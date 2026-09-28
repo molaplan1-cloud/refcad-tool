@@ -344,6 +344,27 @@ export default function DesignerClient({ user, projectId }) {
   }
   const removeRoom = (id) => setRooms(prev => prev.filter(r => r.id !== id))
 
+  // Tidy up: re-position all rooms in a clean 8m grid, no overlaps
+  const tidyUp = () => {
+    pushUndo()
+    const sorted = [...rooms].sort((a, b) => a.name.localeCompare(b.name))
+    let placed = []
+    const newRooms = sorted.map((r, i) => {
+      const w = r.width || 4, d = r.depth || 4
+      const pos = findFreePosition(w, d, placed)
+      placed.push({ ...r, x: pos.x, z: pos.z })
+      return { ...r, x: pos.x, z: pos.z }
+    })
+    setRooms(newRooms)
+  }
+
+  // Clear all rooms
+  const clearAll = () => {
+    if (!confirm('Poistetaanko KAIKKI huoneet tästä projektista?')) return
+    pushUndo()
+    setRooms([])
+  }
+
   const selectedRoom = rooms.find(r => r.id === selectedId)
   const selectedEquipment = useMemo(() => {
     for (const r of rooms) {
@@ -402,6 +423,8 @@ export default function DesignerClient({ user, projectId }) {
             <button onClick={() => setView3D(true)} style={{ padding: '6px 12px', background: view3D ? 'linear-gradient(135deg, #06b6d4, #3b82f6)' : 'transparent', border: 'none', borderRadius: '4px', color: '#fff', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>🎲 3D</button>
           </div>
           <button onClick={() => exportToPDF(rooms, heatLoad, projectName, user)} style={{ padding: '8px 14px', background: 'linear-gradient(135deg, #dc2626, #b91c1c)', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>📄 PDF</button>
+          <button onClick={tidyUp} title="Järjestä kaikki huoneet siististi" style={{ padding: '8px 12px', background: 'rgba(168,85,247,0.15)', border: '1px solid #a855f7', borderRadius: '6px', color: '#d8b4fe', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>✨ Siivoa</button>
+          <button onClick={clearAll} title="Poista kaikki huoneet" style={{ padding: '8px 12px', background: 'rgba(220,38,38,0.15)', border: '1px solid #dc2626', borderRadius: '6px', color: '#fca5a5', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>🗑️ Tyhjennä</button>
           <form action="/api/auth/logout" method="POST" style={{ display: 'inline' }}>
             <button type="submit" style={{ padding: '6px 10px', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#f1f5f9', cursor: 'pointer', fontSize: '11px' }}>Poistu</button>
           </form>
