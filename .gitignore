@@ -1,24 +1,57 @@
+# Dependencies
 node_modules/
+node_modules.bak/
+node_modules_v3/
+node_modules_v3bak/
+node_modules.vite-backup/
+**/node_modules/
+
+# Build outputs
 .next/
+.vercel/
 dist/
-.vite/
 out/
 build/
+
+# Test/lint/coverage
+coverage/
+.nyc_output/
+
+# Environment
 .env
 .env.local
+.env.*.local
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
 .DS_Store
 Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local data
 data/db.json
-.vercel/
+
+# Backup/temp files
+*.bak
+*_bak
+*.bak/
 .disabled/
 .disabled-*
 disabled-*
-*.bak
-*_bak
-node_modules.bak/
-node_modules.vite-backup/
-scripts/cft-build_old.js
-scripts/strip-edge-runtime.js
-app/old_*
-old_*
+old-*
+_old*
+_OLD*
+
+# Misc
+.cache/
+.tmp/
