@@ -1,473 +1,442 @@
 'use client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
 
 export default function LandingClient({ user }) {
   const router = useRouter()
-
-  const handleStart = () => {
-    router.push('/projects')
-  }
+  const start = () => router.push('/projects')
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: '#0a0f1e', color: '#f1f5f9', overflow: 'hidden' }}>
-      {/* Header */}
+    <div style={{ minHeight: '100vh', background: '#ffffff', color: '#0f172a', fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' }}>
+      {/* Top nav */}
       <header style={{
-        position: 'sticky', top: 0, zIndex: 100,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 32px',
-        background: 'rgba(15,23,42,0.85)',
+        position: 'sticky', top: 0, zIndex: 50,
+        background: 'rgba(255,255,255,0.85)',
         backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        borderBottom: '1px solid #e5e7eb',
       }}>
-        <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '12px', textDecoration: 'none', color: 'inherit' }}>
-          <svg width="40" height="40" viewBox="0 0 64 64">
-            <defs>
-              <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#60a5fa" />
-                <stop offset="100%" stopColor="#06b6d4" />
-              </linearGradient>
-            </defs>
-            <polygon points="32,6 56,20 32,34 8,20" fill="#dbeafe" opacity="0.95" />
-            <polygon points="8,20 8,46 32,60 32,34" fill="#bfdbfe" opacity="0.95" />
-            <polygon points="56,20 56,46 32,60 32,34" fill="url(#logoGrad)" />
-          </svg>
-          <div>
-            <div style={{ fontSize: '17px', fontWeight: 800, background: 'linear-gradient(135deg, #60a5fa, #06b6d4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', lineHeight: 1 }}>RefCAD Tool</div>
-            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: '1.5px', marginTop: '3px' }}>Cold Room Designer</div>
-          </div>
-        </Link>
-        <nav style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <a href="#features" style={navBtnStyle}>Ominaisuudet</a>
-          <a href="#demo" style={navBtnStyle}>Demo</a>
-          <button onClick={handleStart} style={{
-            padding: '10px 20px',
-            background: 'linear-gradient(135deg, #3b82f6, #06b6d4)',
-            border: 'none', borderRadius: '8px', color: '#fff',
-            fontSize: '14px', fontWeight: 700, cursor: 'pointer',
-            boxShadow: '0 4px 16px rgba(59,130,246,0.35)',
-          }}>
-            {user ? 'Avaa projektit' : 'Aloita ilmaiseksi'} →
-          </button>
-        </nav>
+        <div style={{ maxWidth: '1280px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px' }}>
+          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', color: 'inherit' }}>
+            <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
+              <rect x="4" y="4" width="32" height="32" rx="6" fill="#0ea5e9" />
+              <path d="M12 22L20 14L28 22L20 30L12 22Z" fill="white" opacity="0.95" />
+              <path d="M14 24L20 18L26 24L20 30L14 24Z" fill="white" opacity="0.5" />
+            </svg>
+            <div>
+              <div style={{ fontSize: '16px', fontWeight: 700, lineHeight: 1 }}>RefCAD Tool</div>
+              <div style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1.2px', marginTop: '2px' }}>Cold Room Designer</div>
+            </div>
+          </Link>
+          <nav style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <a href="#features" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Ominaisuudet</a>
+            <a href="#docs" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Dokumentaatio</a>
+            <a href="#pricing" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Hinnoittelu</a>
+            <button onClick={start} style={{
+              padding: '10px 20px', background: '#0ea5e9', border: 'none', borderRadius: '8px',
+              color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
+              marginLeft: '12px',
+            }}>
+              {user ? 'Avaa projektit' : 'Aloita ilmaiseksi'} →
+            </button>
+          </nav>
+        </div>
       </header>
 
       {/* Hero */}
-      <main style={{ flex: 1 }}>
-        <section style={{
-          position: 'relative',
-          padding: '60px 32px 80px',
-          background: 'radial-gradient(ellipse at top, rgba(59,130,246,0.18), transparent 60%), radial-gradient(ellipse at bottom right, rgba(6,182,212,0.12), transparent 50%)',
-        }}>
-          <div style={{ maxWidth: '1280px', margin: '0 auto', display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: '60px', alignItems: 'center' }}>
-            <div>
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: '8px',
-                padding: '6px 14px', background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.35)',
-                borderRadius: '24px', fontSize: '11px', fontWeight: 600, color: '#60a5fa',
-                marginBottom: '20px', textTransform: 'uppercase', letterSpacing: '1.5px',
-              }}>
-                <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: '#22d3ee', boxShadow: '0 0 8px #22d3ee' }}></span>
-                Ammattilaisille · Kylmähuonesuunnittelu
-              </div>
-              <h1 style={{ fontSize: '56px', fontWeight: 800, lineHeight: 1.05, marginBottom: '24px', letterSpacing: '-0.025em' }}>
-                Suunnittele kylmähuone{' '}
-                <span style={{ background: 'linear-gradient(135deg, #60a5fa, #06b6d4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>selaimessa</span>.
-              </h1>
-              <p style={{ fontSize: '18px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.65, marginBottom: '36px', maxWidth: '540px' }}>
-                RefCAD Tool on selainpohjainen CAD-työkalu kylmäurakoitsijoille. Piirrä 2D-pohjapiirros, katso 3D-isometrinen näkymä, laske lämpökuorma automaattisesti ja vie PDF-raportti.
-              </p>
-              <div style={{ display: 'flex', gap: '12px', marginBottom: '44px' }}>
-                <button onClick={handleStart} style={{
-                  padding: '14px 28px', background: 'linear-gradient(135deg, #3b82f6, #06b6d4)',
-                  border: 'none', borderRadius: '10px', color: '#fff',
-                  fontSize: '15px', fontWeight: 700, cursor: 'pointer',
-                  boxShadow: '0 4px 24px rgba(59,130,246,0.45)',
-                }}>
-                  ➕ Luo uusi projekti
-                </button>
-                <a href="#demo" style={{
-                  padding: '14px 24px', background: 'transparent',
-                  border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', color: '#f1f5f9',
-                  fontSize: '14px', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center',
-                }}>
-                  ▶ Katso demo
-                </a>
-              </div>
-              <div style={{ display: 'flex', gap: '32px', fontSize: '13px', color: 'rgba(255,255,255,0.55)' }}>
-                <FeaturePill text="Ei tilauksia" />
-                <FeaturePill text="Ei asennuksia" />
-                <FeaturePill text="Toimii kaikkialla" />
-              </div>
-            </div>
-
-            {/* 3D Isometric Cold Room Illustration */}
-            <div id="demo" style={{ position: 'relative', height: '520px' }}>
-              <SupaCADScene />
-            </div>
+      <section style={{
+        padding: '80px 24px 100px',
+        background: 'linear-gradient(180deg, #f0f9ff 0%, #ffffff 100%)',
+      }}>
+        <div style={{ maxWidth: '1280px', margin: '0 auto', textAlign: 'center' }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '8px',
+            padding: '6px 14px', background: '#fff', border: '1px solid #e5e7eb',
+            borderRadius: '999px', fontSize: '13px', fontWeight: 500, color: '#475569',
+            marginBottom: '32px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }}></span>
+            RefCAD Tool v3.0.8 · Selaimessa toimiva CAD
           </div>
-        </section>
-
-        {/* Features */}
-        <section id="features" style={{ padding: '80px 32px', background: 'rgba(15,23,42,0.5)', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-          <div style={{ maxWidth: '1280px', margin: '0 auto' }}>
-            <div style={{ textAlign: 'center', marginBottom: '56px' }}>
-              <div style={{ display: 'inline-block', padding: '4px 12px', background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)', borderRadius: '20px', fontSize: '11px', fontWeight: 600, color: '#22d3ee', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '1.5px' }}>
-                OMINAISUUDET
-              </div>
-              <h2 style={{ fontSize: '38px', fontWeight: 800, marginBottom: '14px', letterSpacing: '-0.02em' }}>
-                Kaikki mitä tarvitset kylmähuoneen suunnitteluun
-              </h2>
-              <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '16px', maxWidth: '600px', margin: '0 auto' }}>
-                Ammattimainen CAD ilman asennuksia, ilman tilauksia, suoraan selaimessa.
-              </p>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-              {[
-                { icon: '❄️', title: '5 kylmähuonetyyppiä', desc: 'Chilled, Frozen, Blast Chiller, Blast Freezer, Fresh', color: '#3b82f6' },
-                { icon: '🎲', title: '3D-isometrinen näkymä', desc: 'Reaaliaikainen pyöritettävä visualisointi', color: '#06b6d4' },
-                { icon: '🚪', title: '14 esivalmistettua laitetta', desc: 'Ovet, höyrystimet, lauhduttimet, koneikot, hyllyt', color: '#8b5cf6' },
-                { icon: '📊', title: 'Lämpökuormalaskenta', desc: 'Automaattinen Q-transmission, Q-infiltraatio, Q-tuote', color: '#22c55e' },
-                { icon: '🖱️', title: 'Drag-and-drop', desc: 'Vedä ja pudota laitteet suoraan pohjapiirrokseen', color: '#f59e0b' },
-                { icon: '📏', title: 'Mitat & merkinnät', desc: 'mm/cm/m-yksiköissä, automaattiset seinämitat', color: '#ec4899' },
-                { icon: '📄', title: 'PDF-vienti', desc: 'Ammattimainen raportti yhdellä klikkauksella', color: '#06b6d4' },
-                { icon: '💾', title: 'Selaimen tallennus', desc: 'localStorage — toimii ilman pilveä tai tiliä', color: '#3b82f6' },
-              ].map((f, i) => (
-                <div key={i} style={{
-                  padding: '24px',
-                  background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01))',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '16px',
-                  transition: 'all 0.2s',
-                  cursor: 'default',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = f.color
-                  e.currentTarget.style.transform = 'translateY(-4px)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
-                  e.currentTarget.style.transform = 'translateY(0)'
-                }}>
-                  <div style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: '48px', height: '48px',
-                    background: `${f.color}20`,
-                    border: `1px solid ${f.color}40`,
-                    borderRadius: '12px',
-                    fontSize: '24px',
-                    marginBottom: '14px',
-                  }}>
-                    {f.icon}
-                  </div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, marginBottom: '6px', color: '#f1f5f9' }}>{f.title}</div>
-                  <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.55 }}>{f.desc}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* CTA */}
-        <section style={{ padding: '80px 32px', textAlign: 'center', background: 'radial-gradient(ellipse at center, rgba(59,130,246,0.15), transparent 70%)' }}>
-          <div style={{ maxWidth: '640px', margin: '0 auto' }}>
-            <h2 style={{ fontSize: '36px', fontWeight: 800, marginBottom: '16px', letterSpacing: '-0.02em' }}>
-              Valmis aloittamaan?
-            </h2>
-            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '16px', marginBottom: '32px' }}>
-              Ei rekisteröitymistä, ei luottokorttia. Avaa suunnittelija ja aloita ensimmäinen projektisi 30 sekunnissa.
-            </p>
-            <button onClick={handleStart} style={{
-              padding: '16px 36px', background: 'linear-gradient(135deg, #3b82f6, #06b6d4)',
-              border: 'none', borderRadius: '12px', color: '#fff',
-              fontSize: '16px', fontWeight: 700, cursor: 'pointer',
-              boxShadow: '0 6px 28px rgba(59,130,246,0.5)',
+          <h1 style={{
+            fontSize: '64px', fontWeight: 800, lineHeight: 1.05,
+            letterSpacing: '-0.03em', marginBottom: '24px', color: '#0f172a',
+            maxWidth: '900px', margin: '0 auto 24px',
+          }}>
+            Kylmähuoneen suunnittelu{' '}
+            <span style={{ color: '#0ea5e9' }}>yhdellä työkalulla</span>
+          </h1>
+          <p style={{
+            fontSize: '19px', color: '#475569', lineHeight: 1.65,
+            maxWidth: '680px', margin: '0 auto 40px',
+          }}>
+            RefCAD Tool yhdistää luonnostelun ja lämpökuormalaskennan yhdeksi saumattomaksi kokonaisuudeksi. Suunniteltu kylmäalan ammattilaisille, jotka haluavat piirtää kylmähuoneensa, konfiguroida höyrystimet ja ovet, ja saada automaattisesti 3D-mallin — kaikki yhdessä paikassa.
+          </p>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginBottom: '60px' }}>
+            <button onClick={start} style={{
+              padding: '16px 32px', background: '#0ea5e9', border: 'none', borderRadius: '10px',
+              color: '#fff', fontSize: '16px', fontWeight: 600, cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(14,165,233,0.3)',
             }}>
               ➕ Luo ensimmäinen projekti
             </button>
+            <a href="#demo" style={{
+              padding: '16px 28px', background: '#fff', border: '1px solid #e5e7eb',
+              borderRadius: '10px', color: '#0f172a',
+              fontSize: '15px', fontWeight: 500, textDecoration: 'none',
+            }}>
+              ▶ Katso demo
+            </a>
           </div>
-        </section>
-      </main>
+
+          {/* Hero demo preview */}
+          <div id="demo" style={{
+            maxWidth: '1100px', margin: '0 auto',
+            background: '#0f172a', borderRadius: '16px',
+            boxShadow: '0 20px 60px rgba(15,23,42,0.25)',
+            border: '1px solid #1e293b',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              padding: '12px 16px', background: '#1e293b', borderBottom: '1px solid #334155',
+            }}>
+              <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ef4444' }}></span>
+              <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#f59e0b' }}></span>
+              <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#22c55e' }}></span>
+              <div style={{ flex: 1, textAlign: 'center', fontSize: '12px', color: '#94a3b8', fontFamily: 'monospace' }}>refcad-tool/app</div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 280px', height: '520px' }}>
+              {/* Sidebar */}
+              <div style={{ background: '#1e293b', borderRight: '1px solid #334155', padding: '16px 12px', color: '#cbd5e1', fontSize: '12px' }}>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '10px' }}>Projektit</div>
+                <div style={{ padding: '8px 10px', background: 'rgba(14,165,233,0.15)', border: '1px solid rgba(14,165,233,0.4)', borderRadius: '6px', marginBottom: '6px', color: '#fff' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '2px' }}>Iso kylmähuone</div>
+                  <div style={{ fontSize: '10px', color: '#94a3b8' }}>6.0m × 4.0m × 3.0m</div>
+                </div>
+                <div style={{ padding: '8px 10px', borderRadius: '6px', marginBottom: '6px', color: '#cbd5e1' }}>
+                  <div style={{ fontWeight: 500, marginBottom: '2px' }}>Pakastevarasto</div>
+                  <div style={{ fontSize: '10px', color: '#64748b' }}>5.0m × 3.5m × 2.8m</div>
+                </div>
+                <div style={{ padding: '8px 10px', borderRadius: '6px', marginBottom: '6px', color: '#cbd5e1' }}>
+                  <div style={{ fontWeight: 500, marginBottom: '2px' }}>Tuorehuone</div>
+                  <div style={{ fontSize: '10px', color: '#64748b' }}>4.0m × 3.0m × 2.8m</div>
+                </div>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '1.5px', margin: '20px 0 10px' }}>Sketchet</div>
+                <div style={{ padding: '6px 10px', color: '#cbd5e1', fontSize: '11px' }}>📐 Pohjapiirros</div>
+                <div style={{ padding: '6px 10px', color: '#cbd5e1', fontSize: '11px' }}>📐 Laitteet</div>
+                <div style={{ padding: '6px 10px', color: '#cbd5e1', fontSize: '11px' }}>📐 Lämpökuorma</div>
+              </div>
+              {/* Main canvas */}
+              <div style={{ background: '#0a0f1e', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <SupaCADDemo />
+                {/* Top toolbar */}
+                <div style={{ position: 'absolute', top: '12px', left: '12px', display: 'flex', gap: '6px' }}>
+                  {['2D', '3D', 'Mitat', 'Laitteet', 'Lämpökuorma'].map((t, i) => (
+                    <div key={t} style={{
+                      padding: '5px 10px', background: i === 0 ? '#0ea5e9' : 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)', borderRadius: '5px',
+                      fontSize: '11px', color: '#fff', fontWeight: 500,
+                    }}>{t}</div>
+                  ))}
+                </div>
+              </div>
+              {/* Right panel */}
+              <div style={{ background: '#1e293b', borderLeft: '1px solid #334155', padding: '16px', color: '#cbd5e1', fontSize: '12px' }}>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '10px' }}>Huone</div>
+                <Row label="Tyyppi" value="Chilled" />
+                <Row label="Lämpötila" value="+2 °C" />
+                <Row label="Ympäristö" value="25 °C" />
+                <div style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '1.5px', margin: '16px 0 10px' }}>Mitat</div>
+                <Row label="Pituus" value="6.0 m" />
+                <Row label="Leveys" value="4.0 m" />
+                <Row label="Korkeus" value="3.0 m" />
+                <Row label="Pinta-ala" value="24.0 m²" />
+                <Row label="Tilavuus" value="72.0 m³" />
+                <div style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '1.5px', margin: '16px 0 10px' }}>Lämpökuorma</div>
+                <Row label="Q transmission" value="2.4 kW" />
+                <Row label="Q tuote" value="0.8 kW" />
+                <Row label="Q yhteensä" value="3.5 kW" highlight />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* What is RefCAD section */}
+      <section id="docs" style={{ padding: '100px 24px', background: '#fff', borderTop: '1px solid #f1f5f9' }}>
+        <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+            <div style={{
+              display: 'inline-block', padding: '5px 14px', background: '#f0f9ff',
+              borderRadius: '999px', fontSize: '12px', fontWeight: 600, color: '#0369a1',
+              marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '1.5px',
+            }}>
+              MIKÄ ON REFCAD TOOL?
+            </div>
+            <h2 style={{ fontSize: '40px', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: '20px', color: '#0f172a' }}>
+              Erikoistunut kylmähuonesuunnitteluohjelmisto
+            </h2>
+            <p style={{ fontSize: '18px', color: '#64748b', maxWidth: '720px', margin: '0 auto', lineHeight: 1.65 }}>
+              RefCAD Tool yhdistää luonnostelun ja lämpökuormalaskennan yhdeksi saumattomaksi alustaksi. Se poistaa tarpeen hyppiä useiden työkalujen välillä — kaikki kylmähuoneen suunnitteluun tarvittava löytyy yhdestä paikasta.
+            </p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+            {[
+              { icon: '🎨', title: 'Luonnostele suoraan', desc: 'Piirrä kylmähuoneen pohjapiirros, lisää ovet, höyrystimet ja muut laitteet visuaalisesti.', color: '#0ea5e9' },
+              { icon: '📐', title: '3D-isometrinen näkymä', desc: 'Kaunis automaattinen 3D-visualisointi kylmähuoneen kaikista komponenteista.', color: '#8b5cf6' },
+              { icon: '⚡', title: 'Lämpökuormalaskenta', desc: 'Automaattinen Q-transmission, Q-infiltraatio ja Q-tuote -laskenta reaaliajassa.', color: '#f59e0b' },
+              { icon: '🌡️', title: '5 kylmähuonetyyppiä', desc: 'Chilled, Frozen, Blast Chiller, Blast Freezer, Fresh — kaikki tuettuna.', color: '#06b6d4' },
+              { icon: '📦', title: '14 esivalmistettua laitetta', desc: 'Ovet, höyrystimet, lauhduttimet, koneikot ja hyllyt — heti käyttövalmiina.', color: '#22c55e' },
+              { icon: '📄', title: 'PDF-vienti', desc: 'Ammattimaiset PDF-raportit yhdellä klikkauksella.', color: '#ec4899' },
+            ].map((f, i) => (
+              <div key={i} style={{
+                padding: '24px', background: '#fff',
+                border: '1px solid #e5e7eb', borderRadius: '12px',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = f.color; e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.06)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}
+              >
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: '44px', height: '44px', fontSize: '22px',
+                  background: `${f.color}15`, borderRadius: '10px', marginBottom: '14px',
+                }}>{f.icon}</div>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a', marginBottom: '6px' }}>{f.title}</div>
+                <div style={{ fontSize: '14px', color: '#64748b', lineHeight: 1.55 }}>{f.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Projects & Sketches section */}
+      <section id="features" style={{ padding: '100px 24px', background: '#f8fafc', borderTop: '1px solid #e5e7eb' }}>
+        <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+            <div style={{
+              display: 'inline-block', padding: '5px 14px', background: '#f0f9ff',
+              borderRadius: '999px', fontSize: '12px', fontWeight: 600, color: '#0369a1',
+              marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '1.5px',
+            }}>
+              PROJEKTIEN HALLINTA
+            </div>
+            <h2 style={{ fontSize: '40px', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: '20px', color: '#0f172a' }}>
+              RefCAD Tool järjestää suunnitelmasi Projekteihin ja Sketch-tiedostoihin
+            </h2>
+            <p style={{ fontSize: '18px', color: '#64748b', maxWidth: '720px', margin: '0 auto', lineHeight: 1.65 }}>
+              Jokainen projekti sisältää useita kylmähuoneita (sketch-tiedostoja). Näin hallitset koko asiakkaan kylmähuonekokonaisuuden yhdellä klikkauksella.
+            </p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+            {[
+              { num: '1', title: 'Luo projekti', desc: 'Anna projektille nimi (esim. "Kauppa X kylmähuoneet")', icon: '📁' },
+              { num: '2', title: 'Lisää sketch', desc: 'Jokainen sketch = yksi kylmähuone (esim. "Pääkylmähuone", "Pakasteosasto")', icon: '📐' },
+              { num: '3', title: 'Konfiguroi', desc: 'Aseta huonetyyppi, mitat, ympäristön lämpötila ja lisää laitteet', icon: '⚙️' },
+              { num: '4', title: 'Laske', desc: 'Saat automaattisen lämpökuorman ja 3D-mallin', icon: '📊' },
+              { num: '5', title: 'Jaa', desc: 'Vie PDF-raportti tai jaa linkki asiakkaalle', icon: '🔗' },
+              { num: '6', title: 'Toista', desc: 'Kopioi projekti, muokkaa huonetta, luo versioita', icon: '🔄' },
+            ].map((step, i) => (
+              <div key={i} style={{
+                padding: '28px 24px', background: '#fff',
+                border: '1px solid #e5e7eb', borderRadius: '12px',
+                position: 'relative',
+              }}>
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: '36px', height: '36px', background: '#0ea5e9', color: '#fff',
+                  borderRadius: '50%', fontWeight: 700, fontSize: '14px',
+                  marginBottom: '14px',
+                }}>{step.num}</div>
+                <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1.2px', marginBottom: '4px' }}>VAIHE {step.num}</div>
+                <div style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a', marginBottom: '6px' }}>{step.title}</div>
+                <div style={{ fontSize: '14px', color: '#64748b', lineHeight: 1.55 }}>{step.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing section */}
+      <section id="pricing" style={{ padding: '100px 24px', background: '#fff', borderTop: '1px solid #e5e7eb' }}>
+        <div style={{ maxWidth: '900px', margin: '0 auto', textAlign: 'center' }}>
+          <div style={{
+            display: 'inline-block', padding: '5px 14px', background: '#f0f9ff',
+            borderRadius: '999px', fontSize: '12px', fontWeight: 600, color: '#0369a1',
+            marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '1.5px',
+          }}>
+            HINNOITTELU
+          </div>
+          <h2 style={{ fontSize: '40px', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: '20px', color: '#0f172a' }}>
+            Yksinkertainen hinnoittelu
+          </h2>
+          <p style={{ fontSize: '18px', color: '#64748b', maxWidth: '600px', margin: '0 auto 40px', lineHeight: 1.65 }}>
+            RefCAD Tool on tällä hetkellä ilmainen demo. Ei tilausmaksuja, ei luottokortteja, ei piilokustannuksia.
+          </p>
+          <div style={{
+            padding: '40px', background: '#f8fafc',
+            border: '1px solid #e5e7eb', borderRadius: '16px',
+            maxWidth: '480px', margin: '0 auto',
+          }}>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: '#0ea5e9', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '12px' }}>
+              DEMO-TILI
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '56px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>0 €</span>
+              <span style={{ fontSize: '16px', color: '#64748b' }}>/ ikuinen</span>
+            </div>
+            <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '24px' }}>
+              Kaikki ominaisuudet, ei rajoituksia.
+            </div>
+            <button onClick={start} style={{
+              padding: '14px 28px', background: '#0ea5e9', border: 'none', borderRadius: '10px',
+              color: '#fff', fontSize: '15px', fontWeight: 600, cursor: 'pointer',
+              width: '100%', boxShadow: '0 4px 12px rgba(14,165,233,0.3)',
+            }}>
+              ➕ Aloita nyt
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section style={{ padding: '80px 24px', background: '#0f172a', textAlign: 'center' }}>
+        <div style={{ maxWidth: '640px', margin: '0 auto' }}>
+          <h2 style={{ fontSize: '32px', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em', marginBottom: '16px' }}>
+            Valmis aloittamaan ensimmäisen kylmähuoneprojektisi?
+          </h2>
+          <p style={{ fontSize: '16px', color: '#94a3b8', marginBottom: '32px', lineHeight: 1.6 }}>
+            Ei rekisteröitymistä, ei luottokorttia, ei sitoumuksia. Avaa suunnittelija ja aloita 30 sekunnissa.
+          </p>
+          <button onClick={start} style={{
+            padding: '16px 36px', background: '#0ea5e9', border: 'none', borderRadius: '10px',
+            color: '#fff', fontSize: '16px', fontWeight: 600, cursor: 'pointer',
+            boxShadow: '0 6px 24px rgba(14,165,233,0.4)',
+          }}>
+            ➕ Avaa RefCAD Tool
+          </button>
+        </div>
+      </section>
 
       {/* Footer */}
-      <footer style={{
-        padding: '24px 32px', borderTop: '1px solid rgba(255,255,255,0.05)',
-        background: 'rgba(15,23,42,0.8)',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px',
-        fontSize: '12px', color: 'rgba(255,255,255,0.4)',
-      }}>
-        <div>© 2026 RefCAD Tool · Kylmäurakoitsijoille</div>
-        <div>v3.0.7 · Avoin lähdekoodi</div>
+      <footer style={{ padding: '32px 24px', background: '#fff', borderTop: '1px solid #e5e7eb' }}>
+        <div style={{ maxWidth: '1280px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', fontSize: '13px', color: '#64748b' }}>
+          <div>© 2026 RefCAD Tool · Kylmäalan ammattilaisille</div>
+          <div>v3.0.8 · Avoin lähdekoodi</div>
+        </div>
       </footer>
     </div>
   )
 }
 
-function FeaturePill({ text }) {
-  return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-      <span style={{ display: 'inline-block', width: '14px', height: '14px', borderRadius: '50%', background: 'rgba(34,211,238,0.2)', color: '#22d3ee', fontSize: '9px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>✓</span>
-      {text}
-    </div>
-  )
-}
-
-// Beautiful isometric cold-room scene — the heart of SupaCAD-style UI.
-function SupaCADScene() {
-  const [rotation, setRotation] = useState(0)
-
-  useEffect(() => {
-    const id = setInterval(() => setRotation((r) => (r + 0.4) % 360), 50)
-    return () => clearInterval(id)
-  }, [])
-
-  // Isometric projection constants — classic 30°/30° cabinet projection
-  const cos = Math.cos((rotation * Math.PI) / 180) * 0.3
-  const sin = Math.sin((rotation * Math.PI) / 180) * 0.3
-
+function Row({ label, value, highlight }) {
   return (
     <div style={{
-      width: '100%', height: '100%',
-      background: 'radial-gradient(ellipse at center bottom, rgba(59,130,246,0.15), transparent 70%)',
-      borderRadius: '24px',
-      border: '1px solid rgba(255,255,255,0.06)',
-      overflow: 'hidden',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      position: 'relative',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.05)',
     }}>
-      <svg viewBox="0 0 600 600" style={{ width: '90%', height: '90%' }} preserveAspectRatio="xMidYMid meet">
-        <defs>
-          {/* Wall gradients */}
-          <linearGradient id="wallLeft" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#f8fafc" />
-            <stop offset="100%" stopColor="#cbd5e1" />
-          </linearGradient>
-          <linearGradient id="wallRight" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#cbd5e1" />
-            <stop offset="100%" stopColor="#94a3b8" />
-          </linearGradient>
-          <linearGradient id="wallBack" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#e2e8f0" />
-            <stop offset="100%" stopColor="#cbd5e1" />
-          </linearGradient>
-          {/* Floor */}
-          <linearGradient id="floorG" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#1e3a8a" />
-            <stop offset="100%" stopColor="#1e293b" />
-          </linearGradient>
-          {/* Equipment gradients */}
-          <linearGradient id="evapGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#f1f5f9" />
-            <stop offset="50%" stopColor="#cbd5e1" />
-            <stop offset="100%" stopColor="#94a3b8" />
-          </linearGradient>
-          <linearGradient id="doorGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#fbbf24" />
-            <stop offset="100%" stopColor="#d97706" />
-          </linearGradient>
-          <linearGradient id="rackGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#ea580c" />
-            <stop offset="100%" stopColor="#9a3412" />
-          </linearGradient>
-          <radialGradient id="coolGlow" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.8" />
-            <stop offset="60%" stopColor="#22d3ee" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="#22d3ee" stopOpacity="0" />
-          </radialGradient>
-          {/* Shadow filter */}
-          <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
-            <feOffset dx="0" dy="3" result="offsetblur" />
-            <feComponentTransfer><feFuncA type="linear" slope="0.4" /></feComponentTransfer>
-            <feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge>
-          </filter>
-        </defs>
-
-        {/* Ground shadow */}
-        <ellipse cx="300" cy="500" rx="220" ry="22" fill="rgba(0,0,0,0.45)" />
-
-        {/* === COLD ROOM BUILDING === */}
-        {/* Floor (parallelogram in isometric) */}
-        <polygon
-          points={`${150 + cos * 100},${420 + sin * 100} ${450 + cos * 100},${420 + sin * 100} ${510 - cos * 60},${490 - sin * 60} ${90 - cos * 60},${490 - sin * 60}`}
-          fill="url(#floorG)"
-          stroke="#475569"
-          strokeWidth="1"
-        />
-        {/* Floor grid */}
-        {[1, 2, 3, 4].map((i) => (
-          <line
-            key={`gv${i}`}
-            x1={150 + cos * 100 + ((i * 60)) * (1 - cos * 0.4)}
-            y1={420 + sin * 100 + ((i * 60)) * (sin * 0.4)}
-            x2={450 + cos * 100 + ((i * 60)) * (1 - cos * 0.4)}
-            y2={420 + sin * 100 + ((i * 60)) * (sin * 0.4)}
-            stroke="#334155"
-            strokeWidth="0.5"
-            opacity="0.5"
-          />
-        ))}
-        {[1, 2, 3, 4].map((i) => (
-          <line
-            key={`gh${i}`}
-            x1={150 + cos * 100}
-            y1={420 + sin * 100 + i * 17}
-            x2={510 - cos * 60}
-            y2={490 - sin * 60 + i * 17}
-            stroke="#334155"
-            strokeWidth="0.5"
-            opacity="0.5"
-          />
-        ))}
-
-        {/* Back wall (left face) */}
-        <polygon
-          points={`${150 + cos * 100},${420 + sin * 100} ${450 + cos * 100},${420 + sin * 100} ${450 + cos * 100},${160 + sin * 100} ${150 + cos * 100},${160 + sin * 100}`}
-          fill="url(#wallBack)"
-          stroke="#94a3b8"
-          strokeWidth="1.5"
-        />
-        {/* Side wall (right face) */}
-        <polygon
-          points={`${450 + cos * 100},${420 + sin * 100} ${510 - cos * 60},${490 - sin * 60} ${510 - cos * 60},${230 - sin * 60} ${450 + cos * 100},${160 + sin * 100}`}
-          fill="url(#wallRight)"
-          stroke="#64748b"
-          strokeWidth="1.5"
-        />
-        {/* Left wall */}
-        <polygon
-          points={`${150 + cos * 100},${420 + sin * 100} ${90 - cos * 60},${490 - sin * 60} ${90 - cos * 60},${230 - sin * 60} ${150 + cos * 100},${160 + sin * 100}`}
-          fill="url(#wallLeft)"
-          stroke="#94a3b8"
-          strokeWidth="1.5"
-        />
-
-        {/* === DOOR (front, with frame) === */}
-        <g filter="url(#shadow)">
-          <polygon
-            points={`${280 + cos * 100},${420 + sin * 100} ${340 + cos * 100},${420 + sin * 100} ${340 + cos * 100},${260 + sin * 100} ${280 + cos * 100},${260 + sin * 100}`}
-            fill="url(#doorGrad)"
-            stroke="#92400e"
-            strokeWidth="1.5"
-          />
-          {/* Door handle */}
-          <circle cx={335 + cos * 100} cy={345 + sin * 100} r="3" fill="#fbbf24" stroke="#92400e" strokeWidth="0.5" />
-          {/* Door hinges */}
-          <rect x={282 + cos * 100} y={285 + sin * 100} width="3" height="6" fill="#78350f" />
-          <rect x={282 + cos * 100} y={395 + sin * 100} width="3" height="6" fill="#78350f" />
-        </g>
-
-        {/* === EVAPORATOR (hanging from ceiling) === */}
-        <g filter="url(#shadow)">
-          {/* Hanging bracket */}
-          <line x1={210 + cos * 50} y1={190 + sin * 50} x2={210 + cos * 50} y2={220 + sin * 50} stroke="#475569" strokeWidth="1.5" />
-          <line x1={290 + cos * 50} y1={190 + sin * 50} x2={290 + cos * 50} y2={220 + sin * 50} stroke="#475569" strokeWidth="1.5" />
-          {/* Unit body */}
-          <rect
-            x={200 + cos * 50} y={220 + sin * 50}
-            width={100}
-            height={26}
-            fill="url(#evapGrad)"
-            stroke="#475569"
-            strokeWidth="1.2"
-            rx="2"
-          />
-          {/* Cooling coils */}
-          {Array.from({ length: 12 }).map((_, i) => (
-            <line
-              key={i}
-              x1={205 + cos * 50 + i * 8}
-              y1={224 + sin * 50}
-              x2={205 + cos * 50 + i * 8}
-              y2={243 + sin * 50}
-              stroke="#1e293b"
-              strokeWidth="0.5"
-              opacity="0.6"
-            />
-          ))}
-          {/* Fans */}
-          <circle cx={220 + cos * 50} cy={233 + sin * 50} r="6" fill="#1e293b" stroke="#0f172a" strokeWidth="0.5" />
-          <circle cx={250 + cos * 50} cy={233 + sin * 50} r="6" fill="#1e293b" stroke="#0f172a" strokeWidth="0.5" />
-          <circle cx={280 + cos * 50} cy={233 + sin * 50} r="6" fill="#1e293b" stroke="#0f172a" strokeWidth="0.5" />
-          {/* Fan blades */}
-          {[220, 250, 280].map((cx, i) => (
-            <g key={`fb${i}`} transform={`rotate(${rotation * 3} ${cx + cos * 50} ${233 + sin * 50})`}>
-              <ellipse cx={cx + cos * 50} cy={233 + sin * 50} rx="5" ry="1.5" fill="#475569" />
-            </g>
-          ))}
-        </g>
-
-        {/* === RACKING (right side, multi-level) === */}
-        <g filter="url(#shadow)">
-          {/* Vertical posts */}
-          <line x1={400 + cos * 70} y1={200 + sin * 70} x2={400 + cos * 70} y2={415 + sin * 70} stroke="url(#rackGrad)" strokeWidth="3" />
-          <line x1={440 + cos * 70} y1={200 + sin * 70} x2={440 + cos * 70} y2={415 + sin * 70} stroke="url(#rackGrad)" strokeWidth="3" />
-          {/* Shelves */}
-          <rect x={398 + cos * 70} y={245 + sin * 70} width={44} height={6} fill="#a16207" stroke="#78350f" strokeWidth="0.5" />
-          <rect x={398 + cos * 70} y={290 + sin * 70} width={44} height={6} fill="#a16207" stroke="#78350f" strokeWidth="0.5" />
-          <rect x={398 + cos * 70} y={335 + sin * 70} width={44} height={6} fill="#a16207" stroke="#78350f" strokeWidth="0.5" />
-          <rect x={398 + cos * 70} y={380 + sin * 70} width={44} height={6} fill="#a16207" stroke="#78350f" strokeWidth="0.5" />
-          {/* Boxes on shelves */}
-          <rect x={402 + cos * 70} y={232 + sin * 70} width={12} height={13} fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
-          <rect x={416 + cos * 70} y={232 + sin * 70} width={12} height={13} fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
-          <rect x={430 + cos * 70} y={232 + sin * 70} width={10} height={13} fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
-          <rect x={402 + cos * 70} y={277 + sin * 70} width={12} height={13} fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
-          <rect x={416 + cos * 70} y={277 + sin * 70} width={12} height={13} fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
-          <rect x={402 + cos * 70} y={322 + sin * 70} width={14} height={13} fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
-        </g>
-
-        {/* === TEMPERATURE DISPLAY === */}
-        <g filter="url(#shadow)">
-          <rect x={170 + cos * 50} y={295 + sin * 50} width={70} height={32} fill="#0f172a" stroke="#22d3ee" strokeWidth="1.5" rx="3" />
-          <text x={205 + cos * 50} y={318 + sin * 50} textAnchor="middle" fill="#22d3ee" fontSize="18" fontWeight="700" fontFamily="monospace">+2°C</text>
-        </g>
-
-        {/* === DIMENSIONS === */}
-        <g>
-          {/* Width dimension (top) */}
-          <line x1={150 + cos * 100} y1={150 + sin * 100} x2={450 + cos * 100} y2={150 + sin * 100} stroke="#fbbf24" strokeWidth="0.8" />
-          <line x1={150 + cos * 100} y1={145 + sin * 100} x2={150 + cos * 100} y2={155 + sin * 100} stroke="#fbbf24" strokeWidth="0.8" />
-          <line x1={450 + cos * 100} y1={145 + sin * 100} x2={450 + cos * 100} y2={155 + sin * 100} stroke="#fbbf24" strokeWidth="0.8" />
-          <rect x={285 + cos * 100} y={140 + sin * 100} width={50} height={18} fill="#0a0f1e" stroke="#fbbf24" strokeWidth="0.5" rx="2" />
-          <text x={310 + cos * 100} y={153 + sin * 100} textAnchor="middle" fill="#fbbf24" fontSize="11" fontWeight="700">6.0 m</text>
-
-          {/* Depth dimension (right side) */}
-          <line x1={460 + cos * 100} y1={420 + sin * 100} x2={520 - cos * 60} y2={490 - sin * 60} stroke="#fbbf24" strokeWidth="0.8" />
-          <text x={485} y={465} textAnchor="middle" fill="#fbbf24" fontSize="10" fontWeight="700" transform="rotate(35 485 465)">4.0 m</text>
-
-          {/* Height dimension (left) */}
-          <line x1={140 + cos * 100} y1={160 + sin * 100} x2={140 + cos * 100} y2={420 + sin * 100} stroke="#22d3ee" strokeWidth="0.8" />
-          <text x={125 + cos * 100} y={290 + sin * 100} fill="#22d3ee" fontSize="11" fontWeight="700" textAnchor="middle">H 3.0m</text>
-        </g>
-
-        {/* === AXIS INDICATOR (bottom right) === */}
-        <g transform="translate(530, 540)">
-          <line x1="0" y1="0" x2="20" y2="0" stroke="#ef4444" strokeWidth="1.5" />
-          <line x1="0" y1="0" x2="0" y2="-20" stroke="#22c55e" strokeWidth="1.5" />
-          <line x1="0" y1="0" x2="-15" y2="9" stroke="#3b82f6" strokeWidth="1.5" />
-          <text x="22" y="3" fill="#ef4444" fontSize="10" fontWeight="700">X</text>
-          <text x="-3" y="-22" fill="#22c55e" fontSize="10" fontWeight="700">Y</text>
-          <text x="-25" y="14" fill="#3b82f6" fontSize="10" fontWeight="700">Z</text>
-        </g>
-
-        {/* === INFO BADGES === */}
-        <g transform="translate(80, 80)">
-          <rect x="0" y="0" width="100" height="24" fill="#0f172a" stroke="#22d3ee" strokeWidth="1" rx="12" />
-          <circle cx="12" cy="12" r="4" fill="#22d3ee" />
-          <text x="22" y="16" fill="#22d3ee" fontSize="11" fontWeight="700">CHILLED</text>
-        </g>
-        <g transform="translate(450, 90)">
-          <rect x="0" y="0" width="80" height="22" fill="#0f172a" stroke="#06b6d4" strokeWidth="1" rx="11" />
-          <text x="40" y="15" textAnchor="middle" fill="#06b6d4" fontSize="10" fontWeight="700">10 kW</text>
-        </g>
-      </svg>
+      <span style={{ color: '#94a3b8' }}>{label}</span>
+      <span style={{
+        fontWeight: highlight ? 700 : 500,
+        color: highlight ? '#22d3ee' : '#f1f5f9',
+        fontFamily: 'monospace',
+      }}>{value}</span>
     </div>
   )
 }
 
-const navBtnStyle = {
-  padding: '8px 14px', background: 'transparent', color: '#f1f5f9',
-  border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', textDecoration: 'none',
-  fontSize: '13px', fontWeight: 600, display: 'inline-flex', alignItems: 'center',
+// Clean isometric cold-room scene matching the demo theme
+function SupaCADDemo() {
+  return (
+    <svg viewBox="0 0 500 350" style={{ width: '100%', height: '100%', maxWidth: '560px' }}>
+      <defs>
+        <linearGradient id="floorD" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#1e3a8a" stopOpacity="0.9" />
+          <stop offset="100%" stopColor="#0c1538" stopOpacity="0.95" />
+        </linearGradient>
+        <linearGradient id="wallBD" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#e2e8f0" />
+          <stop offset="100%" stopColor="#94a3b8" />
+        </linearGradient>
+        <linearGradient id="wallLD" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#cbd5e1" />
+          <stop offset="100%" stopColor="#64748b" />
+        </linearGradient>
+        <linearGradient id="evapD" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#f8fafc" />
+          <stop offset="100%" stopColor="#94a3b8" />
+        </linearGradient>
+      </defs>
+      {/* Floor */}
+      <polygon points="100,250 380,250 440,310 60,310" fill="url(#floorD)" stroke="#3b82f6" strokeWidth="1" />
+      {/* Floor grid */}
+      {[1, 2, 3].map(i => (
+        <line key={`fv${i}`} x1={100 + i * 60} y1={250} x2={100 + i * 60} y2={310} stroke="rgba(59,130,246,0.2)" strokeWidth="0.5" />
+      ))}
+      {[1, 2, 3].map(i => (
+        <line key={`fh${i}`} x1={100} y1={250 + i * 15} x2={440} y2={310 + i * 15} stroke="rgba(59,130,246,0.2)" strokeWidth="0.5" />
+      ))}
+      {/* Back wall */}
+      <polygon points="100,250 380,250 380,80 100,80" fill="url(#wallBD)" stroke="#94a3b8" strokeWidth="1" />
+      {/* Left wall */}
+      <polygon points="100,250 60,310 60,140 100,80" fill="url(#wallLD)" stroke="#64748b" strokeWidth="1" />
+      {/* Door (sliding, with frame) */}
+      <rect x="200" y="180" width="60" height="70" fill="#fbbf24" stroke="#92400e" strokeWidth="1.5" />
+      <line x1="200" y1="180" x2="260" y2="180" stroke="#92400e" strokeWidth="2" />
+      <line x1="230" y1="185" x2="230" y2="245" stroke="#92400e" strokeWidth="0.5" strokeDasharray="2,2" />
+      {/* Door dimensions */}
+      <text x="230" y="195" textAnchor="middle" fill="#92400e" fontSize="9" fontWeight="700">0.9m</text>
+      {/* Evaporator hanging from ceiling */}
+      <rect x="170" y="120" width="100" height="20" fill="url(#evapD)" stroke="#475569" strokeWidth="1" rx="2" />
+      {/* Cooling coils */}
+      {Array.from({ length: 12 }).map((_, i) => (
+        <line key={i} x1={175 + i * 8} y1={124} x2={175 + i * 8} y2={136} stroke="#1e293b" strokeWidth="0.5" />
+      ))}
+      {/* Fans */}
+      <circle cx={195} cy={130} r="5" fill="#1e293b" />
+      <circle cx={220} cy={130} r="5" fill="#1e293b" />
+      <circle cx={245} cy={130} r="5" fill="#1e293b" />
+      {/* Hanging rods */}
+      <line x1="175" y1="115" x2="175" y2="120" stroke="#475569" strokeWidth="1.5" />
+      <line x1="265" y1="115" x2="265" y2="120" stroke="#475569" strokeWidth="1.5" />
+      {/* Racking */}
+      <rect x="290" y="200" width="80" height="50" fill="none" stroke="#ea580c" strokeWidth="1.5" />
+      <line x1="290" y1="217" x2="370" y2="217" stroke="#ea580c" strokeWidth="1" />
+      <line x1="290" y1="234" x2="370" y2="234" stroke="#ea580c" strokeWidth="1" />
+      {/* Boxes on shelves */}
+      <rect x="293" y="203" width="20" height="14" fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
+      <rect x="316" y="203" width="20" height="14" fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
+      <rect x="339" y="203" width="20" height="14" fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
+      <rect x="293" y="220" width="20" height="14" fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
+      <rect x="316" y="220" width="20" height="14" fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
+      <rect x="293" y="237" width="20" height="14" fill="#d97706" stroke="#92400e" strokeWidth="0.5" />
+      {/* Width dimension (top) */}
+      <line x1="100" y1="70" x2="380" y2="70" stroke="#22d3ee" strokeWidth="0.8" />
+      <line x1="100" y1="65" x2="100" y2="75" stroke="#22d3ee" strokeWidth="0.8" />
+      <line x1="380" y1="65" x2="380" y2="75" stroke="#22d3ee" strokeWidth="0.8" />
+      <rect x="225" y="60" width="50" height="16" fill="#0f172a" stroke="#22d3ee" strokeWidth="0.5" rx="2" />
+      <text x="250" y="72" textAnchor="middle" fill="#22d3ee" fontSize="10" fontWeight="700">6.0 m</text>
+      {/* Depth */}
+      <line x1="395" y1="250" x2="455" y2="310" stroke="#22d3ee" strokeWidth="0.8" />
+      <text x="445" y="285" textAnchor="middle" fill="#22d3ee" fontSize="10" fontWeight="700" transform="rotate(35 445 285)">4.0 m</text>
+      {/* Height */}
+      <line x1="80" y1="80" x2="80" y2="250" stroke="#fbbf24" strokeWidth="0.8" />
+      <text x="50" y="170" fill="#fbbf24" fontSize="10" fontWeight="700">H 3.0m</text>
+      {/* Axis indicator */}
+      <g transform="translate(40, 320)">
+        <line x1="0" y1="0" x2="20" y2="0" stroke="#ef4444" strokeWidth="1.5" />
+        <line x1="0" y1="0" x2="0" y2="-20" stroke="#22c55e" strokeWidth="1.5" />
+        <line x1="0" y1="0" x2="-15" y2="9" stroke="#3b82f6" strokeWidth="1.5" />
+        <text x="22" y="3" fill="#ef4444" fontSize="8" fontWeight="700">X</text>
+        <text x="-3" y="-22" fill="#22c55e" fontSize="8" fontWeight="700">Y</text>
+        <text x="-22" y="14" fill="#3b82f6" fontSize="8" fontWeight="700">Z</text>
+      </g>
+      {/* CHILLED badge */}
+      <g transform="translate(280, 30)">
+        <rect x="0" y="0" width="90" height="22" fill="#0f172a" stroke="#22d3ee" strokeWidth="1" rx="11" />
+        <circle cx="12" cy="11" r="4" fill="#22d3ee" />
+        <text x="22" y="15" fill="#22d3ee" fontSize="10" fontWeight="700">CHILLED</text>
+      </g>
+    </svg>
+  )
 }
