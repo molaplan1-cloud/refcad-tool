@@ -1,37 +1,80 @@
 # RefCAD Tool
 
-Professional Cold Room Designer - Web-sovellus kylmähuoneiden suunnitteluun.
+Professional Cold Room Designer - Next.js SaaS ilman tilausmaksuja.
 
-## Ominaisuudet
+## 🎯 Ominaisuudet
 
-- **5 esivalmistettua huonetyyppiä**: Chilled (+2°C), Frozen (-18°C), Blast Chiller (0°C), Blast Freezer (-30°C), Fresh (-2°C)
+- **5 esivalmistettua kylmähuonetyyppiä**: Chilled (+2°C), Frozen (-18°C), Blast Chiller (0°C), Blast Freezer (-30°C), Fresh (-2°C)
 - **Polygon-huoneiden piirtäminen** - vapaamuotoinen pohjapiirros
-- **Esivalmistetut laitetemplateet** - ovet, höyrystimet, lauhduttimet, koneikot, hyllyt
+- **14 esivalmistettua laitetta**: ovet, höyrystimet, lauhduttimet, koneikot, hyllyt
 - **Reaaliaikainen 3D-isometrinen näkymä** pyöritettävissä
-- **Lämpökuorma-analyysi** - reaaliaikainen laskenta
-- **Kontekstivalikko (oikea klikkaus)** - siirrä, kopioi, kierrä, muokkaa
+- **Lämpökuorma-analyysi** - 6 eri lähdettä (johtuminen, ilmanvaihto, tuotteet, laitteet, valaistus, henkilöt)
 - **Drag & drop** - laitteiden raahaus huoneisiin
-- **Automaattinen tallennus** localStorageen
-- **PDF/JSON-vienti**
-- **SI/IP-yksikön vaihto** (mm/cm/m)
-- **Suomenkielinen käyttöliittymä**
+- **Kontekstivalikko** - kopioi, liitä, kierrä, siirrä
+- **Automaattinen mittayksikön vaihto** (mm/cm/m)
+- **PDF-vienti** (3-sivuinen raportti)
+- **Pilvitallennus** - projekti- ja käyttäjäkohtainen
 
-## Teknologia
+## 🔐 Autentikointi
 
-- React 18
-- Vite
-- Three.js (valinnainen, SVG korvaa)
-- jsPDF
+- JWT-evästeet (`jose`)
+- Salasanan hashays (`bcryptjs`)
+- Ei kolmannen osapuolen kirjautumispalvelua
+- Ei tilausmaksuja, ei Stripe-integraatiota
+- Käyttäjäkohtainen tietovarasto
 
-## Asennus
+## 🛠 Teknologia
 
-```bash
-npm install
-npm run dev          # Kehitys
-npm run build        # Tuotanto
-npm run preview      # Esikatselu
+- **Next.js 14** App Router
+- **React 18**
+- **jose** (JWT)
+- **bcryptjs** (salasanat)
+- **jsPDF** (PDF-vienti)
+- Tiedostopohjainen tietovarasto (data/db.json)
+
+## 📁 Rakenne
+
+```
+app/
+  page.jsx              # Laskeutumissivu (SupaCAD-tyyli)
+  LandingClient.jsx     # Tyylitelty aloitussivu
+  login/, signup/       # Autentikointisivut
+  projects/
+    page.jsx            # Projektien lista (suojattu)
+    ProjectsClient.jsx  # Projektinhallinta UI
+    [id]/
+      page.jsx          # Yksittäisen projektin muokkaus
+      DesignerClient.jsx # Cold Room Designer
+  api/
+    auth/               # Login/signup/logout endpointit
+    projects/           # CRUD-projektit
+lib/
+  auth.js               # JWT, bcrypt, evästehallinta
+  db.js                 # JSON-tiedostopohjainen tietokanta
+data/
+  db.json               # Käyttäjät ja projektit
 ```
 
-## Lisenssi
+## 🚀 Asennus ja käyttöönotto
 
-MIT
+### Paikallinen kehitys
+```bash
+npm install
+AUTH_SECRET=your-secret-key-here npm run dev
+```
+
+Avaa [http://localhost:3000](http://localhost:3000)
+
+### Tuotanto (esim. Railway, Render, Fly.io)
+```bash
+npm install
+AUTH_SECRET=your-secret-key-here npm run build
+AUTH_SECRET=your-secret-key-here npm start
+```
+
+### Ympäristömuuttujat
+- `AUTH_SECRET` - salaisten JWT:ien allekirjoitusavain (min 32 merkkiä)
+
+## 📝 Lisenssi
+
+MIT License

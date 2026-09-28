@@ -1,8 +1,12 @@
 node_modules/
+.next/
 dist/
 .vite/
+out/
+build/
 .env
 .env.local
 *.log
 .DS_Store
 Thumbs.db
+data/db.json

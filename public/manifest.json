@@ -1,0 +1,16 @@
+{
+  "name": "RefCAD Tool",
+  "short_name": "RefCAD",
+  "description": "Professional Cold Room Designer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f1e",
+  "theme_color": "#06b6d4",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
