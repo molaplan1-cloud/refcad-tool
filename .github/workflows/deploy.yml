@@ -9,6 +9,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pages: write
@@ -24,13 +25,17 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Build for Cloudflare Pages
         env:
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           CLOUDFLARE_PAGES: "1"
-        run: npx @cloudflare/next-on-pages@1 build
+          CI: "true"
+        run: npx --legacy-peer-deps @cloudflare/next-on-pages@1 build
+
+      - name: Verify build output
+        run: ls -la .vercel/output/static/ || ls -la .next/
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
@@ -40,3 +45,4 @@ jobs:
           command: deploy
           directory: .vercel/output/static
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          wranglerVersion: "3"
