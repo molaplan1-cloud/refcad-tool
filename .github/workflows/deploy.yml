@@ -72,10 +72,10 @@ jobs:
           # Tell Vercel CLI we have a local project so it doesn't try to pull from Vercel
           VERCEL_PROJECT_ID: "refcad-tool"
           VERCEL_ORG_ID: "team_local"
-        # Use Vercel CLI directly with --local-config to skip the auth-required
-        # `vercel pull` step. Combined with .vercel/project.json, this produces
-        # .vercel/output/static/ without any network auth.
-        run: npx --legacy-peer-deps vercel build --local-config --yes
+        # Use Vercel CLI directly. The .vercel/project.json file (committed in
+        # this repo) provides project metadata so Vercel CLI doesn't try to
+        # `vercel pull` and require authentication.
+        run: npx --legacy-peer-deps vercel build --yes
 
       - name: Verify build output
         run: |
