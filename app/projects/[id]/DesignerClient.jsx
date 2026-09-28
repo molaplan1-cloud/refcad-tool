@@ -472,6 +472,65 @@ export default function DesignerClient({ user, projectId }) {
               </div>
             ))}
           </div>
+
+          <div style={{ padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '1px', marginBottom: '4px' }}>
+              📦 LAITTEET
+            </div>
+            {!selectedRoom && (
+              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginBottom: '10px', padding: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px dashed rgba(255,255,255,0.1)' }}>
+                Valitse huone ensin
+              </div>
+            )}
+            {selectedRoom && (
+              <>
+                <div style={{ fontSize: '10px', color: '#22d3ee', marginBottom: '8px', padding: '4px 8px', background: 'rgba(34,211,238,0.1)', borderRadius: '4px', border: '1px solid rgba(34,211,238,0.3)' }}>
+                  Lisätään huoneeseen: <strong>{selectedRoom.name}</strong>
+                </div>
+                {['door', 'evaporator', 'condenser', 'unit', 'rack'].map(cat => {
+                  const items = EQUIPMENT_CATALOG.filter(e => e.category === cat)
+                  return (
+                    <div key={cat} style={{ marginBottom: '8px' }}>
+                      <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                        {cat === 'door' && '🚪 Ovet'}
+                        {cat === 'evaporator' && '❄️ Höyrystimet'}
+                        {cat === 'condenser' && '🔥 Lauhduttimet'}
+                        {cat === 'unit' && '⚙️ Koneikot'}
+                        {cat === 'rack' && '📦 Hyllyt'}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
+                        {items.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              const cx = (Math.random() - 0.5) * (selectedRoom.width - item.width - 0.5)
+                              const cz = (Math.random() - 0.5) * (selectedRoom.depth - item.depth - 0.5)
+                              handleAddEq(item.id, selectedRoom.id, cx, cz)
+                            }}
+                            title={`${item.name} (${item.width}m × ${item.depth}m)`}
+                            style={{
+                              padding: '6px 8px',
+                              background: 'rgba(255,255,255,0.04)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              borderRadius: '5px',
+                              color: '#f1f5f9', fontSize: '10px', cursor: 'pointer',
+                              textAlign: 'left',
+                              display: 'flex', alignItems: 'center', gap: '4px'
+                            }}
+                          >
+                            <span>{item.icon}</span>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {item.name.replace(/^\S+\s/, '')}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+          </div>
         </aside>
 
         {/* Canvas */}
