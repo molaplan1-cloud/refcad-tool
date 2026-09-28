@@ -11,7 +11,7 @@
     "prebuild": "node scripts/check-lockfile.js",
     "build": "next build",
     "start": "next start",
-    "cf:build": "npx --legacy-peer-deps @cloudflare/next-on-pages@1.13.15 build",
+    "cf:build": "npx --legacy-peer-deps @cloudflare/next-on-pages@1.13.15",
     "cf:dev": "wrangler pages dev .vercel/output/static"
   },
   "dependencies": {
