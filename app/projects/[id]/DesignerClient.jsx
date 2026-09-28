@@ -251,10 +251,20 @@ export default function DesignerClient({ user, projectId }) {
   const nudgeSelection = useCallback((dx, dz) => {
     if (!selectedId) return
     pushUndo()
-    setRooms(rs => rs.map(r => {
-      if (r.id === selectedId) return { ...r, x: (r.x || 0) + dx, z: (r.z || 0) + dz }
-      return { ...r, equipment: (r.equipment || []).map(eq => eq.id === selectedId ? { ...eq, x: eq.x + dx, z: eq.z + dz } : eq) }
-    }))
+    setRooms(rs => {
+      // Find selected room and check if nudged position collides
+      const sel = rs.find(r => r.id === selectedId)
+      if (sel) {
+        const newX = (sel.x || 0) + dx
+        const newZ = (sel.z || 0) + dz
+        if (wouldCollide(selectedId, newX, newZ, sel.width || 4, sel.depth || 4, rs)) {
+          // Block this nudge - don't apply
+          return rs
+        }
+        return rs.map(r => r.id === selectedId ? { ...r, x: newX, z: newZ } : r)
+      }
+      return rs.map(r => ({ ...r, equipment: (r.equipment || []).map(eq => eq.id === selectedId ? { ...eq, x: eq.x + dx, z: eq.z + dz } : eq) }))
+    })
   }, [selectedId, pushUndo])
 
   // Rename
@@ -268,13 +278,41 @@ export default function DesignerClient({ user, projectId }) {
     }
   }
 
+  // Find a non-overlapping position for a new room of (w, d) size
+  const findFreePosition = (newW, newD, existing) => {
+    let cx = (existing.length) * 6
+    let cz = 0
+    for (let i = 0; i < 100; i++) {
+      const collides = existing.some(r => {
+        const rw = r.width || 4, rd = r.depth || 4
+        // AABB overlap test with 0.5m clearance
+        return Math.abs(cx - (r.x || 0)) < (newW + rw) / 2 + 0.5 &&
+               Math.abs(cz - (r.z || 0)) < (newD + rd) / 2 + 0.5
+      })
+      if (!collides) return { x: cx, z: cz }
+      cx += 6
+      if (cx > 60) { cx = 0; cz += 6 }
+    }
+    return { x: cx, z: cz }
+  }
+
+  // Test if a proposed position would collide with other rooms
+  const wouldCollide = (roomId, x, z, w, d, list) => {
+    return list.some(r => {
+      if (r.id === roomId) return false
+      const rw = r.width || 4, rd = r.depth || 4
+      return Math.abs(x - (r.x || 0)) < (w + rw) / 2 + 0.5 &&
+             Math.abs(z - (r.z || 0)) < (d + rd) / 2 + 0.5
+    })
+  }
+
   const addRoom = (typeId) => {
     const type = COLD_ROOM_TYPES.find(t => t.id === typeId)
     const newRoom = {
       id: genId(), type: typeId,
       name: `${type.name} ${rooms.length + 1}`,
       width: 4, depth: 4, height: 2.8,
-      x: rooms.length * 5, z: 0,
+      x: 0, z: 0,
       temp: type.sub === '+2°C' ? 2 : type.sub === '-18°C' ? -18 : type.sub === '0°C' ? 0 : type.sub === '-30°C' ? -30 : -2,
       ambientTemp: 25, RH: 70,
       uWall: 0.25, uCeiling: 0.22, uFloor: 0.30,
@@ -282,33 +320,28 @@ export default function DesignerClient({ user, projectId }) {
       color: type.accent,
       equipment: []
     }
-    // Find non-overlapping position for new room (offset by 5m in x direction, scan for free spot)
-    const findFreePosition = (newW, newD) => {
-      let attempts = 0
-      let cx = rooms.length * 5
-      let cz = 0
-      while (attempts < 50) {
-        const collision = rooms.some(r =>
-          Math.abs(cx - (r.x || 0)) < (newW + (r.width || 4)) / 2 - 0.3 &&
-          Math.abs(cz - (r.z || 0)) < (newD + (r.depth || 4)) / 2 - 0.3
-        )
-        if (!collision) return { x: cx, z: cz }
-        cx += 5
-        if (cx > 100) { cx = 0; cz += 5 }
-        attempts++
-      }
-      return { x: cx, z: cz }
-    }
-    const pos = findFreePosition(newRoom.width, newRoom.depth)
+    // Find non-overlapping position (use existing rooms list)
+    const pos = findFreePosition(newRoom.width, newRoom.depth, rooms)
     newRoom.x = pos.x
     newRoom.z = pos.z
 
-    setRooms([...rooms, newRoom])
-    setSelectedId(newRoom.id)
+    setRooms(prev => [...prev, newRoom])
     setSelectedId(newRoom.id)
   }
 
-  const updateRoom = (room) => setRooms(prev => prev.map(r => r.id === room.id ? room : r))
+  // Update room with optional collision blocking. If 'block' is true, refuse
+  // the update if it would overlap another room. Returns true if accepted.
+  const updateRoom = (room, block = true) => {
+    if (block && room.x !== undefined && room.z !== undefined) {
+      if (wouldCollide(room.id, room.x, room.z, room.width || 4, room.depth || 4, rooms)) {
+        // Snap to nearest free position instead
+        const pos = findFreePosition(room.width || 4, room.depth || 4, rooms)
+        room = { ...room, x: pos.x, z: pos.z }
+      }
+    }
+    setRooms(prev => prev.map(r => r.id === room.id ? room : r))
+    return true
+  }
   const removeRoom = (id) => setRooms(prev => prev.filter(r => r.id !== id))
 
   const selectedRoom = rooms.find(r => r.id === selectedId)
@@ -608,11 +641,19 @@ function PlanView2DNew({ rooms, selectedId, onSelect, onUpdate, view2D, setView2
           const d = (room.depth || 4) * view2D.scale
           const tl = proj(-(room.width||4)/2, -(room.depth||4)/2)
           const isSelected = selectedId === room.id
+          // Collision detection: this room overlaps any other room
+          const collides = rooms.some(other => {
+            if (!other || other.id === room.id) return false
+            return Math.abs((room.x||0) - (other.x||0)) < ((room.width||4) + (other.width||4)) / 2 - 0.3 &&
+                   Math.abs((room.z||0) - (other.z||0)) < ((room.depth||4) + (other.depth||4)) / 2 - 0.3
+          })
           return (
             <g key={room.id}>
               <rect x={tl.px} y={tl.py} width={w} height={d}
                 fill={room.color || '#3b82f6'} fillOpacity={isSelected ? 0.30 : 0.18}
-                stroke={isSelected ? '#06b6d4' : '#60a5fa'} strokeWidth={isSelected ? 3 : 2}
+                stroke={collides ? '#ef4444' : (isSelected ? '#06b6d4' : '#60a5fa')}
+                strokeWidth={collides ? 4 : (isSelected ? 3 : 2)}
+                strokeDasharray={collides ? '6,3' : 'none'}
                 onClick={(e) => { e.stopPropagation(); onSelect(room.id) }}
                 style={{ cursor: 'pointer' }} />
               <text x={tl.px + w/2} y={tl.py + d/2 - 10} textAnchor="middle" fill="#fff" fontSize="13" fontWeight="700" style={{ pointerEvents: 'none' }}>{room.name}</text>
