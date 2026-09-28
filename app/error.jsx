@@ -6,9 +6,6 @@
 //   The following routes were not configured to run with the Edge Runtime:
 //     - /_error
 
-export const runtime = 'edge'
-export const dynamic = 'force-dynamic'
-
 export default function GlobalError({ error, reset }) {
   return (
     <html lang="fi">

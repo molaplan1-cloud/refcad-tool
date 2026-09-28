@@ -1,4 +1,4 @@
-name: Deploy to Cloudflare Pages
+name: Deploy to Vercel
 
 on:
   push:
@@ -8,23 +8,19 @@ on:
 
 # Cancel in-progress deploys when new commits arrive (avoid duplicate deploys)
 concurrency:
-  group: pages-deploy-${{ github.ref }}
+  group: vercel-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     permissions:
       contents: read
-      pages: write
-      id-token: write
 
     env:
-      # Pin Node to 18 because @cloudflare/next-on-pages 1.13.15 ships vercel@30.2.3
-      # internally, which has a strict validator that ONLY accepts "18.x" for engines.node.
-      # Node 20+ is rejected by Vercel CLI 30.x's hardcoded engine check.
-      NODE_VERSION: "18"
+      # Vercel supports Node 20+ — no version pinning needed for vercel CLI
+      NODE_VERSION: "20"
 
     steps:
       - name: Checkout
@@ -37,73 +33,31 @@ jobs:
           cache: "npm"
 
       - name: Validate package-lock.json is in sync with package.json
-        # Fails fast if the lockfile drift is detected (prevents ERESOLVE / EUSAGE failures)
         run: |
           echo "Checking that package-lock.json matches package.json..."
           if [ ! -f package-lock.json ]; then
             echo "::error::package-lock.json is missing. Run 'npm install' locally and commit it."
             exit 1
           fi
-          # `npm ci --dry-run` exits non-zero if package.json and lockfile are out of sync
           npm ci --dry-run --legacy-peer-deps
           if [ $? -ne 0 ]; then
-            echo "::error::package-lock.json is out of sync with package.json. Run 'npm install --legacy-peer-deps' locally and commit the regenerated lockfile."
+            echo "::error::package-lock.json is out of sync with package.json."
             exit 1
           fi
           echo "Lockfile is in sync ✓"
 
       - name: Install dependencies
-        # `npm ci` is strict; --legacy-peer-deps handles any remaining peer-dep noise
         run: npm ci --legacy-peer-deps --no-audit --no-fund
 
-      - name: Pre-build sanity checks
-        # Light sanity check before build. Not blocking — Next.js build itself surfaces type errors.
-        run: |
-          echo "Running light sanity checks..."
-          node -e "console.log('Node version:', process.version)"
-          node -e "const p = require('./package.json'); console.log('App version:', p.version)"
-
-      - name: Build for Cloudflare Pages
-        env:
-          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
-          CLOUDFLARE_PAGES: "1"
-          CI: "true"
-          NEXT_TELEMETRY_DISABLED: "1"
-          # Tell Vercel CLI we have a local project so it doesn't try to pull from Vercel
-          VERCEL_PROJECT_ID: "refcad-tool"
-          VERCEL_ORG_ID: "team_local"
-        # Use Vercel CLI directly. The .vercel/project.json file (committed in
-        # this repo) provides project metadata so Vercel CLI doesn't try to
-        # `vercel pull` and require authentication.
-        run: npx --legacy-peer-deps vercel build --yes
-
-      - name: Verify build output
-        run: |
-          echo "Checking .vercel/output/static/ ..."
-          if [ ! -d ".vercel/output/static" ]; then
-            echo "::error::Build output directory .vercel/output/static/ does not exist."
-            echo "Build step did not produce expected output. Check the @cloudflare/next-on-pages build logs above."
-            exit 1
-          fi
-          echo "Build output contents:"
-          ls -la .vercel/output/static/
-          echo ""
-          echo "Static file count:"
-          find .vercel/output/static -type f | wc -l
-          echo ""
-          echo "Total build output size:"
-          du -sh .vercel/output/static/
-
-      # NOTE: cloudflare/pages-action was archived Oct 21 2024.
-      # Using the actively maintained wrangler-action with `wrangler pages deploy`.
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v4
+      # Vercel CLI deploys with `vercel deploy --prebuilt` after a separate build.
+      # We don't actually need to build in CI because the official
+      # amondnet/vercel-action handles building + deploying together with full
+      # Vercel context (env vars, regions, etc.).
+      - name: Deploy to Vercel (Production)
+        uses: amondnet/vercel-action@v25
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .vercel/output/static --project-name=refcad-tool --commit-dirty=true --branch=master
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          wranglerVersion: "3"
-        env:
-          # Pass AUTH_SECRET so it's available at runtime in Cloudflare env
-          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod --yes'
+          working-directory: ./

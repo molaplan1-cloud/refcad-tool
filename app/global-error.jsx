@@ -5,9 +5,6 @@
 // edge runtime if no explicit global error page exists. This must be a Client
 // Component and must include html/body tags (it replaces the root layout).
 
-export const runtime = 'edge'
-export const dynamic = 'force-dynamic'
-
 export default function GlobalError({ error, reset }) {
   return (
     <html lang="fi">

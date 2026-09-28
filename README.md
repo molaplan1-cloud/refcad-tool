@@ -1,80 +1,86 @@
 # RefCAD Tool
 
-Professional Cold Room Designer - Next.js SaaS ilman tilausmaksuja.
+Professional cold room designer (SaaS) with 3D isometric view, heat-load calculation, drag-and-drop equipment, dimensions, and PDF export. Built with Next.js 14 App Router + JWT auth + multi-user projects.
 
-## 🎯 Ominaisuudet
+## Features
 
-- **5 esivalmistettua kylmähuonetyyppiä**: Chilled (+2°C), Frozen (-18°C), Blast Chiller (0°C), Blast Freezer (-30°C), Fresh (-2°C)
-- **Polygon-huoneiden piirtäminen** - vapaamuotoinen pohjapiirros
-- **14 esivalmistettua laitetta**: ovet, höyrystimet, lauhduttimet, koneikot, hyllyt
-- **Reaaliaikainen 3D-isometrinen näkymä** pyöritettävissä
-- **Lämpökuorma-analyysi** - 6 eri lähdettä (johtuminen, ilmanvaihto, tuotteet, laitteet, valaistus, henkilöt)
-- **Drag & drop** - laitteiden raahaus huoneisiin
-- **Kontekstivalikko** - kopioi, liitä, kierrä, siirrä
-- **Automaattinen mittayksikön vaihto** (mm/cm/m)
-- **PDF-vienti** (3-sivuinen raportti)
-- **Pilvitallennus** - projekti- ja käyttäjäkohtainen
+- **SupaCAD-style landing page** — warm cyan/blue gradient with isometric 3D illustration
+- **Multi-user with JWT auth** — bcrypt-hashed passwords, signed JWT cookies, 7-day sessions
+- **Projects dashboard** — CRUD projects per user, auto-save to disk
+- **Cold Room Designer** — 2D plan view (SVG) + 3D isometric view (SVG)
+- **Drag-and-drop equipment** — doors, evaporators, condensers, units, racks
+- **Auto-snap** — doors snap to nearest wall; evaporators hang from ceiling
+- **Dimensions** — measure and display in mm/m
+- **Heat load calculation** — based on room type (chilled/frozen/blast chiller/blast freezer/fresh)
+- **Right-click context menu** — move, copy, delete equipment
+- **PDF export** — generates branded PDF with room specs
 
-## 🔐 Autentikointi
+## Cold room types
 
-- JWT-evästeet (`jose`)
-- Salasanan hashays (`bcryptjs`)
-- Ei kolmannen osapuolen kirjautumispalvelua
-- Ei tilausmaksuja, ei Stripe-integraatiota
-- Käyttäjäkohtainen tietovarasto
+- **Chilled** (+2°C)
+- **Frozen** (-18°C)
+- **Blast chiller** (0°C)
+- **Blast freezer** (-30°C)
+- **Fresh** (-2°C)
 
-## 🛠 Teknologia
+## Equipment categories
 
-- **Next.js 14** App Router
-- **React 18**
-- **jose** (JWT)
-- **bcryptjs** (salasanat)
-- **jsPDF** (PDF-vienti)
-- Tiedostopohjainen tietovarasto (data/db.json)
+- Doors (auto-snap to walls)
+- Evaporators (hang from ceiling)
+- Condensers (mounted externally)
+- Refrigeration units (standalone)
+- Storage racks
 
-## 📁 Rakenne
+## Stack
+
+- Next.js 14 (App Router)
+- React 18
+- bcryptjs + jose for JWT auth
+- jsPDF for PDF export
+- SVG-based 2D/3D rendering (no WebGL dependencies)
+- File-based JSON database (`data/db.json`) — swap for Postgres/Supabase in production
+
+## Run locally
+
+```bash
+npm install --legacy-peer-deps
+cp .env.production.example .env.local
+# Edit .env.local — set AUTH_SECRET to a random 32+ char string
+npm run dev
+# Open http://localhost:3000
+```
+
+## Deploy
+
+See **[DEPLOY.md](./DEPLOY.md)** for the Vercel deployment guide (recommended).
+
+The simplest path:
+
+1. Sign up at https://vercel.com (free)
+2. Import the `molaplan1-cloud/refcad-tool` repo
+3. Set `AUTH_SECRET` env var
+4. Deploy
+
+First build takes ~1 minute, subsequent deploys ~30 seconds.
+
+## Project structure
 
 ```
 app/
-  page.jsx              # Laskeutumissivu (SupaCAD-tyyli)
-  LandingClient.jsx     # Tyylitelty aloitussivu
-  login/, signup/       # Autentikointisivut
-  projects/
-    page.jsx            # Projektien lista (suojattu)
-    ProjectsClient.jsx  # Projektinhallinta UI
-    [id]/
-      page.jsx          # Yksittäisen projektin muokkaus
-      DesignerClient.jsx # Cold Room Designer
-  api/
-    auth/               # Login/signup/logout endpointit
-    projects/           # CRUD-projektit
+  page.jsx              # SupaCAD-style landing
+  login/, signup/       # Auth pages
+  projects/             # Dashboard + [id] designer
+  api/                  # Auth + projects CRUD
 lib/
-  auth.js               # JWT, bcrypt, evästehallinta
-  db.js                 # JSON-tiedostopohjainen tietokanta
-data/
-  db.json               # Käyttäjät ja projektit
+  auth.js               # JWT + bcrypt helpers
+  db.js                 # JSON-file based DB
+scripts/
+  check-lockfile.js     # pre-build lockfile validator
+.github/workflows/
+  deploy.yml            # Vercel deploy via amondnet/vercel-action
+data/                   # JSON DB (gitignored)
 ```
 
-## 🚀 Asennus ja käyttöönotto
+## License
 
-### Paikallinen kehitys
-```bash
-npm install
-AUTH_SECRET=your-secret-key-here npm run dev
-```
-
-Avaa [http://localhost:3000](http://localhost:3000)
-
-### Tuotanto (esim. Railway, Render, Fly.io)
-```bash
-npm install
-AUTH_SECRET=your-secret-key-here npm run build
-AUTH_SECRET=your-secret-key-here npm start
-```
-
-### Ympäristömuuttujat
-- `AUTH_SECRET` - salaisten JWT:ien allekirjoitusavain (min 32 merkkiä)
-
-## 📝 Lisenssi
-
-MIT License
+MIT

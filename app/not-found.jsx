@@ -5,9 +5,6 @@
 //   The following routes were not configured to run with the Edge Runtime:
 //     - /_not-found
 
-export const runtime = 'edge'
-export const dynamic = 'force-dynamic'
-
 export default function NotFound() {
   return (
     <div

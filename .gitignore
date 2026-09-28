@@ -10,3 +10,15 @@ build/
 .DS_Store
 Thumbs.db
 data/db.json
+.vercel/
+.disabled/
+.disabled-*
+disabled-*
+*.bak
+*_bak
+node_modules.bak/
+node_modules.vite-backup/
+scripts/cft-build_old.js
+scripts/strip-edge-runtime.js
+app/old_*
+old_*
