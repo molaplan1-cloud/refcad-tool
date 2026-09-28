@@ -9,7 +9,7 @@
 // fallback while app/error.jsx and app/global-error.jsx handle App Router errors.
 
 export const config = {
-  runtime: 'edge',
+  runtime: 'experimental-edge',
 }
 
 function Error({ statusCode }) {
