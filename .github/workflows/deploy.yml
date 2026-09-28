@@ -19,8 +19,8 @@ jobs:
       contents: read
 
     env:
-      # Vercel supports Node 20+ — no version pinning needed for vercel CLI
-      NODE_VERSION: "20"
+      # Vercel requires Node 24.x as of recent platform changes (Sep 2025+)
+      NODE_VERSION: "24"
 
     steps:
       - name: Checkout
