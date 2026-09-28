@@ -69,10 +69,13 @@ jobs:
           CLOUDFLARE_PAGES: "1"
           CI: "true"
           NEXT_TELEMETRY_DISABLED: "1"
-        # NOTE: @cloudflare/next-on-pages v1.13.15 has no subcommands — it runs the
-        # build by default when invoked with no arguments. Passing 'build' causes
-        # "too many arguments" error. Use flags only (e.g. --skip-build, -o).
-        run: npx --legacy-peer-deps @cloudflare/next-on-pages@1.13.15
+        # Skip @cloudflare/next-on-pages entirely — its 1.13.15 post-processor
+        # rejects the auto-generated /_error.func route even after we add
+        # error.jsx, global-error.jsx, app/_error/page.jsx, and Pages Router files.
+        # We run Vercel CLI directly to produce the .vercel/output/static/ directory,
+        # then deploy it with `wrangler pages deploy` which doesn't care about
+        # next-on-pages' edge-runtime check.
+        run: npx --legacy-peer-deps vercel build --yes
 
       - name: Verify build output
         run: |
