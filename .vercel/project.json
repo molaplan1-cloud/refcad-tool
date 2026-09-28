@@ -1,0 +1,10 @@
+{
+  "projectId": "refcad-tool",
+  "orgId": "team_local",
+  "projectName": "refcad-tool",
+  "buildCommand": "next build",
+  "devCommand": "next dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "outputDirectory": ".next"
+}
