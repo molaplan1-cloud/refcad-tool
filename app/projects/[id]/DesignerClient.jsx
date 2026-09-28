@@ -7,6 +7,19 @@ import { getProject as lsGet, updateProject as lsUpdate } from '@/lib/clientStor
 
 const genId = () => Math.random().toString(36).substr(2, 9)
 const fmt = (n, d = 2) => typeof n === 'number' ? n.toFixed(d) : '0.00'
+
+const btn3DStyle = {
+  width: '90px',
+  padding: '6px 10px',
+  background: 'rgba(30,41,59,0.92)',
+  border: '1px solid #334155',
+  borderRadius: '4px',
+  color: '#f1f5f9',
+  fontSize: '11px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  textAlign: 'left',
+}
 const formatDim = (meters, unit = 'auto') => {
   if (unit === 'mm') return `${(meters * 1000).toFixed(0)} mm`
   if (unit === 'cm') return `${(meters * 100).toFixed(1)} cm`
@@ -269,7 +282,29 @@ export default function DesignerClient({ user, projectId }) {
       color: type.accent,
       equipment: []
     }
+    // Find non-overlapping position for new room (offset by 5m in x direction, scan for free spot)
+    const findFreePosition = (newW, newD) => {
+      let attempts = 0
+      let cx = rooms.length * 5
+      let cz = 0
+      while (attempts < 50) {
+        const collision = rooms.some(r =>
+          Math.abs(cx - (r.x || 0)) < (newW + (r.width || 4)) / 2 - 0.3 &&
+          Math.abs(cz - (r.z || 0)) < (newD + (r.depth || 4)) / 2 - 0.3
+        )
+        if (!collision) return { x: cx, z: cz }
+        cx += 5
+        if (cx > 100) { cx = 0; cz += 5 }
+        attempts++
+      }
+      return { x: cx, z: cz }
+    }
+    const pos = findFreePosition(newRoom.width, newRoom.depth)
+    newRoom.x = pos.x
+    newRoom.z = pos.z
+
     setRooms([...rooms, newRoom])
+    setSelectedId(newRoom.id)
     setSelectedId(newRoom.id)
   }
 
@@ -677,8 +712,77 @@ function PlanView2DNew({ rooms, selectedId, onSelect, onUpdate, view2D, setView2
 }
 
 function IsometricView3D({ rooms, selectedId, onSelect, proj, rotation }) {
+  // Local rotation/pan/zoom state - works even if parent doesn't pass setters
+  const [rot, setRot] = useState(rotation || { azimuth: 0.5, elevation: 0.5 })
+  const [pan, setPan] = useState({ x: 400, y: 300 })
+  const [zoom, setZoom] = useState(40)
+  const dragRef = useRef(null)
+
+  // Build local projector from current rot + pan + zoom
+  const localProj = useCallback((x, y, z) => {
+    const cosA = Math.cos(rot.azimuth), sinA = Math.sin(rot.azimuth)
+    const cosE = Math.cos(rot.elevation), sinE = Math.sin(rot.elevation)
+    const xr = x * cosA + z * sinA
+    const zr = -x * sinA + z * cosA
+    const yr = y * cosE - zr * sinE
+    const depth = zr * cosE + y * sinE
+    return {
+      x: xr * zoom + pan.x,
+      y: yr * zoom + pan.y,
+      depth
+    }
+  }, [rot, pan, zoom])
+
+  const onWheel = (e) => {
+    e.preventDefault()
+    const delta = e.deltaY > 0 ? 0.9 : 1.1
+    setZoom(z => Math.max(10, Math.min(150, z * delta)))
+  }
+
+  const onMouseDown = (e) => {
+    if (e.button === 1 || e.button === 2 || e.shiftKey) {
+      // Middle-click or shift = pan
+      dragRef.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y }
+    } else {
+      // Left-click drag = rotate
+      dragRef.current = { kind: 'rotate', startX: e.clientX, startY: e.clientY, az: rot.azimuth, el: rot.elevation }
+    }
+    e.preventDefault()
+  }
+
+  const onMouseMove = (e) => {
+    if (!dragRef.current) return
+    const dx = e.clientX - dragRef.current.startX
+    const dy = e.clientY - dragRef.current.startY
+    if (dragRef.current.kind === 'pan') {
+      setPan({ x: dragRef.current.panX + dx, y: dragRef.current.panY + dy })
+    } else {
+      setRot({
+        azimuth: dragRef.current.az + dx * 0.01,
+        elevation: Math.max(0.05, Math.min(Math.PI / 2 - 0.05, dragRef.current.el - dy * 0.01))
+      })
+    }
+  }
+
+  const onMouseUp = () => { dragRef.current = null }
+  const onContextMenu = (e) => e.preventDefault()
+
+  const resetView = () => {
+    setRot({ azimuth: 0.5, elevation: 0.5 })
+    setPan({ x: 400, y: 300 })
+    setZoom(40)
+  }
+
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: '#0a0f1e' }}>
+    <div
+      style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: '#0a0f1e', cursor: dragRef.current ? 'grabbing' : 'grab' }}
+      onWheel={onWheel}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+      onContextMenu={onContextMenu}
+    >
       <svg viewBox="0 0 800 600" style={{ width: '100%', height: '100%' }}>
         <defs>
           <linearGradient id="wallG1" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -692,7 +796,7 @@ function IsometricView3D({ rooms, selectedId, onSelect, proj, rotation }) {
 
         {/* Axes */}
         {(() => {
-          const x0 = proj(0,0,0), x1 = proj(3,0,0), x2 = proj(0,0,3), x3 = proj(0,3,0)
+          const x0 = localProj(0,0,0), x1 = localProj(3,0,0), x2 = localProj(0,0,3), x3 = localProj(0,3,0)
           return (
             <g opacity="0.4">
               <line x1={x0.x} y1={x0.y} x2={x1.x} y2={x1.y} stroke="#ef4444" strokeWidth="1.5" />
@@ -704,8 +808,8 @@ function IsometricView3D({ rooms, selectedId, onSelect, proj, rotation }) {
 
         {rooms.map(room => {
           const L = (room.width || 4) / 2, D = (room.depth || 4) / 2, H = room.height || 2.8
-          const p000 = proj(-L,0,-D), p100 = proj(L,0,-D), p010 = proj(-L,H,-D), p110 = proj(L,H,-D)
-          const p001 = proj(-L,0,D), p101 = proj(L,0,D), p011 = proj(-L,H,D), p111 = proj(L,H,D)
+          const p000 = localProj(-L,0,-D), p100 = localProj(L,0,-D), p010 = localProj(-L,H,-D), p110 = localProj(L,H,-D)
+          const p001 = localProj(-L,0,D), p101 = localProj(L,0,D), p011 = localProj(-L,H,D), p111 = localProj(L,H,D)
           const isSel = selectedId === room.id
 
           return (
@@ -726,14 +830,14 @@ function IsometricView3D({ rooms, selectedId, onSelect, proj, rotation }) {
               {(room.equipment || []).map(eq => {
                 const eW = eq.width, eD = eq.depth, eH = eq.height || 0.5
                 const eY = eq.y || 0
-                const ep000 = proj(eq.x - eW/2, eY, eq.z - eD/2)
-                const ep100 = proj(eq.x + eW/2, eY, eq.z - eD/2)
-                const ep010 = proj(eq.x - eW/2, eY + eH, eq.z - eD/2)
-                const ep110 = proj(eq.x + eW/2, eY + eH, eq.z - eD/2)
-                const ep001 = proj(eq.x - eW/2, eY, eq.z + eD/2)
-                const ep101 = proj(eq.x + eW/2, eY, eq.z + eD/2)
-                const ep011 = proj(eq.x - eW/2, eY + eH, eq.z + eD/2)
-                const ep111 = proj(eq.x + eW/2, eY + eH, eq.z + eD/2)
+                const ep000 = localProj(eq.x - eW/2, eY, eq.z - eD/2)
+                const ep100 = localProj(eq.x + eW/2, eY, eq.z - eD/2)
+                const ep010 = localProj(eq.x - eW/2, eY + eH, eq.z - eD/2)
+                const ep110 = localProj(eq.x + eW/2, eY + eH, eq.z - eD/2)
+                const ep001 = localProj(eq.x - eW/2, eY, eq.z + eD/2)
+                const ep101 = localProj(eq.x + eW/2, eY, eq.z + eD/2)
+                const ep011 = localProj(eq.x - eW/2, eY + eH, eq.z + eD/2)
+                const ep111 = localProj(eq.x + eW/2, eY + eH, eq.z + eD/2)
                 const isDoor = eq.category === 'door'
                 const color = eq.category === 'door' ? '#a16207' : eq.category === 'evaporator' ? '#94c5e8' : eq.category === 'condenser' ? '#4ade80' : eq.category === 'rack' ? '#a78bfa' : '#fbbf24'
                 return (
@@ -749,10 +853,28 @@ function IsometricView3D({ rooms, selectedId, onSelect, proj, rotation }) {
         })}
       </svg>
 
-      <div style={{ position: 'absolute', bottom: '20px', left: '20px', padding: '10px', background: 'rgba(15,23,42,0.92)', borderRadius: '8px', border: '1px solid #334155', fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>
-        <div style={{ color: '#06b6d4', fontWeight: 700, marginBottom: '4px' }}>🎮 3D-näkymä</div>
-        <div>Atsimuutti: {Math.round(rotation.azimuth * 180 / Math.PI)}°</div>
-        <div>Korkeus: {Math.round(rotation.elevation * 180 / Math.PI)}°</div>
+      {/* 3D viewport controls */}
+      <div style={{ position: 'absolute', top: '14px', right: '14px', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', background: 'rgba(15,23,42,0.92)', borderRadius: '8px', padding: '4px', border: '1px solid #334155' }}>
+          <button onClick={() => setRot(r => ({ ...r, elevation: Math.max(0.05, r.elevation - 0.15) }))} style={btn3DStyle}>↑ Eteen</button>
+          <button onClick={() => setRot(r => ({ ...r, elevation: Math.min(Math.PI / 2 - 0.05, r.elevation + 0.15) }))} style={btn3DStyle}>↓ Taakse</button>
+          <button onClick={() => setRot(r => ({ ...r, azimuth: r.azimuth - 0.2 }))} style={btn3DStyle}>← Vasemmalle</button>
+          <button onClick={() => setRot(r => ({ ...r, azimuth: r.azimuth + 0.2 }))} style={btn3DStyle}>→ Oikealle</button>
+          <button onClick={() => setZoom(z => Math.min(150, z * 1.2))} style={btn3DStyle}>+ Lähennä</button>
+          <button onClick={() => setZoom(z => Math.max(10, z * 0.83))} style={btn3DStyle}>− Loitonna</button>
+          <button onClick={resetView} style={{ ...btn3DStyle, background: 'rgba(220,38,38,0.2)', borderColor: '#dc2626', color: '#fca5a5' }}>⌂ Reset</button>
+        </div>
+      </div>
+
+      {/* 3D status panel */}
+      <div style={{ position: 'absolute', bottom: '14px', left: '14px', padding: '10px 14px', background: 'rgba(15,23,42,0.92)', borderRadius: '8px', border: '1px solid #334155', fontSize: '11px', color: 'rgba(255,255,255,0.7)', fontFamily: 'monospace' }}>
+        <div style={{ color: '#06b6d4', fontWeight: 700, marginBottom: '6px', fontSize: '12px' }}>🎮 3D-NÄKYMÄ</div>
+        <div>Vedä: <strong>kiertää</strong> · Shift+vedä: <strong>panoroi</strong> · Rulla: <strong>zoomaa</strong></div>
+        <div style={{ marginTop: '4px', display: 'flex', gap: '12px' }}>
+          <span>Atsim: <strong style={{ color: '#22d3ee' }}>{Math.round(rot.azimuth * 180 / Math.PI)}°</strong></span>
+          <span>Elev: <strong style={{ color: '#22d3ee' }}>{Math.round(rot.elevation * 180 / Math.PI)}°</strong></span>
+          <span>Zoom: <strong style={{ color: '#22d3ee' }}>{zoom.toFixed(0)}</strong></span>
+        </div>
       </div>
     </div>
   )
