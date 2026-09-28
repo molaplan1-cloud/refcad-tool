@@ -729,15 +729,47 @@ function PlanView2DNew({ rooms, selectedId, onSelect, onUpdate, view2D, setView2
             return Math.abs((room.x||0) - (other.x||0)) < ((room.width||4) + (other.width||4)) / 2 - 0.3 &&
                    Math.abs((room.z||0) - (other.z||0)) < ((room.depth||4) + (other.depth||4)) / 2 - 0.3
           })
+          // Wall thickness in pixels (typically 4-8px depending on scale)
+          const wallThicknessPx = Math.max(3, Math.min(8, (room.wallThickness || 0.1) * view2D.scale))
+          // Inner wall colors slightly darker
+          const wallColor = room.color || '#3b82f6'
+          const wallStroke = collides ? '#ef4444' : (isSelected ? '#06b6d4' : '#60a5fa')
+          const wallStrokeW = collides ? 5 : (isSelected ? 4 : 3)
+
           return (
             <g key={room.id}>
+              {/* Outer wall - thick line */}
               <rect x={tl.px} y={tl.py} width={w} height={d}
-                fill={room.color || '#3b82f6'} fillOpacity={isSelected ? 0.30 : 0.18}
-                stroke={collides ? '#ef4444' : (isSelected ? '#06b6d4' : '#60a5fa')}
-                strokeWidth={collides ? 4 : (isSelected ? 3 : 2)}
-                strokeDasharray={collides ? '6,3' : 'none'}
+                fill="none"
+                stroke={wallStroke}
+                strokeWidth={wallStrokeW}
+                strokeDasharray={collides ? '8,4' : 'none'}
                 onClick={(e) => { e.stopPropagation(); onSelect(room.id) }}
                 style={{ cursor: 'pointer' }} />
+              {/* Floor fill (subtle) */}
+              <rect x={tl.px} y={tl.py} width={w} height={d}
+                fill={wallColor}
+                fillOpacity={isSelected ? 0.15 : 0.08}
+                pointerEvents="none" />
+              {/* Inner wall lines - showing wall thickness (double-line CAD style) */}
+              <rect x={tl.px + wallThicknessPx} y={tl.py + wallThicknessPx}
+                width={w - wallThicknessPx * 2} height={d - wallThicknessPx * 2}
+                fill="none"
+                stroke={wallColor}
+                strokeWidth={Math.max(1.5, wallStrokeW * 0.55)}
+                strokeOpacity={0.7}
+                pointerEvents="none" />
+              {/* Wall hatch pattern - diagonal lines for "wall material" feel */}
+              <pattern id={`hatch-${room.id}`} patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke={wallColor} strokeWidth="0.4" strokeOpacity="0.4" />
+              </pattern>
+              <rect x={tl.px} y={tl.py} width={w} height={d}
+                fill={`url(#hatch-${room.id})`} pointerEvents="none" />
+              {/* Wall thickness label (only on selected, in a corner) */}
+              {isSelected && (
+                <text x={tl.px + 6} y={tl.py + 14} fill="#22d3ee" fontSize="9" fontWeight="700"
+                  pointerEvents="none">SEINÄ {(room.wallThickness || 0.1) * 1000}mm</text>
+              )}
               <text x={tl.px + w/2} y={tl.py + d/2 - 10} textAnchor="middle" fill="#fff" fontSize="13" fontWeight="700" style={{ pointerEvents: 'none' }}>{room.name}</text>
               <text x={tl.px + w/2} y={tl.py + d/2 + 8} textAnchor="middle" fill="#94a3b8" fontSize="10" style={{ pointerEvents: 'none' }}>
                 {formatDim(room.width || 0, dimUnit)} × {formatDim(room.depth || 0, dimUnit)} · {room.temp}°C
@@ -931,20 +963,55 @@ function IsometricView3D({ rooms, selectedId, onSelect, proj, rotation }) {
 
         {rooms.map(room => {
           const L = (room.width || 4) / 2, D = (room.depth || 4) / 2, H = room.height || 2.8
+          const Wt = room.wallThickness || 0.1  // wall thickness in meters
           const p000 = localProj(-L,0,-D), p100 = localProj(L,0,-D), p010 = localProj(-L,H,-D), p110 = localProj(L,H,-D)
           const p001 = localProj(-L,0,D), p101 = localProj(L,0,D), p011 = localProj(-L,H,D), p111 = localProj(L,H,D)
           const isSel = selectedId === room.id
 
+          // Inner wall corners (offset by wall thickness inward)
+          const ip000 = localProj(-L+Wt,0,-D+Wt), ip100 = localProj(L-Wt,0,-D+Wt)
+          const ip010 = localProj(-L+Wt,H,-D+Wt), ip110 = localProj(L-Wt,H,-D+Wt)
+          const ip001 = localProj(-L+Wt,0,D-Wt), ip101 = localProj(L-Wt,0,D-Wt)
+          const ip011 = localProj(-L+Wt,H,D-Wt), ip111 = localProj(L-Wt,H,D-Wt)
+
           return (
             <g key={room.id}>
-              <polygon points={`${p000.x},${p000.y} ${p100.x},${p100.y} ${p101.x},${p101.y} ${p001.x},${p001.y}`} fill={room.color || '#3b82f6'} fillOpacity="0.3" />
-              <polygon points={`${p100.x},${p100.y} ${p101.x},${p101.y} ${p111.x},${p111.y} ${p110.x},${p110.y}`} fill="url(#wallG1)" stroke={isSel ? '#06b6d4' : '#94a3b8'} strokeWidth={isSel ? 2 : 1} />
-              <polygon points={`${p000.x},${p000.y} ${p001.x},${p001.y} ${p011.x},${p011.y} ${p010.x},${p010.y}`} fill="url(#wallG2)" stroke={isSel ? '#06b6d4' : '#94a3b8'} strokeWidth={isSel ? 2 : 1} />
-              <polygon points={`${p010.x},${p010.y} ${p110.x},${p110.y} ${p111.x},${p111.y} ${p011.x},${p011.y}`} fill="none" stroke="#06b6d4" strokeWidth="1.5" />
-              <line x1={p000.x} y1={p000.y} x2={p010.x} y2={p010.y} stroke="#06b6d4" strokeWidth="1" />
-              <line x1={p100.x} y1={p100.y} x2={p110.x} y2={p110.y} stroke="#06b6d4" strokeWidth="1" />
-              <line x1={p001.x} y1={p001.y} x2={p011.x} y2={p011.y} stroke="#06b6d4" strokeWidth="1" />
-              <line x1={p101.x} y1={p101.y} x2={p111.x} y2={p111.y} stroke="#06b6d4" strokeWidth="1" />
+              {/* Floor */}
+              <polygon points={`${p000.x},${p000.y} ${p100.x},${p100.y} ${p101.x},${p101.y} ${p001.x},${p001.y}`} fill={room.color || '#3b82f6'} fillOpacity="0.35" />
+
+              {/* WALL PANELS - proper CAD-style with thickness */}
+              {/* East wall panel (outer + inner + top + end caps) */}
+              <polygon points={`${p100.x},${p100.y} ${p101.x},${p101.y} ${ip101.x},${ip101.y} ${ip100.x},${ip100.y}`} fill="#cbd5e1" stroke="#475569" strokeWidth="0.8" />
+              <polygon points={`${p101.x},${p101.y} ${ip101.x},${ip101.y} ${ip111.x},${ip111.y} ${p111.x},${p111.y}`} fill="#94a3b8" stroke="#475569" strokeWidth="0.6" />
+              <polygon points={`${p100.x},${p100.y} ${ip100.x},${ip100.y} ${ip110.x},${ip110.y} ${p110.x},${p110.y}`} fill="#cbd5e1" stroke="#475569" strokeWidth="0.6" />
+              <polygon points={`${p110.x},${p110.y} ${ip110.x},${ip110.y} ${ip111.x},${ip111.y} ${p111.x},${p111.y}`} fill="#e2e8f0" stroke="#475569" strokeWidth="0.6" />
+
+              {/* West wall panel */}
+              <polygon points={`${p000.x},${p000.y} ${p001.x},${p001.y} ${ip001.x},${ip001.y} ${ip000.x},${ip000.y}`} fill="#cbd5e1" stroke="#475569" strokeWidth="0.8" />
+              <polygon points={`${p000.x},${p000.y} ${ip000.x},${ip000.y} ${ip010.x},${ip010.y} ${p010.x},${p010.y}`} fill="#94a3b8" stroke="#475569" strokeWidth="0.6" />
+              <polygon points={`${p001.x},${p001.y} ${ip001.x},${ip001.y} ${ip011.x},${ip011.y} ${p011.x},${p011.y}`} fill="#cbd5e1" stroke="#475569" strokeWidth="0.6" />
+              <polygon points={`${p010.x},${p010.y} ${ip010.x},${ip010.y} ${ip011.x},${ip011.y} ${p011.x},${p011.y}`} fill="#e2e8f0" stroke="#475569" strokeWidth="0.6" />
+
+              {/* North wall panel (back) */}
+              <polygon points={`${p000.x},${p000.y} ${p100.x},${p100.y} ${ip100.x},${ip100.y} ${ip000.x},${ip000.y}`} fill="#94a3b8" stroke="#475569" strokeWidth="0.8" />
+              <polygon points={`${p000.x},${p000.y} ${ip000.x},${ip000.y} ${ip010.x},${ip010.y} ${p010.x},${p010.y}`} fill="#64748b" stroke="#475569" strokeWidth="0.6" />
+
+              {/* South wall panel (front, near viewer) */}
+              <polygon points={`${p001.x},${p001.y} ${p101.x},${p101.y} ${ip101.x},${ip101.y} ${ip001.x},${ip001.y}`} fill="#94a3b8" stroke="#475569" strokeWidth="0.8" />
+              <polygon points={`${p001.x},${p001.y} ${ip001.x},${ip001.y} ${ip011.x},${ip011.y} ${p011.x},${p011.y}`} fill="#64748b" stroke="#475569" strokeWidth="0.6" />
+
+              {/* Ceiling (top of inner walls) */}
+              <polygon points={`${ip010.x},${ip010.y} ${ip110.x},${ip110.y} ${ip111.x},${ip111.y} ${ip011.x},${ip011.y}`} fill="#e2e8f0" stroke="#475569" strokeWidth="0.6" />
+
+              {/* Selection highlight (only on selected) */}
+              {isSel && (
+                <polygon points={`${p010.x},${p010.y} ${p110.x},${p110.y} ${p111.x},${p111.y} ${p011.x},${p011.y}`} fill="none" stroke="#06b6d4" strokeWidth="2" strokeDasharray="4,3" />
+              )}
+
+              {/* Temperature badge on front-top corner */}
+              <circle cx={(p010.x + p110.x)/2} cy={p010.y - 8} r="13" fill="#06b6d4" stroke="#fff" strokeWidth="1.5" />
+              <text x={(p010.x + p110.x)/2} y={p010.y - 4} textAnchor="middle" fill="#fff" fontSize="11" fontWeight="700">{room.temp}°</text>
+              <text x={(p010.x + p110.x)/2 + 22} y={p010.y - 8} fill="#fff" fontSize="12" fontWeight="600">{room.name}</text>
               <circle cx={(p010.x + p110.x)/2} cy={p010.y - 8} r="13" fill="#06b6d4" stroke="#fff" strokeWidth="1.5" />
               <text x={(p010.x + p110.x)/2} y={p010.y - 4} textAnchor="middle" fill="#fff" fontSize="11" fontWeight="700">{room.temp}°</text>
               <text x={(p010.x + p110.x)/2 + 22} y={p010.y - 8} fill="#fff" fontSize="12" fontWeight="600">{room.name}</text>
