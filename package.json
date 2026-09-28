@@ -1,12 +1,14 @@
 {
   "name": "refcad-tool",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "cf:build": "npx @cloudflare/next-on-pages@1 build",
+    "cf:dev": "wrangler pages dev .vercel/output/static"
   },
   "dependencies": {
     "next": "14.2.18",
@@ -18,6 +20,8 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@cloudflare/next-on-pages": "^1.13.0",
+    "wrangler": "^3.99.0",
     "eslint": "^8",
     "eslint-config-next": "14.2.18"
   }
