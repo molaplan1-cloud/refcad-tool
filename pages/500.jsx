@@ -1,18 +1,10 @@
-// Pages Router fallback error page.
-// next-on-pages 1.13.15 generates a /_error route automatically when wrapping
-// the Next.js build. Without this file, that route has no runtime export and
-// fails with:
-//   The following routes were not configured to run with the Edge Runtime:
-//     - /_error
-//
-// Pages Router and App Router can coexist; this only handles the auto-generated
-// fallback while app/error.jsx and app/global-error.jsx handle App Router errors.
+// Pages Router 500 page (used by Vercel/next-on-pages fallback for the /_error route).
 
 export const config = {
   runtime: 'experimental-edge',
 }
 
-function Error({ statusCode }) {
+export default function ServerError() {
   return (
     <div
       style={{
@@ -28,11 +20,9 @@ function Error({ statusCode }) {
         textAlign: 'center',
       }}
     >
-      <h1 style={{ fontSize: '4rem', fontWeight: 800, margin: 0, color: '#f87171' }}>
-        {statusCode || 'Virhe'}
-      </h1>
+      <h1 style={{ fontSize: '4rem', fontWeight: 800, margin: 0, color: '#f87171' }}>500</h1>
       <p style={{ fontSize: '1.1rem', marginTop: '1rem', color: '#94a3b8' }}>
-        {statusCode === 404 ? 'Sivua ei löytynyt' : 'Tapahtui odottamaton virhe'}
+        Palvelinvirhe
       </p>
       <a
         href="/"
@@ -51,10 +41,3 @@ function Error({ statusCode }) {
     </div>
   )
 }
-
-Error.getInitialProps = ({ res, err }) => {
-  const statusCode = res ? res.statusCode : err ? err.statusCode : 404
-  return { statusCode }
-}
-
-export default Error
