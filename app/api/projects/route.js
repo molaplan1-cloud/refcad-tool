@@ -4,7 +4,7 @@ import { listProjects, createProject } from '@/lib/db'
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) return Response.json({ error: 'Ei kirjautunut' }, { status: 401 })
-  const projects = listProjects(user.id)
+  const projects = await listProjects(user.id)
   return Response.json({ projects })
 }
 
@@ -13,7 +13,7 @@ export async function POST(request) {
   if (!user) return Response.json({ error: 'Ei kirjautunut' }, { status: 401 })
 
   const body = await request.json()
-  const project = createProject({
+  const project = await createProject({
     userId: user.id,
     name: body.name || 'Uusi projekti',
     data: body.data || { rooms: [], dimUnit: 'auto', settings: {} }

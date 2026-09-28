@@ -6,6 +6,6 @@ import ProjectsClient from './ProjectsClient'
 export default async function ProjectsPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
-  const projects = listProjects(user.id)
+  const projects = await listProjects(user.id)
   return <ProjectsClient user={user} initialProjects={projects} />
 }

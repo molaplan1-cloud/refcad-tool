@@ -7,7 +7,7 @@ export default async function ProjectPage({ params }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
-  const project = findProject(params.id, user.id)
+  const project = await findProject(params.id, user.id)
   if (!project) notFound()
 
   return <DesignerClient user={user} initialProject={project} />
