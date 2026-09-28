@@ -1,9 +1,14 @@
 {
   "name": "refcad-tool",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0 <23.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/check-lockfile.js",
     "build": "next build",
     "start": "next start",
     "cf:build": "npx --legacy-peer-deps @cloudflare/next-on-pages@1.13.15 build",

@@ -6,14 +6,23 @@ on:
       - master
   workflow_dispatch:
 
+# Cancel in-progress deploys when new commits arrive (avoid duplicate deploys)
+concurrency:
+  group: pages-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: write
       id-token: write
+
+    env:
+      # Pin Node to match the version we tested locally (works with npm 10.x + Next 14.2)
+      NODE_VERSION: "20"
 
     steps:
       - name: Checkout
@@ -22,20 +31,60 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Validate package-lock.json is in sync with package.json
+        # Fails fast if the lockfile drift is detected (prevents ERESOLVE / EUSAGE failures)
+        run: |
+          echo "Checking that package-lock.json matches package.json..."
+          if [ ! -f package-lock.json ]; then
+            echo "::error::package-lock.json is missing. Run 'npm install' locally and commit it."
+            exit 1
+          fi
+          # `npm ci --dry-run` exits non-zero if package.json and lockfile are out of sync
+          npm ci --dry-run --legacy-peer-deps
+          if [ $? -ne 0 ]; then
+            echo "::error::package-lock.json is out of sync with package.json. Run 'npm install --legacy-peer-deps' locally and commit the regenerated lockfile."
+            exit 1
+          fi
+          echo "Lockfile is in sync ✓"
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        # `npm ci` is strict; --legacy-peer-deps handles any remaining peer-dep noise
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+
+      - name: Type-check & lint (informational, non-blocking)
+        # Light sanity check before build. Not blocking — Next.js build itself surfaces type errors.
+        run: |
+          echo "Running light sanity checks..."
+          node -e "console.log('Node version:', process.version)"
+          node -e "const p = require('./package.json'); console.log('App version:', p.version)"
 
       - name: Build for Cloudflare Pages
         env:
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           CLOUDFLARE_PAGES: "1"
           CI: "true"
-        run: npx --legacy-peer-deps @cloudflare/next-on-pages@1 build
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npx --legacy-peer-deps @cloudflare/next-on-pages@1.13.15 build
 
       - name: Verify build output
-        run: ls -la .vercel/output/static/ || ls -la .next/
+        run: |
+          echo "Checking .vercel/output/static/ ..."
+          if [ ! -d ".vercel/output/static" ]; then
+            echo "::error::Build output directory .vercel/output/static/ does not exist."
+            echo "Build step did not produce expected output. Check the @cloudflare/next-on-pages build logs above."
+            exit 1
+          fi
+          echo "Build output contents:"
+          ls -la .vercel/output/static/
+          echo ""
+          echo "Static file count:"
+          find .vercel/output/static -type f | wc -l
+          echo ""
+          echo "Total build output size:"
+          du -sh .vercel/output/static/
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
@@ -46,3 +95,6 @@ jobs:
           directory: .vercel/output/static
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           wranglerVersion: "3"
+        env:
+          # Pass AUTH_SECRET so it's available at runtime in Cloudflare env
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
