@@ -3,6 +3,9 @@ import { getCurrentUser } from '@/lib/auth'
 import { listProjects } from '@/lib/db'
 import ProjectsClient from './ProjectsClient'
 
+export const runtime = 'edge'
+export const dynamic = 'force-dynamic'
+
 export default async function ProjectsPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')

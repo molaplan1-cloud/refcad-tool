@@ -3,6 +3,9 @@ import { getCurrentUser } from '@/lib/auth'
 import { findProject } from '@/lib/db'
 import DesignerClient from './DesignerClient'
 
+export const runtime = 'edge'
+export const dynamic = 'force-dynamic'
+
 export default async function ProjectPage({ params }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')

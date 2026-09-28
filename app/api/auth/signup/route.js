@@ -1,5 +1,7 @@
 import { registerUser, createToken, setSessionCookie } from '@/lib/auth'
 
+export const runtime = 'edge'
+
 export async function POST(request) {
   try {
     const { email, password, name } = await request.json()

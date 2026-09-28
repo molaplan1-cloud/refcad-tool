@@ -1,6 +1,8 @@
 import { getCurrentUser } from '@/lib/auth'
 import { listProjects, createProject } from '@/lib/db'
 
+export const runtime = 'edge'
+
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) return Response.json({ error: 'Ei kirjautunut' }, { status: 401 })
