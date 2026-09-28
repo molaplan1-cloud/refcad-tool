@@ -54,7 +54,7 @@ jobs:
         # `npm ci` is strict; --legacy-peer-deps handles any remaining peer-dep noise
         run: npm ci --legacy-peer-deps --no-audit --no-fund
 
-      - name: Type-check & lint (informational, non-blocking)
+      - name: Pre-build sanity checks
         # Light sanity check before build. Not blocking — Next.js build itself surfaces type errors.
         run: |
           echo "Running light sanity checks..."
@@ -86,13 +86,14 @@ jobs:
           echo "Total build output size:"
           du -sh .vercel/output/static/
 
+      # NOTE: cloudflare/pages-action was archived Oct 21 2024.
+      # Using the actively maintained wrangler-action with `wrangler pages deploy`.
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
-          directory: .vercel/output/static
+          command: pages deploy .vercel/output/static --project-name=refcad-tool --commit-dirty=true --branch=master
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           wranglerVersion: "3"
         env:
