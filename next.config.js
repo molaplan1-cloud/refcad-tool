@@ -3,12 +3,19 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     serverActions: { bodySizeLimit: '2mb' }
-  }
+  },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+          { key: 'Pragma', value: 'no-cache' },
+          { key: 'Expires', value: '0' },
+        ],
+      },
+    ]
+  },
 }
 
-if (process.env.CLOUDFLARE_PAGES) {
-  // Cloudflare Pages build - requires @cloudflare/next-on-pages
-  module.exports = nextConfig
-} else {
-  module.exports = nextConfig
-}
+module.exports = nextConfig
