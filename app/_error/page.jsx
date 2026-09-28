@@ -1,13 +1,12 @@
-// Pages Router 404 page (used by Vercel/next-on-pages fallback).
-// next-on-pages 1.13.15 generates a /_error route that mirrors Pages Router
-// conventions. Adding 404.jsx and 500.jsx with the edge runtime config
-// gives next-on-pages something concrete to satisfy its edge-runtime check.
+// Custom /_error route for App Router.
+// next-on-pages 1.13.15 detects an auto-generated /_error.func route that
+// lacks edge runtime config. By providing app/_error/page.jsx with the
+// runtime export, we let next-on-pages see a properly-configured source.
 
-export const config = {
-  runtime: 'experimental-edge',
-}
+export const runtime = 'edge'
+export const dynamic = 'force-dynamic'
 
-export default function NotFound() {
+export default function Error() {
   return (
     <div
       style={{
@@ -23,8 +22,12 @@ export default function NotFound() {
         textAlign: 'center',
       }}
     >
-      <h1 style={{ fontSize: '4rem', fontWeight: 800, margin: 0, color: '#22d3ee' }}>404</h1>
-      <p style={{ fontSize: '1.1rem', marginTop: '1rem', color: '#94a3b8' }}>Sivua ei löytynyt</p>
+      <h1 style={{ fontSize: '4rem', fontWeight: 800, margin: 0, color: '#f87171' }}>
+        Virhe
+      </h1>
+      <p style={{ fontSize: '1.1rem', marginTop: '1rem', color: '#94a3b8' }}>
+        Tapahtui odottamaton virhe
+      </p>
       <a
         href="/"
         style={{
