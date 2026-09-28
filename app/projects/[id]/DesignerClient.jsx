@@ -3,6 +3,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { jsPDF } from 'jspdf'
+import { getProject as lsGet, updateProject as lsUpdate } from '@/lib/clientStore'
 
 const genId = () => Math.random().toString(36).substr(2, 9)
 const fmt = (n, d = 2) => typeof n === 'number' ? n.toFixed(d) : '0.00'
@@ -62,12 +63,45 @@ function calculateHeatLoad(rooms) {
   }
 }
 
-export default function DesignerClient({ user, initialProject }) {
+export default function DesignerClient({ user, projectId }) {
   const router = useRouter()
-  const [project, setProject] = useState(initialProject)
-  const [projectName, setProjectName] = useState(initialProject.name)
-  const [rooms, setRooms] = useState(initialProject.data?.rooms || [])
-  const [dimUnit, setDimUnit] = useState(initialProject.data?.dimUnit || 'auto')
+  // Always start with an empty default; load from localStorage on mount.
+  const defaultProj = {
+    id: projectId,
+    name: 'Projekti',
+    data: { rooms: [], dimUnit: 'auto' },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  const [project, setProject] = useState(defaultProj)
+  const [projectName, setProjectName] = useState(defaultProj.name)
+  const [rooms, setRooms] = useState([])
+  const [dimUnit, setDimUnit] = useState('auto')
+  const [loaded, setLoaded] = useState(false)
+
+  // Load project from localStorage on mount (client-side persistence).
+  useEffect(() => {
+    const stored = lsGet(projectId)
+    if (stored) {
+      setProject(stored)
+      setProjectName(stored.name)
+      setRooms(stored.data?.rooms || [])
+      setDimUnit(stored.data?.dimUnit || 'auto')
+    } else {
+      // Persist a new project record so subsequent loads work
+      const created = {
+        ...defaultProj,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      const all = JSON.parse(window.localStorage.getItem('refcad:projects:v1') || '[]')
+      all.unshift(created)
+      window.localStorage.setItem('refcad:projects:v1', JSON.stringify(all))
+      setProject(created)
+      setProjectName(created.name)
+    }
+    setLoaded(true)
+  }, [projectId])
   const [selectedId, setSelectedId] = useState(null)
   const [view2D, setView2D] = useState({ scale: 30, offsetX: 400, offsetY: 300 })
   const [view3D, setView3D] = useState(false)
@@ -83,34 +117,29 @@ export default function DesignerClient({ user, initialProject }) {
   // Auto-save (debounced)
   useEffect(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(async () => {
+    saveTimerRef.current = setTimeout(() => {
       setSaving(true)
       try {
-        await fetch(`/api/projects/${project.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: projectName, data: { rooms, dimUnit } })
-        })
+        lsUpdate(project.id, { name: projectName, data: { rooms, dimUnit } })
         setSaveStatus({ saved: true, time: new Date() })
       } catch (e) {
         setSaveStatus({ saved: false, time: new Date() })
       } finally {
         setSaving(false)
       }
-    }, 1500)
+    }, 600)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [project.id, projectName, rooms, dimUnit])
 
   // Rename
-  const renameProject = async () => {
+  const renameProject = () => {
     if (projectName === project.name) return
     setSaving(true)
-    await fetch(`/api/projects/${project.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: projectName, data: { rooms, dimUnit } })
-    })
-    setSaving(false)
+    try {
+      lsUpdate(project.id, { name: projectName })
+    } finally {
+      setSaving(false)
+    }
   }
 
   const addRoom = (typeId) => {

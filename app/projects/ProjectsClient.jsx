@@ -1,36 +1,38 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { listProjects as lsList, createProject as lsCreate, deleteProject as lsDelete } from '@/lib/clientStore'
 
-export default function ProjectsClient({ user, initialProjects }) {
+export default function ProjectsClient({ user }) {
   const router = useRouter()
-  const [projects, setProjects] = useState(initialProjects)
+  const [projects, setProjects] = useState([])
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
 
-  const createProject = async () => {
-    setCreating(true)
+  // Load projects from localStorage on mount
+  useEffect(() => {
+    setProjects(lsList())
+  }, [])
+
+  const refresh = () => setProjects(lsList())
+
+  const createProject = () => {
     try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName || 'Uusi projekti', data: { rooms: [], dimUnit: 'auto' } })
-      })
-      const data = await res.json()
-      if (data.project) {
-        router.push(`/projects/${data.project.id}`)
-      }
-    } catch (e) {
-      alert('Projektin luonti epäonnistui')
+      const project = lsCreate(newName.trim() || 'Uusi projekti')
+      setNewName('')
       setCreating(false)
+      router.push(`/projects/${project.id}`)
+    } catch (e) {
+      console.error('Create failed:', e)
+      alert('Projektin luonti epäonnistui: ' + String(e))
     }
   }
 
-  const deleteProject = async (id) => {
+  const deleteProject = (id) => {
     if (!confirm('Poistetaanko projekti pysyvästi?')) return
-    await fetch(`/api/projects/${id}`, { method: 'DELETE' })
-    setProjects(projects.filter(p => p.id !== id))
+    lsDelete(id)
+    refresh()
   }
 
   return (
@@ -48,9 +50,7 @@ export default function ProjectsClient({ user, initialProjects }) {
         </Link>
         <nav style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '13px' }}>
           <span style={{ color: 'rgba(255,255,255,0.6)' }}>{user.email}</span>
-          <form action="/api/auth/logout" method="POST" style={{ display: 'inline' }}>
-            <button type="submit" style={{ padding: '6px 12px', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#f1f5f9', cursor: 'pointer', fontSize: '12px' }}>Kirjaudu ulos</button>
-          </form>
+          <Link href="/" style={{ padding: '6px 12px', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#f1f5f9', textDecoration: 'none', fontSize: '12px' }}>Etusivu</Link>
         </nav>
       </header>
 
@@ -67,9 +67,19 @@ export default function ProjectsClient({ user, initialProjects }) {
 
         {creating && (
           <div style={{ padding: '20px', background: 'rgba(30,41,59,0.6)', border: '1px solid #06b6d4', borderRadius: '12px', marginBottom: '20px', display: 'flex', gap: '10px' }}>
-            <input autoFocus type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Projektin nimi" onKeyDown={(e) => { if (e.key === 'Enter') createProject(); if (e.key === 'Escape') setCreating(false) }}
-              style={{ flex: 1, padding: '10px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '6px', color: '#f1f5f9', fontSize: '14px' }} />
-            <button onClick={createProject} disabled={creating} style={{ padding: '10px 18px', background: 'linear-gradient(135deg, #3b82f6, #06b6d4)', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+            <input
+              autoFocus
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Projektin nimi"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') createProject()
+                if (e.key === 'Escape') setCreating(false)
+              }}
+              style={{ flex: 1, padding: '10px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '6px', color: '#f1f5f9', fontSize: '14px' }}
+            />
+            <button onClick={createProject} style={{ padding: '10px 18px', background: 'linear-gradient(135deg, #3b82f6, #06b6d4)', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
               Luo
             </button>
             <button onClick={() => setCreating(false)} style={{ padding: '10px 14px', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#fff', fontSize: '13px', cursor: 'pointer' }}>
@@ -89,10 +99,13 @@ export default function ProjectsClient({ user, initialProjects }) {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '14px' }}>
-            {projects.map(p => (
-              <div key={p.id} style={{ padding: '20px', background: 'rgba(30,41,59,0.6)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', transition: 'all 0.15s' }}
-                onMouseEnter={(e) => e.currentTarget.style.borderColor = '#06b6d4'}
-                onMouseLeave={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'}>
+            {projects.map((p) => (
+              <div
+                key={p.id}
+                style={{ padding: '20px', background: 'rgba(30,41,59,0.6)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', transition: 'all 0.15s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#06b6d4')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)')}
+              >
                 <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: '10px' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '15px', fontWeight: 700, marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
@@ -105,15 +118,27 @@ export default function ProjectsClient({ user, initialProjects }) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
-                  <Link href={`/projects/${p.id}`} style={{ flex: 1, padding: '8px 12px', background: 'linear-gradient(135deg, #3b82f6, #06b6d4)', borderRadius: '6px', color: '#fff', fontSize: '12px', fontWeight: 600, textAlign: 'center', textDecoration: 'none' }}>
+                  <Link
+                    href={`/projects/${p.id}`}
+                    style={{ flex: 1, padding: '8px 12px', background: 'linear-gradient(135deg, #3b82f6, #06b6d4)', borderRadius: '6px', color: '#fff', fontSize: '12px', fontWeight: 600, textAlign: 'center', textDecoration: 'none' }}
+                  >
                     Avaa
                   </Link>
-                  <button onClick={() => deleteProject(p.id)} style={{ padding: '8px 12px', background: 'rgba(220,38,38,0.15)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: '6px', color: '#fca5a5', fontSize: '12px', cursor: 'pointer' }}>🗑️</button>
+                  <button
+                    onClick={() => deleteProject(p.id)}
+                    style={{ padding: '8px 12px', background: 'rgba(220,38,38,0.15)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: '6px', color: '#fca5a5', fontSize: '12px', cursor: 'pointer' }}
+                  >
+                    🗑️
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         )}
+
+        <div style={{ marginTop: '32px', padding: '14px 18px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: '8px', fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>
+          💾 Projektit tallentuvat selaimen localStorage-muistiin. Toimii ilman kirjautumista ja ilman palvelinpuolen tietokantaa. Data säilyy myös sivun päivityksen jälkeen.
+        </div>
       </main>
     </div>
   )
