@@ -78,6 +78,10 @@ export default function DesignerClient({ user, projectId }) {
   const [rooms, setRooms] = useState([])
   const [dimUnit, setDimUnit] = useState('auto')
   const [loaded, setLoaded] = useState(false)
+  const [snapToGrid, setSnapToGrid] = useState(true)
+  const [gridSize, setGridSize] = useState(0.25) // meters
+  const [undoStack, setUndoStack] = useState([])
+  const [mousePos, setMousePos] = useState({ x: 0, z: 0 })
 
   // Load project from localStorage on mount (client-side persistence).
   useEffect(() => {
@@ -130,6 +134,115 @@ export default function DesignerClient({ user, projectId }) {
     }, 600)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [project.id, projectName, rooms, dimUnit])
+
+  // Undo/redo
+  const pushUndo = useCallback(() => {
+    setUndoStack(s => [...s.slice(-19), JSON.parse(JSON.stringify(rooms))])
+  }, [rooms])
+
+  const undo = useCallback(() => {
+    setUndoStack(s => {
+      if (s.length === 0) return s
+      const last = s[s.length - 1]
+      setRooms(last)
+      return s.slice(0, -1)
+    })
+  }, [])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e) => {
+      // Don't interfere when typing in inputs
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedId) {
+          e.preventDefault()
+          pushUndo()
+          setRooms(rs => rs.map(r => {
+            if (r.id === selectedId) return null
+            return { ...r, equipment: (r.equipment || []).filter(eq => eq.id !== selectedId) }
+          }).filter(Boolean))
+          setSelectedId(null)
+        }
+      } else if (e.key === 'Escape') {
+        setSelectedId(null)
+        setContextMenu(null)
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault()
+        // simple redo: push current state then undo
+        pushUndo()
+        // No clean redo without separate redo stack; skipping for now
+      } else if (e.key === 'g') {
+        setSnapToGrid(s => !s)
+      } else if (e.key === 'ArrowLeft')  { e.preventDefault(); nudgeSelection(-gridSize, 0) }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); nudgeSelection( gridSize, 0) }
+      else if (e.key === 'ArrowUp')    { e.preventDefault(); nudgeSelection(0, -gridSize) }
+      else if (e.key === 'ArrowDown')  { e.preventDefault(); nudgeSelection(0,  gridSize) }
+      else if (e.key === 'c' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        copySelected()
+      } else if (e.key === 'v' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        pasteFromClipboard()
+      } else if (e.key === 'd' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        duplicateSelected()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedId, rooms, gridSize, undoStack, pushUndo])
+
+  // Copy/paste buffer (client-side only)
+  const clipboardRef = useRef(null)
+  const copySelected = useCallback(() => {
+    for (const r of rooms) {
+      const eq = (r.equipment || []).find(e => e.id === selectedId)
+      if (eq) { clipboardRef.current = { kind: 'equipment', payload: { ...eq } }; return }
+      if (r.id === selectedId) { clipboardRef.current = { kind: 'room', payload: { ...r } }; return }
+    }
+  }, [rooms, selectedId])
+
+  const duplicateSelected = useCallback(() => {
+    pushUndo()
+    for (const r of rooms) {
+      const eq = (r.equipment || []).find(e => e.id === selectedId)
+      if (eq) {
+        const id = genId()
+        const newEq = { ...eq, id, x: eq.x + 0.3, z: eq.z + 0.3 }
+        setRooms(rs => rs.map(rr => rr.id === r.id ? { ...rr, equipment: [...(rr.equipment || []), newEq] } : rr))
+        setSelectedId(id)
+        return
+      }
+    }
+  }, [rooms, selectedId, pushUndo])
+
+  const pasteFromClipboard = useCallback(() => {
+    if (!clipboardRef.current) return
+    pushUndo()
+    const { kind, payload } = clipboardRef.current
+    if (kind === 'equipment') {
+      const r = rooms[rooms.length - 1]
+      if (!r) return
+      const id = genId()
+      const newEq = { ...payload, id, x: payload.x + 0.5, z: payload.z + 0.5 }
+      setRooms(rs => rs.map(rr => rr.id === r.id ? { ...rr, equipment: [...(rr.equipment || []), newEq] } : rr))
+      setSelectedId(id)
+    }
+  }, [rooms, clipboardRef, pushUndo])
+
+  const nudgeSelection = useCallback((dx, dz) => {
+    if (!selectedId) return
+    pushUndo()
+    setRooms(rs => rs.map(r => {
+      if (r.id === selectedId) return { ...r, x: (r.x || 0) + dx, z: (r.z || 0) + dz }
+      return { ...r, equipment: (r.equipment || []).map(eq => eq.id === selectedId ? { ...eq, x: eq.x + dx, z: eq.z + dz } : eq) }
+    }))
+  }, [selectedId, pushUndo])
 
   // Rename
   const renameProject = () => {
@@ -275,7 +388,7 @@ export default function DesignerClient({ user, projectId }) {
           {view3D ? (
             <IsometricView3D rooms={rooms} selectedId={selectedId} onSelect={setSelectedId} proj={proj3D} rotation={rotation} />
           ) : (
-            <PlanView2DNew rooms={rooms} selectedId={selectedId} onSelect={setSelectedId} onUpdate={updateRoom} view2D={view2D} setView2D={setView2D} dimUnit={dimUnit} onAddEq={handleAddEq} />
+            <PlanView2DNew rooms={rooms} selectedId={selectedId} onSelect={setSelectedId} onUpdate={updateRoom} view2D={view2D} setView2D={setView2D} dimUnit={dimUnit} onAddEq={handleAddEq} snapToGrid={snapToGrid} gridSize={gridSize} setMousePos={setMousePos} pushUndo={pushUndo} />
           )}
         </main>
 
@@ -345,29 +458,55 @@ function HeatLoadPanel({ heatLoad }) {
   )
 }
 
-function PlanView2DNew({ rooms, selectedId, onSelect, onUpdate, view2D, setView2D, dimUnit, onAddEq }) {
+function PlanView2DNew({ rooms, selectedId, onSelect, onUpdate, view2D, setView2D, dimUnit, onAddEq, snapToGrid, gridSize, setMousePos, pushUndo }) {
   const proj = (x, z) => ({ px: x * view2D.scale + view2D.offsetX, py: z * view2D.scale + view2D.offsetY })
   const unproj = (px, py) => ({ x: (px - view2D.offsetX) / view2D.scale, z: (py - view2D.offsetY) / view2D.scale })
   const [dragging, setDragging] = useState(null)
   const [dragEq, setDragEq] = useState(null)
+  const [resizeRoom, setResizeRoom] = useState(null) // { id, corner: 'tl'|'tr'|'bl'|'br', startW, startD, startX, startZ }
+  const [hoverPos, setHoverPos] = useState(null)
+
+  // Snap a world-space coordinate to the grid if snapToGrid is enabled
+  const snap = (x, z) => {
+    if (!snapToGrid) return { x, z }
+    return { x: Math.round(x / gridSize) * gridSize, z: Math.round(z / gridSize) * gridSize }
+  }
 
   const handleWheel = (e) => {
     e.preventDefault()
     const delta = e.deltaY > 0 ? 0.9 : 1.1
-    setView2D(v => ({ ...v, scale: Math.max(5, Math.min(100, v.scale * delta)) }))
+    setView2D(v => ({ ...v, scale: Math.max(5, Math.min(150, v.scale * delta)) }))
   }
 
   const startPan = (e) => {
-    if (e.button === 0 && !dragEq) {
+    if (e.button === 0 && !dragEq && !resizeRoom) {
       setDragging({ startX: e.clientX, startY: e.clientY, offsetX: view2D.offsetX, offsetY: view2D.offsetY })
     }
   }
   const doMove = (e) => {
+    const divRect = e.currentTarget.getBoundingClientRect()
+    const worldPos = unproj(e.clientX - divRect.left, e.clientY - divRect.top)
+    setMousePos(worldPos)
     if (dragging) setView2D(v => ({ ...v, offsetX: dragging.offsetX + (e.clientX - dragging.startX), offsetY: dragging.offsetY + (e.clientY - dragging.startY) }))
     if (dragEq) {
-      const divRect = e.currentTarget.getBoundingClientRect()
-      const worldPos = unproj(e.clientX - divRect.left, e.clientY - divRect.top)
-      onUpdate({ ...rooms.find(r => r.id === dragEq.roomId), equipment: rooms.find(r => r.id === dragEq.roomId).equipment.map(eq => eq.id === dragEq.id ? { ...eq, x: worldPos.x, z: worldPos.z } : eq) })
+      const snapped = snap(worldPos.x, worldPos.z)
+      setHoverPos(snapped)
+      const r = rooms.find(rr => rr.id === dragEq.roomId)
+      if (r) {
+        onUpdate({
+          ...r,
+          equipment: r.equipment.map(eq => eq.id === dragEq.id ? { ...eq, x: snapped.x, z: snapped.z } : eq)
+        })
+      }
+    }
+    if (resizeRoom) {
+      const snapped = snap(worldPos.x, worldPos.z)
+      const dx = snapped.x - resizeRoom.startX
+      const dz = snapped.z - resizeRoom.startZ
+      const newW = Math.max(1, resizeRoom.startW + dx * 2)
+      const newD = Math.max(1, resizeRoom.startD + dz * 2)
+      const r = rooms.find(rr => rr.id === resizeRoom.id)
+      if (r) onUpdate({ ...r, width: newW, depth: newD })
     }
   }
   const handleClick = (e) => {
@@ -395,10 +534,28 @@ function PlanView2DNew({ rooms, selectedId, onSelect, onUpdate, view2D, setView2
     onSelect(null)
   }
 
+  const startResize = (e, room, corner) => {
+    e.stopPropagation()
+    e.preventDefault()
+    pushUndo()
+    setResizeRoom({
+      id: room.id,
+      corner,
+      startW: room.width,
+      startD: room.depth,
+      startX: e.clientX,
+      startZ: e.clientY,
+    })
+  }
+
+  const scalePct = Math.round(view2D.scale / 30 * 100)
+
   return (
-    <div style={{ width: '100%', height: '100%', cursor: dragEq ? 'move' : (dragging ? 'grabbing' : 'grab'), overflow: 'hidden' }}
+    <div style={{ width: '100%', height: '100%', cursor: resizeRoom ? 'nwse-resize' : (dragEq ? 'move' : (dragging ? 'grabbing' : 'crosshair')), overflow: 'hidden' }}
       onWheel={handleWheel} onMouseDown={(e) => { if (e.button === 0) { startPan(e) } }} onMouseMove={doMove}
-      onMouseUp={() => { setDragging(null); setDragEq(null) }} onMouseLeave={() => { setDragging(null); setDragEq(null) }} onClick={handleClick}>
+      onMouseUp={() => { setDragging(null); setDragEq(null); setResizeRoom(null); setHoverPos(null) }}
+      onMouseLeave={() => { setDragging(null); setDragEq(null); setResizeRoom(null); setHoverPos(null) }}
+      onClick={handleClick}>
       <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
         <defs>
           <pattern id="grid2d" width={view2D.scale} height={view2D.scale} patternUnits="userSpaceOnUse">
@@ -431,6 +588,21 @@ function PlanView2DNew({ rooms, selectedId, onSelect, onUpdate, view2D, setView2
               <line x1={tl.px} y1={tl.py - 14} x2={tl.px + w} y2={tl.py - 14} stroke="#fbbf24" strokeWidth="0.6" />
               <rect x={tl.px + w/2 - 40} y={tl.py - 24} width="80" height="14" fill="#0f172a" stroke="#fbbf24" strokeWidth="0.4" rx="2" />
               <text x={tl.px + w/2} y={tl.py - 14} textAnchor="middle" fill="#fbbf24" fontSize="11" fontWeight="700">{fmt(room.width)} m</text>
+
+              {/* Resize handles - only when selected */}
+              {isSelected && ['tl', 'tr', 'bl', 'br'].map((corner) => {
+                const cx = corner.includes('r') ? tl.px + w : tl.px
+                const cy = corner.includes('b') ? tl.py + d : tl.py
+                return (
+                  <rect
+                    key={corner}
+                    x={cx - 6} y={cy - 6} width="12" height="12"
+                    fill="#06b6d4" stroke="#fff" strokeWidth="1.5"
+                    style={{ cursor: corner === 'tl' || corner === 'br' ? 'nwse-resize' : 'nesw-resize' }}
+                    onMouseDown={(e) => startResize(e, room, corner)}
+                  />
+                )
+              })}
 
               {(room.equipment || []).map(eq => {
                 const p = proj(eq.x, eq.z)
@@ -466,11 +638,39 @@ function PlanView2DNew({ rooms, selectedId, onSelect, onUpdate, view2D, setView2
         <button onClick={() => setView2D({ scale: 30, offsetX: 400, offsetY: 300 })} style={{ width: '32px', height: '32px', background: 'rgba(30,41,59,0.92)', color: '#fff', border: '1px solid #334155', borderRadius: '6px', fontSize: '14px', cursor: 'pointer' }}>⌂</button>
       </div>
 
-      {/* Unit toggle */}
-      <div style={{ position: 'absolute', bottom: '14px', right: '14px', display: 'flex', gap: '4px', background: 'rgba(15,23,42,0.92)', padding: '4px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
-        {[{ id: 'auto', l: 'Auto' }, { id: 'mm', l: 'mm' }, { id: 'cm', l: 'cm' }, { id: 'm', l: 'm' }].map(u => (
-          <button key={u.id} onClick={() => {/* setDimUnit via prop */ }} style={{ padding: '6px 10px', background: 'transparent', border: 'none', borderRadius: '4px', color: '#fff', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>{u.l}</button>
-        ))}
+      {/* Snap indicator - shows current cursor snap position */}
+      {hoverPos && snapToGrid && (dragEq || resizeRoom) && (() => {
+        const p = proj(hoverPos.x, hoverPos.z)
+        return (
+          <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', width: '100%', height: '100%' }}>
+            <line x1={p.px} y1={0} x2={p.px} y2="100%" stroke="#22d3ee" strokeWidth="0.5" strokeDasharray="2,3" opacity="0.6" />
+            <line x1={0} y1={p.py} x2="100%" y2={p.py} stroke="#22d3ee" strokeWidth="0.5" strokeDasharray="2,3" opacity="0.6" />
+            <circle cx={p.px} cy={p.py} r="4" fill="none" stroke="#22d3ee" strokeWidth="1.5" />
+          </svg>
+        )
+      })()}
+
+      {/* Status bar - bottom */}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, height: '32px',
+        background: 'rgba(15,23,42,0.95)', backdropFilter: 'blur(8px)',
+        borderTop: '1px solid rgba(255,255,255,0.08)',
+        display: 'flex', alignItems: 'center', padding: '0 14px',
+        fontSize: '11px', color: 'rgba(255,255,255,0.65)', gap: '16px',
+        fontFamily: 'monospace',
+      }}>
+        <span>📍 X: <strong style={{ color: '#22d3ee' }}>{mousePos.x.toFixed(2)} m</strong></span>
+        <span>Y: <strong style={{ color: '#22d3ee' }}>{mousePos.z.toFixed(2)} m</strong></span>
+        <span style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '16px' }}>🔍 Zoom: <strong>{scalePct}%</strong></span>
+        <span style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '16px', color: snapToGrid ? '#22c55e' : '#94a3b8' }}>
+          ⊞ Snap: {snapToGrid ? `on (${gridSize}m)` : 'off'}
+        </span>
+        <span style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '16px' }}>
+          🏠 Huoneita: <strong>{rooms.length}</strong>
+        </span>
+        <span style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.4)' }}>
+          Klikkaa+raahaa: pan · Rulla: zoom · Delete: poista · Ctrl+Z: undo · G: snap
+        </span>
       </div>
     </div>
   )
