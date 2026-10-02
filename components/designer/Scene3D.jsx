@@ -330,8 +330,8 @@ function EvaporatorMesh({ room, eq, onSelect, onContext }) {
         <boxGeometry args={[w * 1.02, 0.03, d * 0.98]} />
         <meshStandardMaterial color="#d5dee8" metalness={0.28} roughness={0.42} />
       </mesh>
-      <mesh position={[0, -0.045, d * 0.22]} rotation={[0.4, 0, 0]}>
-        <cylinderGeometry args={[0.012, 0.012, 0.09, 10]} />
+      <mesh position={[0, 0.02, d / 2 + 0.02]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.014, 0.014, 0.05, 10]} />
         <meshStandardMaterial color="#cbd5e1" metalness={0.45} roughness={0.35} />
       </mesh>
       {[-1, 1].map((side) => [-1, 1].map((end) => (
@@ -778,6 +778,7 @@ function serviceCeiling(rooms, point) {
 }
 
 function anchorHeight(rooms, point, kind, atPort) {
+  if (Number.isFinite(point?.y)) return point.y
   if (atPort) {
     let best = null
     for (const room of rooms) {
@@ -816,19 +817,21 @@ function elbowRuns(a, b, ya, yb) {
   const dx = b.x - a.x
   const dz = b.z - a.z
   const horiz = Math.hypot(dx, dz)
-  if (horiz < 0.04 && Math.abs(ya - yb) < 0.04) return []
+  const dy = yb - ya
+  if (horiz < 0.04 && Math.abs(dy) < 0.04) return []
   const legs = []
   const axis = Math.abs(dx) < 0.04 || Math.abs(dz) < 0.04
+  // Condensate falls a few percent along one axis. Refrigerant changes height on its own vertical.
+  if (axis && horiz >= 0.04 && Math.abs(dy) / horiz <= 0.08) {
+    pushLeg(legs, a.x, ya, a.z, b.x, yb, b.z)
+    return legs
+  }
   if (!axis) {
     const y = Math.max(ya, yb)
     pushLeg(legs, a.x, ya, a.z, a.x, y, a.z)
     pushLeg(legs, a.x, y, a.z, b.x, y, a.z)
     pushLeg(legs, b.x, y, a.z, b.x, y, b.z)
     pushLeg(legs, b.x, y, b.z, b.x, yb, b.z)
-    return legs
-  }
-  if (Math.abs(ya - yb) < 0.05) {
-    pushLeg(legs, a.x, ya, a.z, b.x, yb, b.z)
     return legs
   }
   if (yb < ya) {
@@ -863,7 +866,7 @@ function filletPath(points, radius) {
     outDir.multiplyScalar(1 / outLen)
     const angle = Math.acos(THREE.MathUtils.clamp(inDir.dot(outDir), -1, 1))
     if (angle < 0.15) continue
-    const trim = Math.min(radius, inLen * 0.45, outLen * 0.45)
+    const trim = Math.min(radius, 0.06, inLen * 0.45, outLen * 0.45)
     const start = curr.clone().addScaledVector(inDir, -trim)
     const end = curr.clone().addScaledVector(outDir, trim)
     if (cursor.distanceTo(start) > 1e-3) path.add(new THREE.LineCurve3(cursor, start))
@@ -878,7 +881,7 @@ function filletPath(points, radius) {
 function SmoothTube({ encoded, radius, color, metalness = 0.25, roughness = 0.4 }) {
   const geom = useMemo(() => {
     const pts = JSON.parse(encoded)
-    const path = filletPath(pts, Math.max(0.16, radius * 4))
+    const path = filletPath(pts, 0.05)
     if (!path) return null
     const length = path.getLength()
     if (length < 0.05) return null
