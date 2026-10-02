@@ -222,6 +222,9 @@ export default function DesignerApp({
     teC: -8,
     tcC: 40,
     theme: 'dark',
+    drawingNo: 'KA-01',
+    revision: 'A',
+    designer: '',
     overrides: {},
     ...(initialSchematic || {}),
   }))
