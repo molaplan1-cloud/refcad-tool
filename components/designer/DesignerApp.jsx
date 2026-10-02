@@ -18,6 +18,7 @@ import {
 import { decorateExample } from '@/lib/exampleScene'
 import { templatesForGroup } from '@/lib/selection'
 import { REFRIGERANT_IDS } from '@/lib/pipeSizing'
+import { INTERNAL_LIQUID_TRAIN, PIPE_STYLES, autoCircuit, validateRoute } from '@/lib/pipeTopology'
 import {
   defaultElevation,
   doorOnWall,
@@ -99,9 +100,13 @@ function TemplateThumb({ item }) {
   if (category === 'evaporator' && item?.style === 'slant') {
     return (
       <svg {...box}>
-        <path d="M3 8 H25 L20 20 H8 Z" fill="#e0f2fe" stroke="#0369a1" />
-        <circle cx="11" cy="13" r="2.2" fill="#fff" stroke="#0f172a" />
-        <circle cx="18" cy="13" r="2.2" fill="#fff" stroke="#0f172a" />
+        <rect x="3" y="6" width="22" height="16" fill="#f8fafc" stroke="#64748b" />
+        <path d="M3 11 H25" stroke="#94a3b8" />
+        <rect x="4" y="4" width="2.2" height="3" fill="#94a3b8" />
+        <rect x="21.8" y="4" width="2.2" height="3" fill="#94a3b8" />
+        <circle cx="10" cy="16" r="2.6" fill="#eff6ff" stroke="#1d4ed8" />
+        <circle cx="18" cy="16" r="2.6" fill="#eff6ff" stroke="#1d4ed8" />
+        <circle cx="14" cy="20" r="1" fill="#64748b" />
       </svg>
     )
   }
@@ -490,12 +495,26 @@ export default function DesignerApp({
     setNotice(warning || `${eq.name} sijoitettiin huoneeseen ${room.label}.`)
   }
 
+  function runAutoPipe() {
+    const result = autoCircuit(roomsRef.current, { refrigerant, teC, tcC, id: genId })
+    if (!result.ok) {
+      setNotice(result.hint)
+      return
+    }
+    pushUndo()
+    const kept = pipesRef.current.filter((pipe) => pipe.kind === 'cable')
+    setPipes([...kept, ...result.pipes])
+    setView('2d')
+    setSelectedIds(result.pipes[0] ? [result.pipes[0].id] : [])
+    setNotice(result.notice)
+  }
+
   function onCreateRoute(points) {
     if (!points || points.length < 2) return
     const clean = points.filter((point, index) => index === 0 || Math.hypot(point.x - points[index - 1].x, point.z - points[index - 1].z) > 0.05)
     if (clean.length < 2) return
-    pushUndo()
     if (tool === 'cable') {
+      pushUndo()
       const cable = { id: genId(), points: clean }
       setCables([...cablesRef.current, cable])
       setSelectedIds([cable.id])
@@ -507,9 +526,16 @@ export default function DesignerApp({
       const hd = item.depth / 2
       return Math.abs(clean[0].x - item.x) <= hw && Math.abs(clean[0].z - item.z) <= hd
     }).sort((a, b) => a.width * a.depth - b.width * b.depth)[0]
+    const check = validateRoute(pipeKind, clean, roomsRef.current)
+    if (!check.ok) {
+      setNotice(check.hint)
+      return
+    }
+    pushUndo()
     const pipe = {
       id: genId(),
       kind: pipeKind,
+      segment: check.segment || null,
       points: clean,
       refrigerant,
       teC,
@@ -818,6 +844,7 @@ export default function DesignerApp({
           <button type="button" data-testid="tool-pipe" title="Putki (L)" style={iconBtn(tool === 'pipe')} onClick={() => { setTool('pipe'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3 12.2 H7 V4.2 H13" /></Icon>
           </button>
+          <button type="button" data-testid="auto-pipe" title="Luo kylmäainepiiri laitteista" style={textBtn(false)} onClick={runAutoPipe}>Autoputkitus</button>
           <button type="button" data-testid="tool-cable" title="Kaapeli (K)" style={iconBtn(tool === 'cable')} onClick={() => { setTool('cable'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3 4.2 H6.2 V8 H9.8 V4.2 H13 V12.2" /></Icon>
           </button>
@@ -1008,6 +1035,7 @@ export default function DesignerApp({
                 <select aria-label="Putkityyppi" value={pipeKind} onChange={(e) => setPipeKind(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
                   <option value="suction">Imuputki</option>
                   <option value="liquid">Nesteputki</option>
+                  <option value="hotgas">Kuumakaasu</option>
                   <option value="drain">Kondenssivesi</option>
                 </select>
               )}
@@ -1024,6 +1052,17 @@ export default function DesignerApp({
                   </label>
                 </>
               )}
+            </div>
+          )}
+          {pipes.length > 0 && view !== '3d' && (
+            <div data-testid="pipe-legend" style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 4, background: 'rgba(255,255,255,0.94)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '8px 10px', maxWidth: 320 }}>
+              {['suction', 'liquid', 'liquidReturn', 'hotgas', 'drain', 'drainHeat'].map((key) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
+                  <span style={{ width: 28, height: 0, borderTop: `3px ${key === 'liquid' || key === 'suction' ? 'solid' : 'dashed'} ${PIPE_STYLES[key].color}` }} />
+                  <span>{PIPE_STYLES[key].legend}</span>
+                </div>
+              ))}
+              <div style={{ fontSize: 10, color: '#78716c', marginTop: 4, lineHeight: 1.35 }}>{INTERNAL_LIQUID_TRAIN}</div>
             </div>
           )}
           {rooms.length === 0 && view !== '3d' && (

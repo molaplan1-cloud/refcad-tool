@@ -8,6 +8,7 @@ body {
   -webkit-font-smoothing: antialiased;
   font-size: 14px;
 }
+.refcad-float { pointer-events: none !important; user-select: none; }
 button { font-family: inherit; cursor: pointer; transition: all 0.15s ease; }
 button:active { transform: scale(0.97); }
 input, select { font-family: inherit; outline: none; }
