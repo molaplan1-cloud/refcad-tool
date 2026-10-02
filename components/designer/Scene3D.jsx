@@ -2,11 +2,11 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { ContactShadows, Edges, Grid, Html, OrbitControls } from '@react-three/drei'
+import { ContactShadows, Edges, Grid, Html, OrbitControls, RoundedBox } from '@react-three/drei'
 import * as THREE from 'three'
 import { insetOrthogonal, outlineOf } from '@/lib/cadDraw'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
-import { equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
+import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
 
 const SceneTheme = createContext(null)
 
@@ -107,7 +107,6 @@ function seamList(room) {
 }
 
 function DoorMesh({ room, eq, onSelect, onContext }) {
-  const palette = usePalette()
   const wall = eq.wall || 's'
   const yaw = { s: 0, n: Math.PI, e: Math.PI / 2, w: -Math.PI / 2 }[wall] ?? 0
   const w = Math.max(0.6, eq.width || 0.9)
@@ -174,10 +173,25 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
         <boxGeometry args={[w - 0.04, 0.012, 0.045]} />
         <meshStandardMaterial color="#c2410c" emissive="#9a3412" emissiveIntensity={0.4} roughness={0.42} />
       </mesh>
-      <Html position={[0, h * 0.58, 0.1]} center sprite zIndexRange={[12, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
-        <div style={{ color: palette.id === 'dark' ? '#f8fafc' : '#1c1917', fontWeight: 700, fontSize: 16, textShadow: '0 1px 2px rgba(0,0,0,0.45)' }}>{number}</div>
-      </Html>
+      <DoorNumber room={room} number={number} h={h} />
     </group>
+  )
+}
+
+function DoorNumber({ room, number, h }) {
+  const palette = usePalette()
+  const camera = useThree((state) => state.camera)
+  const outline = useMemo(() => outlineOf(room), [room])
+  const [inside, setInside] = useState(true)
+  useFrame(() => {
+    const next = pointInOutline(camera.position.x, camera.position.z, outline)
+    setInside((current) => (current === next ? current : next))
+  })
+  if (!inside) return null
+  return (
+    <Html position={[0, h * 0.58, 0.1]} center sprite zIndexRange={[12, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
+      <div style={{ color: palette.id === 'dark' ? '#f8fafc' : '#1c1917', fontWeight: 700, fontSize: 16, textShadow: '0 1px 2px rgba(0,0,0,0.45)' }}>{number}</div>
+    </Html>
   )
 }
 
@@ -431,56 +445,192 @@ function CondenserMesh({ room, eq, onSelect, onContext }) {
   )
 }
 
-function ComboMesh({ room, eq, onSelect, onContext }) {
-  const duty = Math.max(4, eq.capacityKw || 8)
-  const w = Math.max(eq.width || 1, Math.min(1.85, 1.05 + duty * 0.02))
-  const h = Math.max(eq.height || 0.75, Math.min(1.2, 0.92 + duty * 0.008))
-  const d = Math.max(0.42, eq.depth || 0.55)
-  const fanR = Math.min(h * 0.34, w * 0.28, 0.42)
-  const valveY = Math.min((eq.height || h) * 0.4, 0.48)
+function useSickleGeometry(radius) {
+  return useMemo(() => {
+    const shape = new THREE.Shape()
+    const r = radius
+    shape.moveTo(r * 0.2, r * 0.012)
+    shape.quadraticCurveTo(r * 0.48, r * 0.2, r * 0.96, r * 0.04)
+    shape.quadraticCurveTo(r * 1.01, 0.004, r * 0.92, -r * 0.018)
+    shape.quadraticCurveTo(r * 0.5, r * 0.05, r * 0.2, -r * 0.012)
+    shape.closePath()
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.003, bevelEnabled: false, curveSegments: 10 })
+    geom.translate(0, 0, -0.0015)
+    return geom
+  }, [radius])
+}
+
+function GuardedFan({ radius }) {
+  const blade = useSickleGeometry(radius)
+  const ring = 0.0032
+  useEffect(() => () => blade.dispose(), [blade])
   return (
-    <EquipFrame room={room} eq={eq} onSelect={onSelect} onContext={onContext}>
-      {[-1, 1].map((side) => {
-        const reach = d * 0.38 + 0.12
-        return (
-          <group key={`bracket-${side}`}>
-            <mesh position={[side * w * 0.3, 0.028, -d / 2 - 0.12 + reach / 2]} castShadow>
-              <boxGeometry args={[0.048, 0.016, reach]} />
-              <meshStandardMaterial color="#cbd5e1" metalness={0.64} roughness={0.32} />
-            </mesh>
-            <mesh position={[side * w * 0.3, -0.045, -d / 2 - 0.115]} castShadow>
-              <boxGeometry args={[0.062, 0.15, 0.01]} />
-              <meshStandardMaterial color="#94a3b8" metalness={0.6} roughness={0.34} />
-            </mesh>
-          </group>
-        )
-      })}
-      <mesh position={[0, h * 0.52, 0]} castShadow>
-        <boxGeometry args={[w, h * 0.92, d * 0.92]} />
-        <meshStandardMaterial color="#e8eef2" metalness={0.22} roughness={0.4} />
-        <Edges threshold={16} color="#94a3b8" />
-      </mesh>
-      {Array.from({ length: 14 }, (_, index) => (
-        <mesh key={`coil-${index}`} position={[(index - 6.5) * (w * 0.055), h * 0.52, d * 0.42]}>
-          <boxGeometry args={[0.012, h * 0.72, 0.04]} />
-          <meshStandardMaterial color="#94a3b8" metalness={0.48} roughness={0.35} />
+    <group>
+      {[0, 1, 2].map((index) => (
+        <mesh key={`blade-${index}`} geometry={blade} rotation={[0, 0, (index * 2 * Math.PI) / 3]} position={[0, 0, -0.01]}>
+          <meshStandardMaterial color="#475569" metalness={0.45} roughness={0.38} side={THREE.DoubleSide} />
         </mesh>
       ))}
-      <mesh position={[w * 0.5 - 0.012, h * 0.5, 0.02]}>
-        <boxGeometry args={[0.02, h * 0.62, d * 0.55]} />
-        <meshStandardMaterial color="#cbd5e1" metalness={0.35} roughness={0.45} />
+      <mesh position={[0, 0, -0.008]}>
+        <cylinderGeometry args={[radius * 0.16, radius * 0.16, 0.016, 16]} />
+        <meshStandardMaterial color="#e2e8f0" metalness={0.62} roughness={0.28} />
       </mesh>
-      <mesh position={[w * 0.5 + 0.012, h * 0.48, 0.04]}>
-        <boxGeometry args={[0.012, 0.08, 0.03]} />
-        <meshStandardMaterial color="#334155" metalness={0.4} roughness={0.4} />
+      {[0.34, 0.66, 0.96].map((scale) => (
+        <mesh key={`ring-${scale}`} position={[0, 0, 0.012]}>
+          <torusGeometry args={[radius * scale, ring, 8, 40]} />
+          <meshStandardMaterial color="#1e293b" metalness={0.62} roughness={0.32} />
+        </mesh>
+      ))}
+      {[0, 1, 2, 3].map((index) => (
+        <mesh key={`spoke-${index}`} position={[0, 0, 0.012]} rotation={[0, 0, (index * Math.PI) / 4]}>
+          <boxGeometry args={[radius * 1.9, 0.005, 0.003]} />
+          <meshStandardMaterial color="#334155" metalness={0.55} roughness={0.35} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function WallConsole({ x, depth, top }) {
+  const profile = 0.04
+  const wallZ = -depth / 2 - 0.115
+  const tipZ = depth / 2 + 0.14
+  const arm = tipZ - wallZ
+  const leg = 0.56
+  const shelfY = top - profile / 2
+  const footY = shelfY - leg
+  const steel = { color: '#c5ced6', metalness: 0.78, roughness: 0.3 }
+  const dz = tipZ - wallZ
+  const dy = shelfY - footY
+  const length = Math.hypot(dz, dy)
+  const angle = -Math.atan2(dy, dz)
+  return (
+    <group position={[x, 0, 0]}>
+      <mesh position={[0, shelfY - leg * 0.42, wallZ - 0.006]} castShadow>
+        <boxGeometry args={[0.12, 0.2, 0.008]} />
+        <meshStandardMaterial color="#b7c1ca" metalness={0.72} roughness={0.34} />
       </mesh>
-      <FanDisc x={0} y={h * 0.52} z={d / 2 + 0.02} radius={fanR} />
-      <ServiceValves
-        depth={eq.depth || d}
+      {[0.06, -0.04].map((bolt) => (
+        <mesh key={bolt} position={[0.03, shelfY - leg * 0.42 + bolt, wallZ + 0.002]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.008, 0.008, 0.01, 8]} />
+          <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.32} />
+        </mesh>
+      ))}
+      <mesh position={[0, (shelfY + footY) / 2, wallZ]} castShadow>
+        <boxGeometry args={[profile, leg, profile]} />
+        <meshStandardMaterial {...steel} />
+      </mesh>
+      <mesh position={[0, shelfY, (wallZ + tipZ) / 2]} castShadow>
+        <boxGeometry args={[profile, profile, arm]} />
+        <meshStandardMaterial {...steel} />
+      </mesh>
+      <mesh position={[0, (footY + shelfY) / 2, (wallZ + tipZ) / 2]} rotation={[angle, 0, 0]} castShadow>
+        <boxGeometry args={[0.008, profile, length * 0.9]} />
+        <meshStandardMaterial color="#9aa6b1" metalness={0.74} roughness={0.34} />
+      </mesh>
+    </group>
+  )
+}
+
+function SideServiceValves({ x, y, valves }) {
+  const brass = { color: '#f0c14b', metalness: 0.72, roughness: 0.28 }
+  return (
+    <group>
+      {valves.map((valve) => (
+        <group key={valve.z} position={[x, y, valve.z]}>
+          <mesh position={[0.045, 0, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+            <cylinderGeometry args={[valve.radius, valve.radius, 0.09, 18]} />
+            <meshStandardMaterial {...brass} />
+          </mesh>
+          <mesh position={[0.008, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[valve.radius * 1.55, valve.radius * 1.55, 0.016, 18]} />
+            <meshStandardMaterial {...brass} />
+          </mesh>
+          <mesh position={[0.045, valve.radius + 0.022, 0]}>
+            <boxGeometry args={[0.036, 0.044, valve.radius * 1.7]} />
+            <meshStandardMaterial color="#e2b34a" metalness={0.68} roughness={0.32} />
+          </mesh>
+          <mesh position={[0.045, valve.radius + 0.07, 0]}>
+            <boxGeometry args={[0.012, 0.06, 0.012]} />
+            <meshStandardMaterial color="#f8fafc" metalness={0.8} roughness={0.22} />
+          </mesh>
+          <mesh position={[0.045, valve.radius + 0.1, 0]}>
+            <boxGeometry args={[0.056, 0.012, 0.014]} />
+            <meshStandardMaterial color="#f8fafc" metalness={0.8} roughness={0.22} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  )
+}
+
+function ComboMesh({ room, eq, onSelect, onContext }) {
+  const body = comboBody(eq)
+  const w = body.width
+  const h = body.height
+  const d = body.depth
+  const fanR = Math.min(h * 0.32, w * 0.26, 0.38)
+  const valveY = h / 3
+  const valveX = -w / 2 - 0.09
+  const casingH = h * 0.86
+  const casingD = d * 0.88
+  const coil = '#8b98a5'
+  return (
+    <EquipFrame room={room} eq={eq} onSelect={onSelect} onContext={onContext}>
+      {[-1, 1].map((side) => (
+        <WallConsole key={`bracket-${side}`} x={side * w * 0.42} depth={d} top={h * 0.08} />
+      ))}
+      <RoundedBox args={[w, casingH, casingD]} radius={0.022} smoothness={3} position={[0, h * 0.5, 0]} castShadow>
+        <meshStandardMaterial color="#e7eef3" metalness={0.24} roughness={0.42} />
+        <Edges threshold={18} color="#94a3b8" />
+      </RoundedBox>
+      <mesh position={[0, h * 0.5 + casingH / 2 - 0.012, 0]}>
+        <boxGeometry args={[w * 0.992, 0.008, casingD * 0.98]} />
+        <meshStandardMaterial color="#94a3b8" metalness={0.35} roughness={0.5} />
+      </mesh>
+      <mesh position={[0, h * 0.5 + casingH / 2 + 0.006, 0]} castShadow>
+        <boxGeometry args={[w * 0.9, 0.016, casingD * 0.82]} />
+        <meshStandardMaterial color="#f4f7fa" metalness={0.22} roughness={0.4} />
+      </mesh>
+      {Array.from({ length: 16 }, (_, index) => (
+        <mesh key={`side-fin-${index}`} position={[w / 2 + 0.012, h * 0.52, (index - 7.5) * ((d * 0.62) / 15)]}>
+          <boxGeometry args={[0.016, h * 0.58, 0.006]} />
+          <meshStandardMaterial color={coil} metalness={0.5} roughness={0.38} />
+        </mesh>
+      ))}
+      {Array.from({ length: 18 }, (_, index) => (
+        <mesh key={`rear-fin-${index}`} position={[(index - 8.5) * ((w * 0.72) / 17), h * 0.52, -d / 2 - 0.01]}>
+          <boxGeometry args={[0.006, h * 0.58, 0.02]} />
+          <meshStandardMaterial color={coil} metalness={0.5} roughness={0.38} />
+        </mesh>
+      ))}
+      {Array.from({ length: 8 }, (_, index) => (
+        <mesh key={`end-fin-${index}`} position={[-w / 2 - 0.01, h * 0.62, 0.12 + (index - 3.5) * 0.028]}>
+          <boxGeometry args={[0.012, h * 0.28, 0.006]} />
+          <meshStandardMaterial color={coil} metalness={0.48} roughness={0.4} />
+        </mesh>
+      ))}
+      <group position={[w * 0.3, h * 0.22, casingD / 2 + 0.006]}>
+        <mesh>
+          <boxGeometry args={[0.15, 0.09, 0.012]} />
+          <meshStandardMaterial color="#d5dee6" metalness={0.32} roughness={0.48} />
+        </mesh>
+        {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => (
+          <mesh key={`screw-${sx}${sy}`} position={[sx * 0.055, sy * 0.03, 0.008]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.005, 0.005, 0.006, 8]} />
+            <meshStandardMaterial color="#334155" metalness={0.65} roughness={0.35} />
+          </mesh>
+        ))}
+      </group>
+      <group position={[0, h * 0.52, casingD / 2 + 0.004]}>
+        <GuardedFan radius={fanR} />
+      </group>
+      <SideServiceValves
+        x={valveX}
         y={valveY}
         valves={[
-          { x: -(eq.width || w) / 2 + 0.18, radius: 0.026 },
-          { x: -(eq.width || w) / 2 + 0.34, radius: 0.018 },
+          { z: -0.1, radius: 0.05 },
+          { z: 0.1, radius: 0.036 },
         ]}
       />
     </EquipFrame>
@@ -1089,6 +1239,24 @@ function PipeRuns({ rooms, pipes }) {
             metalness={0.25}
             roughness={0.4}
           />
+        )}
+        {pipe.kind === 'drain' && (
+          <group position={[sharp[sharp.length - 1][0], 0.025, sharp[sharp.length - 1][2]]}>
+            <mesh>
+              <boxGeometry args={[0.62, 0.04, 0.28]} />
+              <meshStandardMaterial color="#d6d3d1" metalness={0.08} roughness={0.72} />
+            </mesh>
+            <mesh position={[0, 0.012, 0]}>
+              <boxGeometry args={[0.46, 0.02, 0.12]} />
+              <meshStandardMaterial color="#44403c" metalness={0.2} roughness={0.7} />
+            </mesh>
+            {[-0.16, -0.05, 0.06, 0.16].map((offset) => (
+              <mesh key={`grate-${offset}`} position={[offset, 0.028, 0]}>
+                <boxGeometry args={[0.018, 0.01, 0.2]} />
+                <meshStandardMaterial color="#78716c" metalness={0.35} roughness={0.5} />
+              </mesh>
+            ))}
+          </group>
         )}
         {(pipe.kind === 'suction' || pipe.kind === 'liquid') && clipPoints(sharp).map((clip, index) => (
           <group key={`clip-${index}`} position={clip}>
