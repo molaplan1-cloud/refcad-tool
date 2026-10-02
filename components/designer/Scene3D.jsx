@@ -346,12 +346,16 @@ function EvaporatorMesh({ room, eq, onSelect, onContext }) {
           </mesh>
         </group>
       )))}
-      {[[-0.28, '#1c1917'], [0.28, '#c47a3a']].map(([offset, color]) => (
+      {[[-0.28, '#1c1917', 0.018], [0.28, '#c47a3a', 0.01]].map(([offset, color, radius]) => (
         <mesh key={offset} position={[w * offset, h * 0.42, d / 2 + 0.03]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[offset < 0 ? 0.018 : 0.01, offset < 0 ? 0.018 : 0.01, 0.07, 10]} />
+          <cylinderGeometry args={[radius, radius, 0.07, 10]} />
           <meshStandardMaterial color={color} metalness={offset < 0 ? 0.08 : 0.7} roughness={offset < 0 ? 0.8 : 0.32} />
         </mesh>
       ))}
+      <mesh position={[0, 0.045, d / 2 + 0.025]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.014, 0.012, 0.07, 10]} />
+        <meshStandardMaterial color="#a8a29e" metalness={0.35} roughness={0.4} />
+      </mesh>
       {slant ? fanLayout.map((fan, index) => (
         <SlantFan key={index} position={fan.position} quaternion={fan.quaternion} radius={fan.fanR} color="#1e293b" />
       )) : Array.from({ length: fans }, (_, index) => (
@@ -361,12 +365,14 @@ function EvaporatorMesh({ room, eq, onSelect, onContext }) {
   )
 }
 
-function ServiceValves({ w, h, d }) {
+function ServiceValves({ w, h, d, span, depth, offset = 0.22 }) {
+  const across = span || w
+  const back = (depth || d) / 2
   return (
     <group>
-      {[-0.16, 0.16].map((offset) => (
-        <mesh key={offset} position={[w * offset, h * 0.32, -d / 2 - 0.03]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.028, 0.02, 0.09, 12]} />
+      {[-offset, offset].map((side) => (
+        <mesh key={side} position={[across * side, h * 0.32, -back - 0.04]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.034, 0.022, 0.16, 12]} />
           <meshStandardMaterial color="#b45309" metalness={0.72} roughness={0.28} />
         </mesh>
       ))}
@@ -411,7 +417,7 @@ function CondenserMesh({ room, eq, onSelect, onContext }) {
       {Array.from({ length: fans }, (_, index) => (
         <FanDisc key={index} x={(index - (fans - 1) / 2) * (w * 0.42)} y={h * 0.9} z={0} radius={fanR} flat />
       ))}
-      <ServiceValves w={w} h={h} d={d} />
+      <ServiceValves w={w} h={h} d={d} span={eq.width} depth={eq.depth} offset={0.18} />
     </EquipFrame>
   )
 }
@@ -457,7 +463,7 @@ function ComboMesh({ room, eq, onSelect, onContext }) {
         <meshStandardMaterial color="#334155" metalness={0.4} roughness={0.4} />
       </mesh>
       <FanDisc x={0} y={h * 0.52} z={d / 2 + 0.02} radius={fanR} />
-      <ServiceValves w={w} h={valveY / 0.32} d={d} />
+      <ServiceValves w={w} h={valveY / 0.32} d={d} span={eq.width || w} depth={eq.depth || d} />
     </EquipFrame>
   )
 }
@@ -906,41 +912,14 @@ function tubeStyle(pipe) {
   return { radius: Math.max(0.01, copper), color: '#1d4ed8', metalness: 0.2, roughness: 0.4 }
 }
 
-function wallCrossings(rooms, points) {
-  const hits = []
-  const hostAt = (x, z) => (rooms || []).find((room) => room.type !== 'yard' && pointInOutline(x, z, outlineOf(room)))
-  for (let i = 1; i < points.length; i += 1) {
-    const a = points[i - 1]
-    const b = points[i]
-    let prev = hostAt(a[0], a[2])
-    const steps = 12
-    for (let step = 1; step <= steps; step += 1) {
-      const t = step / steps
-      const p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-      const next = hostAt(p[0], p[2])
-      if ((prev?.id || '') !== (next?.id || '')) {
-        const dx = b[0] - a[0]
-        const dy = b[1] - a[1]
-        const dz = b[2] - a[2]
-        const len = Math.hypot(dx, dy, dz) || 1
-        const hit = { x: p[0], y: p[1], z: p[2], dx: dx / len, dy: dy / len, dz: dz / len }
-        const prior = hits[hits.length - 1]
-        if (!prior || Math.hypot(prior.x - hit.x, prior.y - hit.y, prior.z - hit.z) > 0.45) hits.push(hit)
-      }
-      prev = next
-    }
-  }
-  return hits
-}
-
 function clipPoints(sharp) {
   const clips = []
   for (let i = 1; i < sharp.length; i += 1) {
     const a = sharp[i - 1]
     const b = sharp[i]
     const horiz = Math.hypot(b[0] - a[0], b[2] - a[2])
-    if (horiz < 0.9 || Math.abs(b[1] - a[1]) > 0.08) continue
-    const count = Math.max(1, Math.round(horiz / 1.25))
+    if (horiz < 0.42 || Math.abs(b[1] - a[1]) > 0.08) continue
+    const count = Math.max(1, Math.round(horiz / 0.72))
     for (let step = 1; step <= count; step += 1) {
       const t = step / (count + 1)
       clips.push([
@@ -953,7 +932,22 @@ function clipPoints(sharp) {
   return clips
 }
 
-function Sleeve({ x, y, z, dx, dy, dz, radius }) {
+function traceBeside(sharp) {
+  let ox = 0.022
+  let oz = 0
+  for (let i = 1; i < sharp.length; i += 1) {
+    const dx = sharp[i][0] - sharp[i - 1][0]
+    const dz = sharp[i][2] - sharp[i - 1][2]
+    const len = Math.hypot(dx, dz)
+    if (len < 0.2) continue
+    ox = (-dz / len) * 0.022
+    oz = (dx / len) * 0.022
+    break
+  }
+  return sharp.map((point) => [point[0] + ox, point[1], point[2] + oz])
+}
+
+function Sleeve({ x, y, z, dx, dy, dz, radius, length = 0.1 }) {
   const ref = useRef()
   useEffect(() => {
     if (!ref.current) return
@@ -961,14 +955,68 @@ function Sleeve({ x, y, z, dx, dy, dz, radius }) {
   }, [dx, dy, dz])
   return (
     <mesh ref={ref} position={[x, y, z]}>
-      <cylinderGeometry args={[radius, radius, 0.16, 14]} />
+      <cylinderGeometry args={[radius, radius, length, 16]} />
       <meshStandardMaterial color="#f5f5f4" metalness={0.28} roughness={0.42} />
     </mesh>
   )
 }
 
+function clusterSleeves(rooms, pipes) {
+  const marks = []
+  ;(pipes || []).forEach((pipe) => {
+    ;(pipe.points || []).forEach((point) => {
+      if (!point.sleeve) return
+      marks.push({ ...point, y: point.y || 0, kind: pipe.kind })
+    })
+  })
+  const groups = []
+  marks.forEach((mark) => {
+    const group = groups.find((item) => {
+      const sameFamily = (item.kind === 'drain') === (mark.kind === 'drain')
+      return sameFamily
+        && Math.abs(item.y - mark.y) < 0.08
+        && Math.hypot(item.x - mark.x, item.z - mark.z) < 0.35
+    })
+    if (!group) {
+      groups.push({
+        x: mark.x, y: mark.y, z: mark.z, ox: mark.sox || 0, oz: mark.soz || 1, kind: mark.kind, members: [mark],
+      })
+      return
+    }
+    group.members.push(mark)
+    if (mark.sox || mark.soz) {
+      group.ox = mark.sox || 0
+      group.oz = mark.soz || 0
+    }
+  })
+  return groups.map((group) => {
+    const n = group.members.length
+    const x = group.members.reduce((sum, mark) => sum + mark.x, 0) / n
+    const y = group.members.reduce((sum, mark) => sum + mark.y, 0) / n
+    const z = group.members.reduce((sum, mark) => sum + mark.z, 0) / n
+    const spread = group.members.reduce((max, mark) => Math.max(max, Math.hypot(mark.x - x, mark.z - z)), 0)
+    const room = (rooms || []).find((item) => pointInOutline(x, z, outlineOf(item))) || rooms?.[0]
+    const thick = Math.max(0.08, room?.wallThickness || 0.1)
+    const len = Math.hypot(group.ox, group.oz) || 1
+    return {
+      x, y, z,
+      dx: group.ox / len,
+      dy: 0,
+      dz: group.oz / len,
+      radius: Math.max(group.kind === 'drain' ? 0.04 : 0.07, spread + 0.045),
+      length: thick,
+    }
+  })
+}
+
 function PipeRuns({ rooms, pipes }) {
-  return (pipes || []).map((pipe) => {
+  const sleeves = clusterSleeves(rooms, pipes)
+  return (
+    <group>
+      {sleeves.map((sleeve, index) => (
+        <Sleeve key={`sleeve-${index}`} x={sleeve.x} y={sleeve.y} z={sleeve.z} dx={sleeve.dx} dy={sleeve.dy} dz={sleeve.dz} radius={sleeve.radius} length={sleeve.length} />
+      ))}
+      {(pipes || []).map((pipe) => {
     const traced = pipe.kind === 'drain' && pipe.roomTempC < 0
     const style = tubeStyle(pipe)
     const points = pipe.points || []
@@ -986,37 +1034,39 @@ function PipeRuns({ rooms, pipes }) {
     })
     if (sharp.length < 2) return null
     const encoded = JSON.stringify(sharp)
-    const sleeves = wallCrossings(rooms, sharp)
     return (
       <group key={pipe.id}>
         <SmoothTube encoded={encoded} radius={style.radius} color={style.color} metalness={style.metalness} roughness={style.roughness} />
         {traced && (
           <SmoothTube
-            encoded={JSON.stringify(sharp.map((point) => [point[0], point[1] + style.radius + 0.01, point[2]]))}
-            radius={0.006}
-            color="#fdba74"
-            metalness={0.2}
-            roughness={0.45}
+            encoded={JSON.stringify(traceBeside(sharp))}
+            radius={0.012}
+            color="#fb923c"
+            metalness={0.25}
+            roughness={0.4}
           />
         )}
-        {sleeves.map((sleeve, index) => (
-          <Sleeve key={index} x={sleeve.x} y={sleeve.y} z={sleeve.z} dx={sleeve.dx} dy={sleeve.dy} dz={sleeve.dz} radius={style.radius + 0.02} />
-        ))}
         {(pipe.kind === 'suction' || pipe.kind === 'liquid') && clipPoints(sharp).map((clip, index) => (
           <group key={`clip-${index}`} position={clip}>
-            <mesh position={[0, 0.045, 0]}>
-              <cylinderGeometry args={[0.004, 0.004, 0.09, 6]} />
-              <meshStandardMaterial color="#94a3b8" metalness={0.6} roughness={0.32} />
+            <mesh position={[0, 0.14, 0]}>
+              <cylinderGeometry args={[0.008, 0.008, 0.28, 8]} />
+              <meshStandardMaterial color="#cbd5e1" metalness={0.62} roughness={0.28} />
             </mesh>
-            <mesh position={[0, 0.012, 0]}>
-              <boxGeometry args={[style.radius * 2.4, 0.012, 0.012]} />
-              <meshStandardMaterial color="#cbd5e1" metalness={0.55} roughness={0.34} />
+            <mesh position={[0, 0.275, 0]}>
+              <boxGeometry args={[0.07, 0.014, 0.032]} />
+              <meshStandardMaterial color="#94a3b8" metalness={0.55} roughness={0.32} />
+            </mesh>
+            <mesh position={[0, 0, 0]}>
+              <boxGeometry args={[Math.max(0.055, style.radius * 3.2), 0.02, 0.022]} />
+              <meshStandardMaterial color="#e2e8f0" metalness={0.5} roughness={0.3} />
             </mesh>
           </group>
         ))}
       </group>
     )
-  })
+      })}
+    </group>
+  )
 }
 
 function ViewBridge({ rigRef, onHeading }) {
@@ -1044,7 +1094,9 @@ function ViewBridge({ rigRef, onHeading }) {
         controls.update()
       },
     }
-    return () => { rigRef.current = null }
+    return () => {
+      rigRef.current = null
+    }
   }, [camera, controls, rigRef])
   return null
 }
