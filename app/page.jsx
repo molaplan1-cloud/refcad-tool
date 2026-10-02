@@ -23,6 +23,8 @@ export default function Page() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
       projectName: data.name,
       rooms: data.rooms,
+      pipes: data.pipes || [],
+      cables: data.cables || [],
       unitSystem: data.unitSystem,
       dimUnit: data.unitSystem === 'IP' ? 'ft' : 'm',
       lastSaved: new Date().toISOString(),
@@ -37,6 +39,8 @@ export default function Page() {
     <DesignerApp
       initialName={saved?.projectName || saved?.name || 'Uusi projekti'}
       initialRooms={saved?.rooms || []}
+      initialPipes={saved?.pipes || []}
+      initialCables={saved?.cables || []}
       initialUnitSystem={saved?.unitSystem || (saved?.dimUnit === 'ft' ? 'IP' : 'SI')}
       onPersist={onPersist}
       persistLabel="selaimeen"

@@ -5,15 +5,27 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import PlanView from './PlanView'
 import HeatLoadPanel from './HeatLoadPanel'
-import { ROOM_TYPES, TEMPLATE_GROUPS, TEMPLATES, getTemplate } from '@/lib/catalog'
+import { ROOM_TYPES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
 import {
   buildEnquiryExample,
   createRoom,
   descendantIds,
   findContainer,
+  genId,
   makeEquipment,
   normalizeRooms,
 } from '@/lib/geometry'
+import { decorateExample } from '@/lib/exampleScene'
+import { templatesForGroup } from '@/lib/selection'
+import { REFRIGERANT_IDS } from '@/lib/pipeSizing'
+import {
+  defaultElevation,
+  doorOnWall,
+  insideRefrigerated,
+  isOutdoorCategory,
+  rotateDoorWall,
+  snapOutdoorUnit,
+} from '@/lib/placement'
 import { applyOutline, bboxOf, clampGroupTranslation, cleanOrthogonal, isRectangleOutline, scaleOutline, selfIntersects, translateOutline } from '@/lib/cadDraw'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
 import { buildDxf, dxfFilename } from '@/lib/dxf'
@@ -81,11 +93,66 @@ const sectionHead = {
   transform: 'none',
 }
 
-function TemplateThumb({ category }) {
-  const box = { width: 28, height: 28, flexShrink: 0, display: 'block' }
+function TemplateThumb({ item }) {
+  const category = item?.category
+  const box = { width: 28, height: 28, viewBox: '0 0 28 28', 'aria-hidden': true, style: { flexShrink: 0, display: 'block' } }
+  if (category === 'evaporator' && item?.style === 'slant') {
+    return (
+      <svg {...box}>
+        <path d="M3 8 H25 L20 20 H8 Z" fill="#e0f2fe" stroke="#0369a1" />
+        <circle cx="11" cy="13" r="2.2" fill="#fff" stroke="#0f172a" />
+        <circle cx="18" cy="13" r="2.2" fill="#fff" stroke="#0f172a" />
+      </svg>
+    )
+  }
+  if (category === 'combo' || category === 'unit') {
+    return (
+      <svg {...box}>
+        <rect x="3" y="7" width="22" height="14" fill="#f8fafc" stroke="#334155" />
+        <circle cx="9" cy="14" r="3.2" fill="#1f2937" />
+        <path d="M14 10 H23 M14 13 H23 M14 16 H23" stroke="#64748b" />
+        <circle cx="18" cy="14" r="2" fill="none" stroke="#0f172a" />
+        <circle cx="8" cy="7" r="1.1" fill="#b45309" />
+        <circle cx="20" cy="7" r="1.1" fill="#b45309" />
+      </svg>
+    )
+  }
+  if (category === 'compressor') {
+    return (
+      <svg {...box}>
+        <rect x="4" y="6" width="20" height="16" fill="#f5f5f4" stroke="#44403c" />
+        <circle cx="10" cy="14" r="3" fill="#1f2937" />
+        <circle cx="18" cy="14" r="3" fill="#1f2937" />
+        <path d="M8 8 H20" stroke="#94a3b8" strokeWidth="1.4" />
+      </svg>
+    )
+  }
+  if (category === 'sensor') {
+    return (
+      <svg {...box}>
+        <circle cx="14" cy="14" r="6" fill="#fff" stroke="#0369a1" strokeWidth="1.4" />
+        <text x="14" y="17" textAnchor="middle" fontSize="8" fill="#0369a1">T</text>
+      </svg>
+    )
+  }
+  if (category === 'controller') {
+    return (
+      <svg {...box}>
+        <rect x="6" y="8" width="16" height="12" rx="2" fill="#ccfbf1" stroke="#0f766e" />
+        <text x="14" y="17" textAnchor="middle" fontSize="8" fill="#0f766e">S</text>
+      </svg>
+    )
+  }
+  if (category === 'column') {
+    return (
+      <svg {...box}>
+        <rect x="10" y="4" width="8" height="20" fill="#d6d3d1" stroke="#57534e" />
+      </svg>
+    )
+  }
   if (category === 'door') {
     return (
-      <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+      <svg {...box}>
         <rect x="5" y="3" width="12" height="22" rx="1" fill="#f5f5f4" stroke="#44403c" />
         <path d="M17 25 A14 14 0 0 0 17 3" fill="none" stroke="#9a3412" strokeWidth="1.2" />
         <rect x="13.5" y="13" width="1.6" height="4.5" rx="0.4" fill="#292524" />
@@ -94,7 +161,7 @@ function TemplateThumb({ category }) {
   }
   if (category === 'evaporator') {
     return (
-      <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+      <svg {...box}>
         <rect x="2" y="8" width="24" height="12" rx="2" fill="#f8fafc" stroke="#334155" />
         <circle cx="9" cy="14" r="3.1" fill="#0f172a" />
         <circle cx="19" cy="14" r="3.1" fill="#0f172a" />
@@ -105,21 +172,24 @@ function TemplateThumb({ category }) {
   }
   if (category === 'condenser') {
     return (
-      <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+      <svg {...box}>
         <rect x="3" y="6" width="22" height="16" rx="2" fill="#e2e8f0" stroke="#475569" />
         <path d="M6 9 H22 M6 12 H22 M6 15 H22 M6 18 H22" stroke="#64748b" strokeWidth="1" />
+        <circle cx="14" cy="13" r="3" fill="#fff" stroke="#0f172a" />
+        <circle cx="7" cy="6" r="1.1" fill="#b45309" />
+        <circle cx="21" cy="6" r="1.1" fill="#b45309" />
       </svg>
     )
   }
   if (category === 'rack') {
     return (
-      <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+      <svg {...box}>
         <path d="M6 4 V24 M22 4 V24 M6 8 H22 M6 14 H22 M6 20 H22" stroke="#78716c" strokeWidth="1.4" />
       </svg>
     )
   }
   return (
-    <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+    <svg {...box}>
       <rect x="6" y="5" width="16" height="18" rx="1.5" fill="#e2e8f0" stroke="#334155" />
       <rect x="9" y="8" width="10" height="3" fill="#64748b" />
     </svg>
@@ -130,13 +200,23 @@ export default function DesignerApp({
   initialName = 'Uusi projekti',
   initialRooms = [],
   initialUnitSystem = 'SI',
+  initialPipes = [],
+  initialCables = [],
   onPersist,
   user = null,
   persistLabel = 'selaimeen',
 }) {
   const [name, setName] = useState(initialName || 'Uusi projekti')
   const [rooms, setRooms] = useState(() => normalizeRooms(initialRooms))
+  const [pipes, setPipes] = useState(initialPipes || [])
+  const [cables, setCables] = useState(initialCables || [])
   const [unitSystem, setUnitSystem] = useState(initialUnitSystem === 'IP' ? 'IP' : 'SI')
+  const [pipeKind, setPipeKind] = useState('suction')
+  const [refrigerant, setRefrigerant] = useState('R449A')
+  const [teC, setTeC] = useState(-8)
+  const [tcC, setTcC] = useState(40)
+  const [showAllSizes, setShowAllSizes] = useState(false)
+  const [menu, setMenu] = useState(null)
   const [tool, setTool] = useState('select')
   const [drawType, setDrawType] = useState('chilled')
   const [view, setView] = useState('2d')
@@ -151,12 +231,16 @@ export default function DesignerApp({
   const [roomsOpen, setRoomsOpen] = useState(true)
   const [templatesOpen, setTemplatesOpen] = useState(true)
   const roomsRef = useRef(rooms)
+  const pipesRef = useRef(pipes)
+  const cablesRef = useRef(cables)
   const selectedRef = useRef(selectedIds)
   const undoRef = useRef([])
   const redoRef = useRef([])
   const editSnap = useRef(null)
   const fileRef = useRef(null)
   roomsRef.current = rooms
+  pipesRef.current = pipes
+  cablesRef.current = cables
   selectedRef.current = selectedIds
   const selectedId = selectedIds[selectedIds.length - 1] || null
   const snapFlags = { grid: snapOn, endpoint: true, midpoint: true, wall: true, ortho: true }
@@ -170,25 +254,37 @@ export default function DesignerApp({
   const selectedEquipment = selectedRoom?.equipment?.find((eq) => eq.id === selectedId) || null
   const roomResult = selectedRoom ? resultFor(result, selectedRoom.id) : null
 
+  const snapshot = useCallback(() => ({
+    rooms: structuredClone(roomsRef.current),
+    pipes: structuredClone(pipesRef.current),
+    cables: structuredClone(cablesRef.current),
+  }), [])
+
+  const restore = useCallback((shot) => {
+    setRooms(shot.rooms)
+    setPipes(shot.pipes || [])
+    setCables(shot.cables || [])
+  }, [])
+
   const pushUndo = useCallback(() => {
-    undoRef.current.push(structuredClone(roomsRef.current))
+    undoRef.current.push(snapshot())
     if (undoRef.current.length > 80) undoRef.current.shift()
     redoRef.current = []
-  }, [])
+  }, [snapshot])
 
   const undo = useCallback(() => {
     const prev = undoRef.current.pop()
     if (!prev) return
-    redoRef.current.push(structuredClone(roomsRef.current))
-    setRooms(prev)
-  }, [])
+    redoRef.current.push(snapshot())
+    restore(prev)
+  }, [restore, snapshot])
 
   const redo = useCallback(() => {
     const next = redoRef.current.pop()
     if (!next) return
-    undoRef.current.push(structuredClone(roomsRef.current))
-    setRooms(next)
-  }, [])
+    undoRef.current.push(snapshot())
+    restore(next)
+  }, [restore, snapshot])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -213,7 +309,19 @@ export default function DesignerApp({
       else if (e.key.toLowerCase() === 'w') setTool('partition')
       else if (e.key.toLowerCase() === 'f') setFitToken((token) => token + 1)
       else if (e.key.toLowerCase() === 'g') setSnapOn((value) => !value)
-      else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+      else if (e.key.toLowerCase() === 'l') setTool('pipe')
+      else if (e.key.toLowerCase() === 'k') setTool('cable')
+      else if (e.key === ']' || e.key === '[') rotateSelected(e.key === ']' ? 90 : -90)
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        duplicateSelected()
+      } else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault()
+        nudgeElevation(e.key === 'ArrowUp' ? 0.1 : -0.1)
+      } else if ((e.ctrlKey || e.metaKey) && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+        e.preventDefault()
+        nudgeSize(e.key)
+      } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
         e.preventDefault()
         const step = snapOn ? gridSize : 0.1
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
@@ -246,7 +354,7 @@ export default function DesignerApp({
     setSaveState('saving')
     const timer = setTimeout(() => {
       try {
-        onPersist({ name, rooms, unitSystem })
+        onPersist({ name, rooms, unitSystem, pipes, cables })
         setSaveState('saved')
       } catch (err) {
         console.error(err)
@@ -254,16 +362,28 @@ export default function DesignerApp({
       }
     }, 500)
     return () => clearTimeout(timer)
-  }, [name, rooms, unitSystem, onPersist])
+  }, [name, rooms, unitSystem, pipes, cables, onPersist])
 
   function deleteSelected() {
     const ids = selectedRef.current
     if (!ids.length) return
     const current = roomsRef.current
     const roomIds = new Set(current.map((room) => room.id))
-    const equipmentIds = ids.filter((id) => !roomIds.has(id))
+    const pipeIds = new Set(pipesRef.current.map((pipe) => pipe.id))
+    const cableIds = new Set(cablesRef.current.map((cable) => cable.id))
     pushUndo()
-    if (equipmentIds.length && equipmentIds.length === ids.length) {
+    if (ids.some((id) => pipeIds.has(id) || cableIds.has(id))) {
+      setPipes(pipesRef.current.filter((pipe) => !ids.includes(pipe.id)))
+      setCables(cablesRef.current.filter((cable) => !ids.includes(cable.id)))
+      const rest = ids.filter((id) => !pipeIds.has(id) && !cableIds.has(id))
+      if (!rest.length) {
+        setSelectedIds([])
+        setMenu(null)
+        return
+      }
+    }
+    const equipmentIds = ids.filter((id) => !roomIds.has(id) && !pipeIds.has(id) && !cableIds.has(id))
+    if (equipmentIds.length && equipmentIds.length === ids.filter((id) => !pipeIds.has(id) && !cableIds.has(id)).length) {
       setRooms(current.map((room) => ({
         ...room,
         equipment: (room.equipment || []).filter((eq) => !equipmentIds.includes(eq.id)),
@@ -296,7 +416,7 @@ export default function DesignerApp({
     }
     const current = roomsRef.current
     let parent = null
-    if (tool === 'partition') {
+    if (tool === 'partition' && isRefrigerated(drawType)) {
       parent = findContainer(current, rect)
       if (!parent) {
         setNotice('Väliseinä piirretään olemassa olevan huoneen sisään.')
@@ -358,14 +478,51 @@ export default function DesignerApp({
     const current = roomsRef.current
     const room = current.find((item) => item.id === roomId)
     if (!room) return
-    const eq = makeEquipment(placingId, room, x, z)
+    const eq = makeEquipment(placingId, room, x, z, current)
+    const warning = eq.warning
+    delete eq.warning
     pushUndo()
     setRooms(current.map((item) => (
       item.id === roomId ? { ...item, equipment: [...item.equipment, eq] } : item
     )))
     setSelectedIds([eq.id])
     setPlacingId(null)
-    setNotice(`${eq.name} sijoitettiin huoneeseen ${room.label}.`)
+    setNotice(warning || `${eq.name} sijoitettiin huoneeseen ${room.label}.`)
+  }
+
+  function onCreateRoute(points) {
+    if (!points || points.length < 2) return
+    const clean = points.filter((point, index) => index === 0 || Math.hypot(point.x - points[index - 1].x, point.z - points[index - 1].z) > 0.05)
+    if (clean.length < 2) return
+    pushUndo()
+    if (tool === 'cable') {
+      const cable = { id: genId(), points: clean }
+      setCables([...cablesRef.current, cable])
+      setSelectedIds([cable.id])
+      setNotice('Kaapeli lisättiin.')
+      return
+    }
+    const room = [...roomsRef.current].filter((item) => {
+      const hw = item.width / 2
+      const hd = item.depth / 2
+      return Math.abs(clean[0].x - item.x) <= hw && Math.abs(clean[0].z - item.z) <= hd
+    }).sort((a, b) => a.width * a.depth - b.width * b.depth)[0]
+    const pipe = {
+      id: genId(),
+      kind: pipeKind,
+      points: clean,
+      refrigerant,
+      teC,
+      tcC,
+      riseM: pipeKind === 'suction' ? 3 : 0,
+      roomTempC: room?.temp ?? 2,
+    }
+    setPipes([...pipesRef.current, pipe])
+    setSelectedIds([pipe.id])
+    setTool('select')
+    setNotice(pipe.kind === 'drain' && pipe.roomTempC < 0
+      ? 'Kondenssivesiputki lisättiin. Pakastetilassa se merkitään eristetyksi ja lämmityskaapelilla.'
+      : 'Putki lisättiin. Koko lasketaan kuormasta, kylmäaineesta ja pituudesta.')
   }
 
   function patchSelected(patch) {
@@ -383,21 +540,160 @@ export default function DesignerApp({
   function loadExample() {
     if (rooms.length && !window.confirm('Korvataanko nykyinen pohja esimerkillä 8 × 12 × 6 m?')) return
     pushUndo()
-    const sample = buildEnquiryExample()
-    setRooms(sample)
-    setSelectedIds([sample[0].id])
+    const scene = decorateExample(buildEnquiryExample())
+    setRooms(normalizeRooms(scene.rooms))
+    setPipes(scene.pipes)
+    setCables(scene.cables)
+    setSelectedIds([scene.rooms[0].id])
     setView('2d')
     setFitToken((token) => token + 1)
-    setNotice('Esimerkki: jäähdytys 12 × 8 × 6 m ja pakastekulma. Kuorma on oikealla.')
+    setNotice('Esimerkki: kylmähuoneet, varasto, konehuone ja putket. Kuorma on oikealla.')
+  }
+
+  function patchEquipment(id, patch) {
+    setRooms((current) => current.map((room) => ({
+      ...room,
+      equipment: (room.equipment || []).map((eq) => (eq.id === id ? { ...eq, ...patch } : eq)),
+    })))
+  }
+
+  function selectedTarget() {
+    const id = selectedRef.current[selectedRef.current.length - 1]
+    if (!id) return null
+    const room = roomsRef.current.find((item) => item.id === id)
+    if (room) return { kind: 'room', room }
+    for (const host of roomsRef.current) {
+      const eq = (host.equipment || []).find((item) => item.id === id)
+      if (eq) return { kind: 'equipment', room: host, eq }
+    }
+    const pipe = pipesRef.current.find((item) => item.id === id)
+    if (pipe) return { kind: 'pipe', pipe }
+    const cable = cablesRef.current.find((item) => item.id === id)
+    if (cable) return { kind: 'cable', cable }
+    return null
+  }
+
+  function rotateSelected(delta) {
+    const target = selectedTarget()
+    if (!target) return
+    pushUndo()
+    if (target.kind === 'equipment') {
+      if (target.eq.category === 'door') {
+        const wall = rotateDoorWall(target.eq.wall, delta)
+        patchEquipment(target.eq.id, doorOnWall(target.room, target.eq, wall))
+        return
+      }
+      patchEquipment(target.eq.id, { rotation: ((target.eq.rotation || 0) + delta + 360) % 360 })
+      return
+    }
+    if (target.kind === 'room') {
+      const quarter = delta >= 0 ? 90 : -90
+      setRooms((current) => current.map((room) => {
+        if (room.id !== target.room.id) return room
+        const turned = quarter === 90 || quarter === -90
+        return {
+          ...room,
+          width: turned ? room.depth : room.width,
+          depth: turned ? room.width : room.depth,
+          outline: room.outline ? room.outline.map((point) => {
+            const dx = point.x - room.x
+            const dz = point.z - room.z
+            const t = (quarter * Math.PI) / 180
+            const c = Math.cos(t)
+            const s = Math.sin(t)
+            return { x: room.x + dx * c - dz * s, z: room.z + dx * s + dz * c }
+          }) : room.outline,
+          equipment: (room.equipment || []).map((eq) => {
+            const t = (quarter * Math.PI) / 180
+            const c = Math.cos(t)
+            const s = Math.sin(t)
+            return {
+              ...eq,
+              x: eq.x * c - eq.z * s,
+              z: eq.x * s + eq.z * c,
+              rotation: ((eq.rotation || 0) + quarter + 360) % 360,
+            }
+          }),
+        }
+      }))
+    }
+  }
+
+  function nudgeElevation(delta) {
+    const target = selectedTarget()
+    if (!target) return
+    pushUndo()
+    if (target.kind === 'equipment') {
+      const current = Number.isFinite(target.eq.elevation) ? target.eq.elevation : defaultElevation(target.room, target.eq)
+      patchEquipment(target.eq.id, { elevation: Math.max(0, current + delta), mount: target.eq.mount || 'wall' })
+    } else if (target.kind === 'room') {
+      setRooms((current) => current.map((room) => (room.id === target.room.id ? { ...room, height: Math.max(0.4, room.height + delta) } : room)))
+    }
+  }
+
+  function nudgeSize(key) {
+    const target = selectedTarget()
+    if (target?.kind !== 'equipment') return
+    const step = 0.1
+    const patch = {}
+    if (key === 'ArrowRight') patch.width = Math.max(0.1, target.eq.width + step)
+    if (key === 'ArrowLeft') patch.width = Math.max(0.1, target.eq.width - step)
+    if (key === 'ArrowDown') patch.depth = Math.max(0.1, target.eq.depth + step)
+    if (key === 'ArrowUp') patch.depth = Math.max(0.1, target.eq.depth - step)
+    if (target.eq.mount === 'ceiling' || target.eq.category === 'evaporator') {
+      const height = patch.height || target.eq.height
+      patch.elevation = Math.max(0, (target.room.height - (target.room.ceilingThickness || target.room.wallThickness || 0.1)) - height)
+    }
+    pushUndo()
+    patchEquipment(target.eq.id, patch)
+  }
+
+  function duplicateSelected() {
+    const target = selectedTarget()
+    if (!target) return
+    pushUndo()
+    if (target.kind === 'equipment') {
+      const copy = { ...target.eq, id: genId(), x: target.eq.x + 0.45, z: target.eq.z + 0.45 }
+      setRooms((current) => current.map((room) => (
+        room.id === target.room.id ? { ...room, equipment: [...room.equipment, copy] } : room
+      )))
+      setSelectedIds([copy.id])
+      return
+    }
+    if (target.kind === 'pipe') {
+      const copy = { ...target.pipe, id: genId(), points: target.pipe.points.map((point) => ({ x: point.x + 0.4, z: point.z + 0.4 })) }
+      setPipes([...pipesRef.current, copy])
+      setSelectedIds([copy.id])
+      return
+    }
+    if (target.kind === 'cable') {
+      const copy = { ...target.cable, id: genId(), points: target.cable.points.map((point) => ({ x: point.x + 0.3, z: point.z + 0.3 })) }
+      setCables([...cablesRef.current, copy])
+      setSelectedIds([copy.id])
+      return
+    }
+    if (target.kind === 'room') {
+      const copy = {
+        ...structuredClone(target.room),
+        id: genId(),
+        label: '',
+        x: target.room.x + 1,
+        z: target.room.z + 1,
+        equipment: (target.room.equipment || []).map((eq) => ({ ...eq, id: genId() })),
+      }
+      const normalized = normalizeRooms([...roomsRef.current, copy])
+      setRooms(normalized)
+      setSelectedIds([normalized[normalized.length - 1].id])
+    }
   }
 
   function exportPdf() {
-    const doc = buildPdf({ projectName: name, userEmail: user?.email || '', rooms, unitSystem })
+    const doc = buildPdf({ projectName: name, userEmail: user?.email || '', rooms, unitSystem, pipes, cables })
     doc.save(pdfFilename(name))
   }
 
   function exportDxf() {
-    const text = buildDxf({ projectName: name, rooms })
+    const text = buildDxf({ projectName: name, rooms, pipes, cables })
     const bytes = new Uint8Array(text.length)
     for (let i = 0; i < text.length; i += 1) {
       const code = text.charCodeAt(i)
@@ -412,7 +708,7 @@ export default function DesignerApp({
   }
 
   function exportJson() {
-    const blob = new Blob([JSON.stringify({ projectName: name, rooms, unitSystem }, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify({ projectName: name, rooms, unitSystem, pipes, cables }, null, 2)], { type: 'application/json' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
     link.download = `${(name || 'refcad').replace(/\s+/g, '_')}.json`
@@ -432,6 +728,8 @@ export default function DesignerApp({
         pushUndo()
         setName(data.projectName || data.name || name)
         setRooms(normalizeRooms(data.rooms))
+        setPipes(Array.isArray(data.pipes) ? data.pipes : [])
+        setCables(Array.isArray(data.cables) ? data.cables : [])
         if (data.unitSystem === 'IP' || data.unitSystem === 'SI') setUnitSystem(data.unitSystem)
         setNotice('Tuotu JSON-tiedosto.')
       } catch {
@@ -455,10 +753,31 @@ export default function DesignerApp({
     onSelect: setSelectedIds,
     onPreview: setRooms,
     onGestureStart: pushUndo,
-    onGestureEnd: () => {},
+    onGestureEnd: () => {
+      setRooms((current) => current.map((room) => ({
+        ...room,
+        equipment: (room.equipment || []).map((eq) => {
+          if (!isOutdoorCategory(eq.category)) return eq
+          const wx = room.x + eq.x
+          const wz = room.z + eq.z
+          if (!insideRefrigerated(current, wx, wz)) return eq
+          const snapped = snapOutdoorUnit(current, eq, wx, wz, { mount: eq.mount || 'wall' })
+          setNotice(snapped.warning || 'Ulkoyksikkö siirrettiin kylmähuoneen ulkopuolelle.')
+          return { ...eq, x: snapped.x - room.x, z: snapped.z - room.z, rotation: snapped.rotation, mount: eq.mount || snapped.mount }
+        }),
+      })))
+    },
     onCreateRect,
     onCreatePolygon,
+    onCreateRoute,
     onPlace,
+    onContextMenu: (hit) => {
+      setSelectedIds([hit.id])
+      setMenu(hit)
+    },
+    pipes,
+    cables,
+    pipeKind,
     notice,
   }
 
@@ -495,6 +814,12 @@ export default function DesignerApp({
           </button>
           <button type="button" data-testid="tool-partition" title="Väliseinä (W)" style={iconBtn(tool === 'partition')} onClick={() => { setTool('partition'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3 3.2 H13 V12.8 H8.2 V3.2" /></Icon>
+          </button>
+          <button type="button" data-testid="tool-pipe" title="Putki (L)" style={iconBtn(tool === 'pipe')} onClick={() => { setTool('pipe'); setPlacingId(null) }}>
+            <Icon><path {...stroke} d="M3 12.2 H7 V4.2 H13" /></Icon>
+          </button>
+          <button type="button" data-testid="tool-cable" title="Kaapeli (K)" style={iconBtn(tool === 'cable')} onClick={() => { setTool('cable'); setPlacingId(null) }}>
+            <Icon><path {...stroke} d="M3 4.2 H6.2 V8 H9.8 V4.2 H13 V12.2" /></Icon>
           </button>
         </div>
         <select aria-label="Huonetyyppi" value={drawType} onChange={(e) => setDrawType(e.target.value)} style={{ background: '#1c212b', color: '#f5f5f4', border: '1px solid transparent', borderRadius: 8, height: 32, padding: '0 8px', fontSize: 12, maxWidth: 132, flexShrink: 1 }}>
@@ -612,11 +937,23 @@ export default function DesignerApp({
           </button>
           {templatesOpen && (
             <div style={{ padding: '2px 8px 10px' }}>
-              <div style={{ fontSize: 11, color: '#78716c', margin: '2px 4px 8px', lineHeight: 1.4 }}>Valitse malli ja klikkaa huonetta.</div>
-              {TEMPLATE_GROUPS.map((group) => (
+              <div style={{ fontSize: 11, color: '#78716c', margin: '2px 4px 8px', lineHeight: 1.4 }}>Valitse malli ja klikkaa huonetta. Lauhdutin ja koneikko asettuvat ulkoseinälle.</div>
+              {roomResult && (
+                <div data-testid="capacity-banner" style={{ margin: '0 4px 8px', padding: '8px 8px', borderRadius: 8, background: '#f0fdfa', border: '1px solid #99f6e4', fontSize: 11, color: '#115e59', lineHeight: 1.4 }}>
+                  <strong>Tarve {roomResult.total / 1000 < 10 ? (roomResult.total / 1000).toFixed(2) : (roomResult.total / 1000).toFixed(1)} kW</strong>
+                  <div>Näytetään koot, jotka kattavat kuorman. Lauhdutin mitoitetaan lämmönluovutukselle (noin 1,25 ×).</div>
+                  <button type="button" data-testid="show-all-sizes" onClick={() => setShowAllSizes((value) => !value)} style={{ marginTop: 6, border: 'none', background: 'transparent', color: '#0f766e', fontWeight: 700, cursor: 'pointer', padding: 0, transform: 'none' }}>
+                    {showAllSizes ? 'Näytä vain sopivat koot' : 'Näytä kaikki koot'}
+                  </button>
+                </div>
+              )}
+              {TEMPLATE_GROUPS.map((group) => {
+                const items = templatesForGroup(group.id, roomResult ? roomResult.total / 1000 : null, { showAll: showAllSizes || !roomResult })
+                if (!items.length) return null
+                return (
                 <div key={group.id} style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 10, color: '#a8a29e', margin: '2px 4px 4px', fontWeight: 700, letterSpacing: 0.4 }}>{group.label}</div>
-                  {TEMPLATES.filter((item) => item.category === group.id).map((item) => (
+                  {items.map((item) => (
                     <button
                       key={item.id}
                       type="button"
@@ -630,7 +967,7 @@ export default function DesignerApp({
                         background: placingId === item.id ? '#f0fdfa' : '#fff',
                       }}
                     >
-                      <TemplateThumb category={item.category} />
+                      <TemplateThumb item={item} />
                       <span style={{ minWidth: 0 }}>
                         <span style={{ display: 'block', fontWeight: 600 }}>{item.name}</span>
                         {item.capacityKw ? <span style={{ fontSize: 10, color: '#78716c' }}>{item.capacityKw} kW</span> : null}
@@ -638,7 +975,7 @@ export default function DesignerApp({
                     </button>
                   ))}
                 </div>
-              ))}
+              )})}
             </div>
           )}
           <div style={{ padding: '0 8px 12px' }}>
@@ -657,13 +994,37 @@ export default function DesignerApp({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%' }}>
               <PlanView {...planProps} />
               <div style={{ borderLeft: '1px solid #d6d3d1' }}>
-                <Scene3D rooms={rooms} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} unitSystem={unitSystem} />
+                <Scene3D rooms={rooms} pipes={pipes} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} unitSystem={unitSystem} />
               </div>
             </div>
           ) : view === '3d' ? (
-            <Scene3D rooms={rooms} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} unitSystem={unitSystem} />
+            <Scene3D rooms={rooms} pipes={pipes} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} unitSystem={unitSystem} />
           ) : (
             <PlanView {...planProps} />
+          )}
+          {(tool === 'pipe' || tool === 'cable') && view !== '3d' && (
+            <div data-testid="pipe-settings" style={{ position: 'absolute', top: 12, right: 12, zIndex: 4, display: 'flex', gap: 6, alignItems: 'center', background: 'rgba(255,255,255,0.96)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '6px 8px' }}>
+              {tool === 'pipe' && (
+                <select aria-label="Putkityyppi" value={pipeKind} onChange={(e) => setPipeKind(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
+                  <option value="suction">Imuputki</option>
+                  <option value="liquid">Nesteputki</option>
+                  <option value="drain">Kondenssivesi</option>
+                </select>
+              )}
+              {tool === 'pipe' && pipeKind !== 'drain' && (
+                <>
+                  <select aria-label="Kylmäaine" value={refrigerant} onChange={(e) => setRefrigerant(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
+                    {REFRIGERANT_IDS.map((id) => <option key={id} value={id}>{id === 'R744' ? 'R744 / CO2' : id}</option>)}
+                  </select>
+                  <label style={{ fontSize: 11, color: '#44403c' }}>Te
+                    <input aria-label="Höyrystymislämpötila" type="number" value={teC} onChange={(e) => setTeC(parseFloat(e.target.value) || 0)} style={{ width: 52, marginLeft: 4, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
+                  </label>
+                  <label style={{ fontSize: 11, color: '#44403c' }}>Tc
+                    <input aria-label="Lauhtumislämpötila" type="number" value={tcC} onChange={(e) => setTcC(parseFloat(e.target.value) || 0)} style={{ width: 52, marginLeft: 4, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
+                  </label>
+                </>
+              )}
+            </div>
           )}
           {rooms.length === 0 && view !== '3d' && (
             <div style={{
@@ -683,7 +1044,7 @@ export default function DesignerApp({
             roomResult={roomResult}
             unitSystem={unitSystem}
             onPatch={patchSelected}
-            onFocusEdit={() => { editSnap.current = structuredClone(roomsRef.current) }}
+            onFocusEdit={() => { editSnap.current = snapshot() }}
             onBlurEdit={() => {
               if (editSnap.current) {
                 undoRef.current.push(editSnap.current)
@@ -691,10 +1052,133 @@ export default function DesignerApp({
               }
             }}
             selectedEquipment={selectedEquipment}
+            selectedPipe={pipes.find((pipe) => pipe.id === selectedId) || null}
+            pipes={pipes}
+            onPatchEquipment={(patch) => {
+              if (!selectedEquipment) return
+              patchEquipment(selectedEquipment.id, patch)
+            }}
+            onPatchPipe={(patch) => {
+              if (!selectedId) return
+              setPipes((current) => current.map((pipe) => (pipe.id === selectedId ? { ...pipe, ...patch } : pipe)))
+            }}
             onDeleteEquipment={deleteSelected}
           />
         </aside>
       </div>
+      {menu && (
+        <ContextMenu
+          menu={menu}
+          rooms={rooms}
+          pipes={pipes}
+          onClose={() => setMenu(null)}
+          onRotate={(delta) => { rotateSelected(delta); }}
+          onAngle={(angle) => {
+            const target = selectedTarget()
+            if (target?.kind === 'equipment' && target.eq.category !== 'door') {
+              pushUndo()
+              patchEquipment(target.eq.id, { rotation: ((angle % 360) + 360) % 360 })
+            } else rotateSelected(90)
+          }}
+          onResize={(patch) => {
+            const target = selectedTarget()
+            if (!target) return
+            pushUndo()
+            if (target.kind === 'equipment') patchEquipment(target.eq.id, patch)
+            if (target.kind === 'room') patchSelected(patch)
+          }}
+          onElevation={(elevation, mount) => {
+            const target = selectedTarget()
+            if (target?.kind !== 'equipment') return
+            pushUndo()
+            const next = { elevation, mount: mount || target.eq.mount }
+            if (mount === 'ceiling') next.elevation = defaultElevation(target.room, { ...target.eq, mount: 'ceiling' })
+            if (mount === 'floor') next.elevation = 0
+            if (mount === 'roof') next.elevation = target.room.height
+            patchEquipment(target.eq.id, next)
+          }}
+          onDuplicate={() => { duplicateSelected(); setMenu(null) }}
+          onDelete={() => { deleteSelected(); setMenu(null) }}
+        />
+      )}
     </div>
   )
 }
+
+function ContextMenu({ menu, rooms, pipes, onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete }) {
+  const host = rooms.find((room) => room.id === menu.id) || rooms.find((room) => (room.equipment || []).some((eq) => eq.id === menu.id))
+  const eq = host?.equipment?.find((item) => item.id === menu.id) || null
+  const pipe = pipes.find((item) => item.id === menu.id) || null
+  const [angle, setAngle] = useState(eq?.rotation || 0)
+  const [width, setWidth] = useState(eq?.width || host?.width || 1)
+  const [depth, setDepth] = useState(eq?.depth || host?.depth || 1)
+  const [height, setHeight] = useState(eq?.height || host?.height || 1)
+  const [elevation, setElevation] = useState(eq ? (Number.isFinite(eq.elevation) ? eq.elevation : defaultElevation(host, eq)) : 0)
+  const [mount, setMount] = useState(eq?.mount || 'floor')
+  const left = Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 280)
+  const top = Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 420)
+  return (
+    <div data-testid="context-menu" style={{ position: 'fixed', left, top, zIndex: 40, width: 260, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }} onMouseDown={(event) => event.stopPropagation()}>
+      <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{eq?.name || pipe?.kind || host?.name || 'Kohde'}</div>
+      {menu.kind !== 'pipe' && menu.kind !== 'cable' && (
+        <>
+          <MenuBtn testid="ctx-rotate-cw" onClick={() => onRotate(90)}>Käännä 90° myötäpäivään  ]</MenuBtn>
+          <MenuBtn testid="ctx-rotate-ccw" onClick={() => onRotate(-90)}>Käännä 90° vastapäivään  [</MenuBtn>
+          {eq && eq.category !== 'door' && (
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, padding: '4px 6px' }}>
+              Kulma
+              <input data-testid="ctx-angle" type="number" value={angle} onChange={(e) => setAngle(parseFloat(e.target.value) || 0)} style={{ width: 72 }} />
+              <button type="button" onClick={() => onAngle(angle)} style={mini}>Aseta</button>
+            </label>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4, padding: '4px 6px' }}>
+            <Tiny label="Lev" value={width} onChange={setWidth} />
+            <Tiny label="Syv" value={depth} onChange={setDepth} />
+            <Tiny label="Kork" value={height} onChange={setHeight} />
+          </div>
+          <MenuBtn testid="ctx-resize" onClick={() => onResize(eq ? { width, depth, height } : { width, depth, height })}>Aseta koko  Ctrl+nuolet</MenuBtn>
+          {eq && (
+            <>
+              <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>
+                Kiinnitys
+                <select data-testid="ctx-mount" value={mount} onChange={(e) => setMount(e.target.value)} style={{ marginLeft: 6 }}>
+                  <option value="floor">Lattia</option>
+                  <option value="wall">Seinä</option>
+                  <option value="ceiling">Katto</option>
+                  <option value="roof">Vesikatto</option>
+                </select>
+              </label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, padding: '4px 6px' }}>
+                Korkeusasema m
+                <input data-testid="ctx-elevation" type="number" step="0.05" value={elevation} onChange={(e) => setElevation(parseFloat(e.target.value) || 0)} style={{ width: 72 }} />
+              </label>
+              <MenuBtn testid="ctx-apply-elevation" onClick={() => onElevation(elevation, mount)}>Aseta korkeus  Alt+↑↓</MenuBtn>
+            </>
+          )}
+        </>
+      )}
+      <MenuBtn testid="ctx-duplicate" onClick={onDuplicate}>Kopioi  Ctrl+D</MenuBtn>
+      <MenuBtn testid="ctx-delete" onClick={onDelete}>Poista  Del</MenuBtn>
+      <MenuBtn onClick={onClose}>Sulje</MenuBtn>
+    </div>
+  )
+}
+
+function MenuBtn({ children, onClick, testid }) {
+  return (
+    <button type="button" data-testid={testid} onClick={onClick} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 8px', border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', fontSize: 12, color: '#1c1917', transform: 'none' }}>
+      {children}
+    </button>
+  )
+}
+
+function Tiny({ label, value, onChange }) {
+  return (
+    <label style={{ fontSize: 10, color: '#78716c' }}>
+      {label}
+      <input type="number" step="0.05" value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(parseFloat(e.target.value) || 0)} style={{ width: '100%', marginTop: 2 }} />
+    </label>
+  )
+}
+
+const mini = { border: '1px solid #d6d3d1', background: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 11, transform: 'none' }
