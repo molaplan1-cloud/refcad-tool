@@ -21,25 +21,107 @@ import { buildPdf, pdfFilename } from '@/lib/pdfExport'
 
 const Scene3D = dynamic(() => import('./Scene3D'), { ssr: false })
 
-const toolBtn = (active) => ({
+const iconBtn = (active) => ({
+  width: 32,
+  height: 32,
+  padding: 0,
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '6px 9px',
+  justifyContent: 'center',
   borderRadius: 8,
-  border: active ? '1px solid #5eead4' : '1px solid transparent',
+  border: '1px solid transparent',
   background: active ? '#134e4a' : 'transparent',
-  color: active ? '#f0fdfa' : '#e7e5e4',
-  fontSize: 12,
-  fontWeight: 600,
+  color: active ? '#ccfbf1' : '#e7e5e4',
   cursor: 'pointer',
+  flexShrink: 0,
   transform: 'none',
 })
 
-function ToolIcon({ d }) {
+const textBtn = (active) => ({
+  height: 32,
+  padding: '0 10px',
+  display: 'inline-flex',
+  alignItems: 'center',
+  borderRadius: 8,
+  border: '1px solid transparent',
+  background: active ? '#134e4a' : 'transparent',
+  color: active ? '#ccfbf1' : '#e7e5e4',
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: 'pointer',
+  flexShrink: 0,
+  transform: 'none',
+  whiteSpace: 'nowrap',
+})
+
+function Icon({ children }) {
   return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d={d} stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      {children}
+    </svg>
+  )
+}
+
+const stroke = { stroke: 'currentColor', strokeWidth: 1.45, strokeLinecap: 'round', strokeLinejoin: 'round' }
+
+const sectionHead = {
+  width: '100%',
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  padding: '10px 12px',
+  background: 'transparent',
+  border: 'none',
+  color: '#44403c',
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: 0.6,
+  textTransform: 'uppercase',
+  cursor: 'pointer',
+  transform: 'none',
+}
+
+function TemplateThumb({ category }) {
+  const box = { width: 28, height: 28, flexShrink: 0, display: 'block' }
+  if (category === 'door') {
+    return (
+      <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+        <rect x="5" y="3" width="12" height="22" rx="1" fill="#f5f5f4" stroke="#44403c" />
+        <path d="M17 25 A14 14 0 0 0 17 3" fill="none" stroke="#9a3412" strokeWidth="1.2" />
+        <rect x="13.5" y="13" width="1.6" height="4.5" rx="0.4" fill="#292524" />
+      </svg>
+    )
+  }
+  if (category === 'evaporator') {
+    return (
+      <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+        <rect x="2" y="8" width="24" height="12" rx="2" fill="#f8fafc" stroke="#334155" />
+        <circle cx="9" cy="14" r="3.1" fill="#0f172a" />
+        <circle cx="19" cy="14" r="3.1" fill="#0f172a" />
+        <circle cx="9" cy="14" r="1" fill="#e2e8f0" />
+        <circle cx="19" cy="14" r="1" fill="#e2e8f0" />
+      </svg>
+    )
+  }
+  if (category === 'condenser') {
+    return (
+      <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+        <rect x="3" y="6" width="22" height="16" rx="2" fill="#e2e8f0" stroke="#475569" />
+        <path d="M6 9 H22 M6 12 H22 M6 15 H22 M6 18 H22" stroke="#64748b" strokeWidth="1" />
+      </svg>
+    )
+  }
+  if (category === 'rack') {
+    return (
+      <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+        <path d="M6 4 V24 M22 4 V24 M6 8 H22 M6 14 H22 M6 20 H22" stroke="#78716c" strokeWidth="1.4" />
+      </svg>
+    )
+  }
+  return (
+    <svg {...box} viewBox="0 0 28 28" aria-hidden="true">
+      <rect x="6" y="5" width="16" height="18" rx="1.5" fill="#e2e8f0" stroke="#334155" />
+      <rect x="9" y="8" width="10" height="3" fill="#64748b" />
     </svg>
   )
 }
@@ -65,6 +147,9 @@ export default function DesignerApp({
   const [gridSize, setGridSize] = useState(0.1)
   const [fitToken, setFitToken] = useState(1)
   const [saveState, setSaveState] = useState('saved')
+  const [exportOpen, setExportOpen] = useState(false)
+  const [roomsOpen, setRoomsOpen] = useState(true)
+  const [templatesOpen, setTemplatesOpen] = useState(true)
   const roomsRef = useRef(rooms)
   const selectedRef = useRef(selectedIds)
   const undoRef = useRef([])
@@ -144,6 +229,13 @@ export default function DesignerApp({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
+
+  useEffect(() => {
+    if (!exportOpen) return undefined
+    const close = () => setExportOpen(false)
+    window.addEventListener('mousedown', close)
+    return () => window.removeEventListener('mousedown', close)
+  }, [exportOpen])
 
   useEffect(() => {
     if (!onPersist) return undefined
@@ -290,7 +382,7 @@ export default function DesignerApp({
     const sample = buildEnquiryExample()
     setRooms(sample)
     setSelectedIds([sample[0].id])
-    setView('split')
+    setView('2d')
     setFitToken((token) => token + 1)
     setNotice('Esimerkki: jäähdytys 12 × 8 × 6 m ja pakastekulma. Kuorma on oikealla.')
   }
@@ -369,115 +461,191 @@ export default function DesignerApp({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
       <header style={{
-        display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
-        padding: '8px 12px', background: '#14181f', borderBottom: '1px solid #0c0f14', color: '#f5f5f4',
+        display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 8,
+        height: 48, padding: '0 10px', overflow: 'hidden',
+        background: '#14181f', borderBottom: '1px solid #0c0f14', color: '#f5f5f4',
       }}>
-        <Link href="/projects" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, letterSpacing: 0.2 }}>RefCAD</Link>
+        <Link href="/projects" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, letterSpacing: -0.2, flexShrink: 0 }}>RefCAD</Link>
         <input
           aria-label="Projektin nimi"
           value={name}
           onChange={(e) => setName(e.target.value)}
           style={{
-            background: 'transparent', border: '1px solid transparent', color: '#fff',
-            fontWeight: 700, fontSize: 14, minWidth: 140, padding: '4px 6px', borderRadius: 6,
+            background: 'transparent', border: 'none', color: '#fff',
+            fontWeight: 650, fontSize: 13, width: 148, minWidth: 72, flex: '0 1 160px',
+            padding: '4px 2px',
           }}
         />
-        <span style={{ fontSize: 10, color: saveState === 'error' ? '#fca5a5' : '#86efac' }}>{saveText}</span>
-        <span style={{ width: 1, height: 22, background: '#3f3f46' }} />
-        <button type="button" data-testid="tool-select" title="Valitse (V)" style={toolBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
-          <ToolIcon d="M4 2.5 L4 13 L7.2 9.6 L10.5 14 L12 13.2 L8.6 8.8 L13 8.2 Z" /> Valitse
-        </button>
-        <button type="button" data-testid="tool-draw" title="Suorakulmio (R)" style={toolBtn(tool === 'draw')} onClick={() => { setTool('draw'); setPlacingId(null) }}>
-          <ToolIcon d="M3 4 H13 V12 H3 Z" /> Huone
-        </button>
-        <button type="button" data-testid="tool-polygon" title="Monikulmio (P)" style={toolBtn(tool === 'polygon')} onClick={() => { setTool('polygon'); setPlacingId(null) }}>
-          <ToolIcon d="M3 11 L6 3 L13 5 L11 13 Z" /> Monikulmio
-        </button>
-        <button type="button" data-testid="tool-partition" title="Väliseinä (W)" style={toolBtn(tool === 'partition')} onClick={() => { setTool('partition'); setPlacingId(null) }}>
-          <ToolIcon d="M3 3 H13 V13 H8 V3" /> Väliseinä
-        </button>
-        <select value={drawType} onChange={(e) => setDrawType(e.target.value)} style={{ background: '#1c1917', color: '#fff', border: '1px solid #44403c', borderRadius: 8, padding: '6px 8px', fontSize: 12 }}>
+        <span title={saveText} style={{ fontSize: 11, color: saveState === 'error' ? '#fca5a5' : '#86efac', flexShrink: 0, whiteSpace: 'nowrap' }}>
+          {saveState === 'error' ? 'Virhe' : saveState === 'saving' ? 'Tallentaa' : 'Tallennettu'}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
+          <button type="button" data-testid="tool-select" title="Valitse (V)" style={iconBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
+            <Icon><path {...stroke} d="M4 2.4 L4 13.2 L7.1 9.8 L10.4 14 L11.8 13.2 L8.5 9 L12.8 8.4 Z" /></Icon>
+          </button>
+          <button type="button" data-testid="tool-draw" title="Huone, suorakulmio (R)" style={iconBtn(tool === 'draw')} onClick={() => { setTool('draw'); setPlacingId(null) }}>
+            <Icon><path {...stroke} d="M3.2 3.6 H12.8 V12.4 H3.2 Z" /></Icon>
+          </button>
+          <button type="button" data-testid="tool-polygon" title="Monikulmio (P)" style={iconBtn(tool === 'polygon')} onClick={() => { setTool('polygon'); setPlacingId(null) }}>
+            <Icon><path {...stroke} d="M3.2 11.2 L6.2 3 L13 5.2 L11 13 Z" /></Icon>
+          </button>
+          <button type="button" data-testid="tool-partition" title="Väliseinä (W)" style={iconBtn(tool === 'partition')} onClick={() => { setTool('partition'); setPlacingId(null) }}>
+            <Icon><path {...stroke} d="M3 3.2 H13 V12.8 H8.2 V3.2" /></Icon>
+          </button>
+        </div>
+        <select aria-label="Huonetyyppi" value={drawType} onChange={(e) => setDrawType(e.target.value)} style={{ background: '#1c212b', color: '#f5f5f4', border: '1px solid transparent', borderRadius: 8, height: 32, padding: '0 8px', fontSize: 12, maxWidth: 132, flexShrink: 1 }}>
           {ROOM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
         </select>
-        <span style={{ width: 1, height: 22, background: '#3f3f46' }} />
-        <button type="button" style={toolBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
-        <button type="button" data-testid="view-3d" style={toolBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
-        <button type="button" data-testid="view-split" style={toolBtn(view === 'split')} onClick={() => setView('split')}>2D + 3D</button>
-        <button type="button" data-testid="unit-si" style={toolBtn(unitSystem === 'SI')} onClick={() => setUnitSystem('SI')}>SI</button>
-        <button type="button" data-testid="unit-ip" style={toolBtn(unitSystem === 'IP')} onClick={() => setUnitSystem('IP')}>IP</button>
-        <button type="button" title="Kumoa (Ctrl+Z)" onClick={undo} style={toolBtn(false)}>Kumoa</button>
-        <button type="button" title="Tee uudelleen (Ctrl+Y)" onClick={redo} style={toolBtn(false)}>Uudelleen</button>
-        <button type="button" title="Sovita näkymä (F)" onClick={() => setFitToken((token) => token + 1)} style={toolBtn(false)}>Sovita</button>
-        <span style={{ flex: 1 }} />
-        <button type="button" data-testid="example-enquiry" onClick={loadExample} style={toolBtn(false)}>Esimerkki 8×12×6</button>
-        <button type="button" data-testid="export-pdf" onClick={exportPdf} style={{ ...toolBtn(false), background: '#b91c1c', border: 'none' }}>PDF</button>
-        <button type="button" data-testid="export-dxf" onClick={exportDxf} style={toolBtn(false)}>DXF</button>
-        <button type="button" onClick={exportJson} style={toolBtn(false)}>JSON</button>
-        <button type="button" onClick={() => fileRef.current?.click()} style={toolBtn(false)}>Tuo</button>
-        <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={importJson} />
-        {user && (
-          <form action="/api/auth/logout" method="POST">
-            <button type="submit" style={toolBtn(false)}>Poistu</button>
-          </form>
-        )}
-      </header>
-
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <aside style={{ width: 248, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #e7e5e4', padding: 12 }}>
-          <div style={{ fontSize: 10, letterSpacing: 1.1, color: '#78716c', fontWeight: 700, marginBottom: 8 }}>HUONEET</div>
-          {rooms.length === 0 && <div style={{ fontSize: 12, color: '#78716c', marginBottom: 10, lineHeight: 1.45 }}>Piirrä ensimmäinen huone tai avaa esimerkki.</div>}
-          {rooms.map((room) => (
-            <button
-              key={room.id}
-              type="button"
-              onClick={() => { setSelectedIds([room.id]); setTool('select') }}
-              style={{
-                width: '100%', textAlign: 'left', marginBottom: 6, padding: '8px 8px',
-                borderRadius: 8, cursor: 'pointer', color: '#1c1917', transform: 'none',
-                border: selectedRoom?.id === room.id ? '1px solid #0f766e' : '1px solid #e7e5e4',
-                background: selectedRoom?.id === room.id ? '#f0fdfa' : '#fff',
-              }}
-            >
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ width: 8, alignSelf: 'stretch', borderRadius: 2, background: room.color }} />
-                <span>
-                  <strong>{room.label}</strong> {room.name}
-                  <div style={{ fontSize: 10, color: '#78716c' }}>{room.temp}°C · {room.width.toFixed(1)}×{room.depth.toFixed(1)} m{room.outline ? ' · monikulmio' : ''}{room.parentId ? ' · väliseinä' : ''}</div>
-                </span>
-              </div>
-            </button>
-          ))}
-
-          <div style={{ fontSize: 10, letterSpacing: 1.1, color: '#78716c', fontWeight: 700, margin: '14px 0 8px' }}>MALLIT</div>
-          <div style={{ fontSize: 11, color: '#78716c', marginBottom: 8, lineHeight: 1.45 }}>Valitse malli ja klikkaa huonetta. Ovi tarttuu seinään, höyrystin jää sisälle.</div>
-          {TEMPLATE_GROUPS.map((group) => (
-            <div key={group.id} style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, color: '#a8a29e', marginBottom: 4, fontWeight: 700 }}>{group.label}</div>
-              {TEMPLATES.filter((item) => item.category === group.id).map((item) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
+          <button type="button" title="Pohjakuva" style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
+          <button type="button" data-testid="view-3d" title="Kolmiulotteinen näkymä" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
+          <button type="button" data-testid="view-split" title="Pohja ja 3D rinnakkain" style={textBtn(view === 'split')} onClick={() => setView('split')}>Jaettu</button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
+          <button type="button" data-testid="unit-si" title="SI-yksiköt" style={textBtn(unitSystem === 'SI')} onClick={() => setUnitSystem('SI')}>SI</button>
+          <button type="button" data-testid="unit-ip" title="IP-yksiköt" style={textBtn(unitSystem === 'IP')} onClick={() => setUnitSystem('IP')}>IP</button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <button type="button" title="Kumoa (Ctrl+Z)" onClick={undo} style={iconBtn(false)}>
+            <Icon><path {...stroke} d="M4 7.5 H11 A3.2 3.2 0 1 1 11 11.2" /><path {...stroke} d="M4 4.6 V7.8 H7.2" /></Icon>
+          </button>
+          <button type="button" title="Tee uudelleen (Ctrl+Y)" onClick={redo} style={iconBtn(false)}>
+            <Icon><path {...stroke} d="M12 7.5 H5 A3.2 3.2 0 1 0 5 11.2" /><path {...stroke} d="M12 4.6 V7.8 H8.8" /></Icon>
+          </button>
+          <button type="button" title="Sovita näkymä (F)" onClick={() => setFitToken((token) => token + 1)} style={iconBtn(false)}>
+            <Icon><path {...stroke} d="M3.2 6.2 V3.2 H6.2 M9.8 3.2 H12.8 V6.2 M12.8 9.8 V12.8 H9.8 M6.2 12.8 H3.2 V9.8" /></Icon>
+          </button>
+        </div>
+        <span style={{ flex: 1, minWidth: 8 }} />
+        <button type="button" data-testid="example-enquiry" title="Esimerkki 8 × 12 × 6 m" onClick={loadExample} style={textBtn(false)}>Esimerkki</button>
+        <div style={{ position: 'relative', flexShrink: 0 }} onMouseDown={(event) => event.stopPropagation()}>
+          <button type="button" title="Vie ja tuo" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)} style={textBtn(exportOpen)}>Vie</button>
+          {exportOpen && (
+            <div style={{
+              position: 'absolute', right: 0, top: 36, width: 188, zIndex: 30,
+              background: '#1c212b', border: '1px solid #3f3f46', borderRadius: 10,
+              padding: 4, boxShadow: '0 16px 40px rgba(0,0,0,0.35)',
+            }}>
+              {[
+                { id: 'pdf', test: 'export-pdf', label: 'PDF-tarjous', run: exportPdf },
+                { id: 'dxf', test: 'export-dxf', label: 'DXF-pohja', run: exportDxf },
+                { id: 'json', test: undefined, label: 'JSON', run: exportJson },
+              ].map((item) => (
                 <button
                   key={item.id}
                   type="button"
-                  data-testid={`template-${item.id}`}
-                  onClick={() => { setPlacingId(item.id); setTool('select'); setNotice(`Klikkaa huonetta: ${item.name}`) }}
+                  data-testid={item.test}
+                  onClick={() => { setExportOpen(false); item.run() }}
                   style={{
-                    width: '100%', textAlign: 'left', marginBottom: 4, padding: '6px 8px',
-                    borderRadius: 6, cursor: 'pointer', fontSize: 11, color: '#1c1917', transform: 'none',
-                    border: placingId === item.id ? '1px solid #0f766e' : '1px solid #e7e5e4',
-                    background: placingId === item.id ? '#f0fdfa' : '#fff',
+                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+                    background: 'transparent', color: '#f5f5f4', border: 'none', borderRadius: 7,
+                    fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none',
                   }}
                 >
-                  {item.name}{item.capacityKw ? ` · ${item.capacityKw} kW` : ''}
+                  {item.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => { setExportOpen(false); fileRef.current?.click() }}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+                  background: 'transparent', color: '#f5f5f4', border: 'none', borderRadius: 7,
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none',
+                }}
+              >
+                Tuo JSON
+              </button>
+              {user && (
+                <form action="/api/auth/logout" method="POST">
+                  <button type="submit" style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+                    background: 'transparent', color: '#fecaca', border: 'none', borderRadius: 7,
+                    fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none',
+                  }}>Poistu</button>
+                </form>
+              )}
+            </div>
+          )}
+        </div>
+        <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={importJson} />
+      </header>
+
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+        <aside data-testid="template-library" style={{ width: 248, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #e7e5e4' }}>
+          <button type="button" onClick={() => setRoomsOpen((open) => !open)} style={sectionHead}>
+            <span>Huoneet</span><span>{roomsOpen ? '−' : '+'}</span>
+          </button>
+          {roomsOpen && (
+            <div style={{ padding: '4px 8px 8px' }}>
+              {rooms.length === 0 && <div style={{ fontSize: 12, color: '#78716c', margin: '4px 4px 8px', lineHeight: 1.4 }}>Piirrä huone tai avaa esimerkki.</div>}
+              {rooms.map((room) => (
+                <button
+                  key={room.id}
+                  type="button"
+                  onClick={() => { setSelectedIds([room.id]); setTool('select') }}
+                  style={{
+                    width: '100%', textAlign: 'left', marginBottom: 4, padding: '6px 8px',
+                    borderRadius: 8, cursor: 'pointer', color: '#1c1917', transform: 'none',
+                    border: selectedRoom?.id === room.id ? '1px solid #0f766e' : '1px solid #e7e5e4',
+                    background: selectedRoom?.id === room.id ? '#f0fdfa' : '#fff',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ width: 8, height: 28, borderRadius: 2, background: room.color, flexShrink: 0 }} />
+                    <span style={{ minWidth: 0 }}>
+                      <strong style={{ fontSize: 12 }}>{room.label}</strong> <span style={{ fontSize: 12 }}>{room.name}</span>
+                      <div style={{ fontSize: 10, color: '#78716c' }}>{room.temp}°C · {room.width.toFixed(1)}×{room.depth.toFixed(1)} m{room.parentId ? ' · väliseinä' : ''}</div>
+                    </span>
+                  </div>
                 </button>
               ))}
             </div>
-          ))}
-          <button
-            type="button"
-            onClick={() => setGridSize((g) => (g === 0.1 ? 0.25 : g === 0.25 ? 0.5 : 0.1))}
-            style={{ width: '100%', marginTop: 8, padding: '7px 8px', borderRadius: 8, border: '1px solid #d6d3d1', background: '#fff', color: '#44403c', fontSize: 12, transform: 'none' }}
-          >
-            Ruutu {snapOn ? `${gridSize} m` : 'pois'} (G)
+          )}
+
+          <button type="button" onClick={() => setTemplatesOpen((open) => !open)} style={{ ...sectionHead, borderTop: '1px solid #e7e5e4' }}>
+            <span>Mallikirjasto</span><span>{templatesOpen ? '−' : '+'}</span>
           </button>
+          {templatesOpen && (
+            <div style={{ padding: '2px 8px 10px' }}>
+              <div style={{ fontSize: 11, color: '#78716c', margin: '2px 4px 8px', lineHeight: 1.4 }}>Valitse malli ja klikkaa huonetta.</div>
+              {TEMPLATE_GROUPS.map((group) => (
+                <div key={group.id} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, color: '#a8a29e', margin: '2px 4px 4px', fontWeight: 700, letterSpacing: 0.4 }}>{group.label}</div>
+                  {TEMPLATES.filter((item) => item.category === group.id).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      data-testid={`template-${item.id}`}
+                      onClick={() => { setPlacingId(item.id); setTool('select'); setNotice(`Klikkaa huonetta: ${item.name}`) }}
+                      style={{
+                        width: '100%', textAlign: 'left', marginBottom: 3, padding: '4px 6px',
+                        borderRadius: 8, cursor: 'pointer', fontSize: 12, color: '#1c1917', transform: 'none',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        border: placingId === item.id ? '1px solid #0f766e' : '1px solid #e7e5e4',
+                        background: placingId === item.id ? '#f0fdfa' : '#fff',
+                      }}
+                    >
+                      <TemplateThumb category={item.category} />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: 'block', fontWeight: 600 }}>{item.name}</span>
+                        {item.capacityKw ? <span style={{ fontSize: 10, color: '#78716c' }}>{item.capacityKw} kW</span> : null}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ padding: '0 8px 12px' }}>
+            <button
+              type="button"
+              onClick={() => setGridSize((g) => (g === 0.1 ? 0.25 : g === 0.25 ? 0.5 : 0.1))}
+              style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff', color: '#44403c', fontSize: 12, transform: 'none' }}
+            >
+              Ruutu {snapOn ? `${gridSize} m` : 'pois'}
+            </button>
+          </div>
         </aside>
 
         <main style={{ flex: 1, minWidth: 0, position: 'relative' }}>
