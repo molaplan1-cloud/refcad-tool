@@ -2,10 +2,12 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { ContactShadows, Edges, Grid, Html, OrbitControls, RoundedBox } from '@react-three/drei'
+import { ContactShadows, Edges, Grid, Html, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { insetOrthogonal, outlineOf } from '@/lib/cadDraw'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
+import { condenserFanSpec } from '@/lib/fanGuard'
+import { pipeSupports } from '@/lib/pipeTopology'
 import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
 
 const SceneTheme = createContext(null)
@@ -445,46 +447,90 @@ function CondenserMesh({ room, eq, onSelect, onContext }) {
   )
 }
 
-function useSickleGeometry(radius) {
+function useSickleGeometry(tip) {
   return useMemo(() => {
     const shape = new THREE.Shape()
-    const r = radius
-    shape.moveTo(r * 0.2, r * 0.012)
-    shape.quadraticCurveTo(r * 0.48, r * 0.2, r * 0.96, r * 0.04)
-    shape.quadraticCurveTo(r * 1.01, 0.004, r * 0.92, -r * 0.018)
-    shape.quadraticCurveTo(r * 0.5, r * 0.05, r * 0.2, -r * 0.012)
+    const r = tip
+    shape.moveTo(r * 0.22, r * 0.08)
+    shape.quadraticCurveTo(r * 0.46, r * 0.58, r * 0.98, r * 0.2)
+    shape.quadraticCurveTo(r * 0.99, 0, r * 0.88, -r * 0.18)
+    shape.quadraticCurveTo(r * 0.4, -r * 0.02, r * 0.22, -r * 0.07)
     shape.closePath()
-    const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.003, bevelEnabled: false, curveSegments: 10 })
-    geom.translate(0, 0, -0.0015)
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.01, bevelEnabled: false, curveSegments: 12 })
+    geom.translate(0, 0, -0.005)
     return geom
-  }, [radius])
+  }, [tip])
+}
+
+function useAnnulus(outer, inner, depth) {
+  return useMemo(() => {
+    const shape = new THREE.Shape()
+    shape.absarc(0, 0, outer, 0, Math.PI * 2, false)
+    const hole = new THREE.Path()
+    hole.absarc(0, 0, inner, 0, Math.PI * 2, true)
+    shape.holes.push(hole)
+    const geom = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 56 })
+    geom.translate(0, 0, -depth)
+    return geom
+  }, [outer, inner, depth])
+}
+
+function useFacePlate(width, height, holeR, holeY, thickness) {
+  return useMemo(() => {
+    const shape = new THREE.Shape()
+    const hw = width / 2
+    const hh = height / 2
+    shape.moveTo(-hw, -hh)
+    shape.lineTo(hw, -hh)
+    shape.lineTo(hw, hh)
+    shape.lineTo(-hw, hh)
+    shape.closePath()
+    const hole = new THREE.Path()
+    hole.absarc(0, holeY, holeR, 0, Math.PI * 2, true)
+    shape.holes.push(hole)
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false, curveSegments: 56 })
+    geom.translate(0, 0, -thickness)
+    return geom
+  }, [width, height, holeR, holeY, thickness])
 }
 
 function GuardedFan({ radius }) {
-  const blade = useSickleGeometry(radius)
-  const ring = 0.0032
-  useEffect(() => () => blade.dispose(), [blade])
+  const spec = condenserFanSpec(radius)
+  const blade = useSickleGeometry(spec.bladeR)
+  const shroud = useAnnulus(spec.shroudOuter, spec.shroudInner, spec.shroudLength)
+  useEffect(() => () => {
+    blade.dispose()
+    shroud.dispose()
+  }, [blade, shroud])
+  const steel = { color: '#e7eef5', metalness: 0.88, roughness: 0.18 }
   return (
     <group>
-      {[0, 1, 2].map((index) => (
-        <mesh key={`blade-${index}`} geometry={blade} rotation={[0, 0, (index * 2 * Math.PI) / 3]} position={[0, 0, -0.01]}>
-          <meshStandardMaterial color="#475569" metalness={0.45} roughness={0.38} side={THREE.DoubleSide} />
-        </mesh>
-      ))}
-      <mesh position={[0, 0, -0.008]}>
-        <cylinderGeometry args={[radius * 0.16, radius * 0.16, 0.016, 16]} />
-        <meshStandardMaterial color="#e2e8f0" metalness={0.62} roughness={0.28} />
+      <mesh position={[0, 0, spec.recessZ]}>
+        <circleGeometry args={[spec.recessR, 40]} />
+        <meshStandardMaterial color="#05070b" roughness={0.92} metalness={0.02} />
       </mesh>
-      {[0.34, 0.66, 0.96].map((scale) => (
-        <mesh key={`ring-${scale}`} position={[0, 0, 0.012]}>
-          <torusGeometry args={[radius * scale, ring, 8, 40]} />
-          <meshStandardMaterial color="#1e293b" metalness={0.62} roughness={0.32} />
+      <mesh geometry={shroud}>
+        <meshStandardMaterial color="#121820" metalness={0.4} roughness={0.48} side={THREE.DoubleSide} />
+      </mesh>
+      {[0, 1, 2].map((index) => (
+        <mesh key={`blade-${index}`} geometry={blade} rotation={[0, 0, (index * 2 * Math.PI) / 3]} position={[0, 0, spec.bladeZ]}>
+          <meshStandardMaterial color="#1e293b" metalness={0.48} roughness={0.38} side={THREE.DoubleSide} />
         </mesh>
       ))}
-      {[0, 1, 2, 3].map((index) => (
-        <mesh key={`spoke-${index}`} position={[0, 0, 0.012]} rotation={[0, 0, (index * Math.PI) / 4]}>
-          <boxGeometry args={[radius * 1.9, 0.005, 0.003]} />
-          <meshStandardMaterial color="#334155" metalness={0.55} roughness={0.35} />
+      <mesh position={[0, 0, spec.hubZ]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[spec.hubR * 0.82, spec.hubR, spec.hubLength, 20]} />
+        <meshStandardMaterial color="#64748b" metalness={0.72} roughness={0.28} />
+      </mesh>
+      {[0.38, 0.68, 1].map((scale) => (
+        <mesh key={`ring-${scale}`} position={[0, 0, spec.grilleZ]}>
+          <torusGeometry args={[spec.grilleR * scale, spec.wire, 10, 64]} />
+          <meshStandardMaterial {...steel} />
+        </mesh>
+      ))}
+      {[0, 1, 2, 3, 4, 5].map((index) => (
+        <mesh key={`spoke-${index}`} position={[0, 0, spec.grilleZ]} rotation={[0, 0, (index * Math.PI) / 6]}>
+          <cylinderGeometry args={[spec.wire, spec.wire, spec.grilleR * 2, 8]} />
+          <meshStandardMaterial {...steel} />
         </mesh>
       ))}
     </group>
@@ -575,15 +621,42 @@ function ComboMesh({ room, eq, onSelect, onContext }) {
   const casingH = h * 0.86
   const casingD = d * 0.88
   const coil = '#8b98a5'
+  const fanSpec = condenserFanSpec(fanR)
+  const faceT = 0.006
+  const skin = 0.016
+  const cy = h * 0.5
+  const fanY = h * 0.52
+  const plate = useFacePlate(w, casingH, fanSpec.openingR, fanY - cy, faceT)
+  useEffect(() => () => plate.dispose(), [plate])
+  const shell = { color: '#e7eef3', metalness: 0.24, roughness: 0.42 }
   return (
     <EquipFrame room={room} eq={eq} onSelect={onSelect} onContext={onContext}>
       {[-1, 1].map((side) => (
         <WallConsole key={`bracket-${side}`} x={side * w * 0.42} depth={d} top={h * 0.08} />
       ))}
-      <RoundedBox args={[w, casingH, casingD]} radius={0.022} smoothness={3} position={[0, h * 0.5, 0]} castShadow>
-        <meshStandardMaterial color="#e7eef3" metalness={0.24} roughness={0.42} />
-        <Edges threshold={18} color="#94a3b8" />
-      </RoundedBox>
+      <mesh position={[-w / 2 + skin / 2, cy, -faceT / 2]} castShadow>
+        <boxGeometry args={[skin, casingH, casingD - faceT]} />
+        <meshStandardMaterial {...shell} />
+      </mesh>
+      <mesh position={[w / 2 - skin / 2, cy, -faceT / 2]} castShadow>
+        <boxGeometry args={[skin, casingH, casingD - faceT]} />
+        <meshStandardMaterial {...shell} />
+      </mesh>
+      <mesh position={[0, cy + casingH / 2 - skin / 2, -faceT / 2]} castShadow>
+        <boxGeometry args={[w, skin, casingD - faceT]} />
+        <meshStandardMaterial {...shell} />
+      </mesh>
+      <mesh position={[0, cy - casingH / 2 + skin / 2, -faceT / 2]} castShadow>
+        <boxGeometry args={[w, skin, casingD - faceT]} />
+        <meshStandardMaterial {...shell} />
+      </mesh>
+      <mesh position={[0, cy, -casingD / 2 + skin / 2]} castShadow>
+        <boxGeometry args={[w, casingH, skin]} />
+        <meshStandardMaterial {...shell} />
+      </mesh>
+      <mesh geometry={plate} position={[0, cy, casingD / 2]} castShadow>
+        <meshStandardMaterial {...shell} side={THREE.DoubleSide} />
+      </mesh>
       <mesh position={[0, h * 0.5 + casingH / 2 - 0.012, 0]}>
         <boxGeometry args={[w * 0.992, 0.008, casingD * 0.98]} />
         <meshStandardMaterial color="#94a3b8" metalness={0.35} roughness={0.5} />
@@ -610,7 +683,7 @@ function ComboMesh({ room, eq, onSelect, onContext }) {
           <meshStandardMaterial color={coil} metalness={0.48} roughness={0.4} />
         </mesh>
       ))}
-      <group position={[w * 0.3, h * 0.22, casingD / 2 + 0.006]}>
+      <group position={[w * 0.36, h * 0.145, casingD / 2 + 0.006]}>
         <mesh>
           <boxGeometry args={[0.15, 0.09, 0.012]} />
           <meshStandardMaterial color="#d5dee6" metalness={0.32} roughness={0.48} />
@@ -622,7 +695,7 @@ function ComboMesh({ room, eq, onSelect, onContext }) {
           </mesh>
         ))}
       </group>
-      <group position={[0, h * 0.52, casingD / 2 + 0.004]}>
+      <group position={[0, h * 0.52, casingD / 2]}>
         <GuardedFan radius={fanR} />
       </group>
       <SideServiceValves
@@ -1085,26 +1158,6 @@ function tubeStyle(pipe) {
   return { radius: Math.max(0.01, copper), color: '#1d4ed8', metalness: 0.2, roughness: 0.4 }
 }
 
-function clipPoints(sharp) {
-  const clips = []
-  for (let i = 1; i < sharp.length; i += 1) {
-    const a = sharp[i - 1]
-    const b = sharp[i]
-    const horiz = Math.hypot(b[0] - a[0], b[2] - a[2])
-    if (horiz < 0.42 || Math.abs(b[1] - a[1]) > 0.08) continue
-    const count = Math.max(1, Math.round(horiz / 0.72))
-    for (let step = 1; step <= count; step += 1) {
-      const t = step / (count + 1)
-      clips.push([
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-      ])
-    }
-  }
-  return clips
-}
-
 function traceBeside(sharp) {
   let ox = 0.03
   let oz = 0
@@ -1228,6 +1281,7 @@ function PipeRuns({ rooms, pipes }) {
     })
     if (sharp.length < 2) return null
     const encoded = JSON.stringify(sharp)
+    const supports = (pipe.kind === 'suction' || pipe.kind === 'liquid') ? pipeSupports(sharp, rooms) : { hangers: [], wallClips: [] }
     return (
       <group key={pipe.id}>
         <SmoothTube encoded={encoded} radius={style.radius} color={style.color} metalness={style.metalness} roughness={style.roughness} />
@@ -1258,19 +1312,35 @@ function PipeRuns({ rooms, pipes }) {
             ))}
           </group>
         )}
-        {(pipe.kind === 'suction' || pipe.kind === 'liquid') && clipPoints(sharp).map((clip, index) => (
-          <group key={`clip-${index}`} position={clip}>
+        {supports.hangers.map((hanger, index) => (
+          <group key={`hanger-${index}`} position={[hanger.x, hanger.y, hanger.z]}>
             <mesh position={[0, 0.14, 0]}>
-              <cylinderGeometry args={[0.008, 0.008, 0.28, 8]} />
+              <cylinderGeometry args={[0.004, 0.004, 0.28, 8]} />
               <meshStandardMaterial color="#cbd5e1" metalness={0.62} roughness={0.28} />
             </mesh>
             <mesh position={[0, 0.275, 0]}>
-              <boxGeometry args={[0.07, 0.014, 0.032]} />
+              <boxGeometry args={[0.07, 0.01, 0.028]} />
               <meshStandardMaterial color="#94a3b8" metalness={0.55} roughness={0.32} />
             </mesh>
             <mesh position={[0, 0, 0]}>
-              <boxGeometry args={[Math.max(0.055, style.radius * 3.2), 0.02, 0.022]} />
+              <boxGeometry args={[Math.max(0.055, style.radius * 3.2), 0.016, 0.018]} />
               <meshStandardMaterial color="#e2e8f0" metalness={0.5} roughness={0.3} />
+            </mesh>
+          </group>
+        ))}
+        {supports.wallClips.map((clip, index) => (
+          <group key={`wall-clip-${index}`} position={[clip.x, clip.y, clip.z]} rotation={[0, Math.atan2(clip.nx, clip.nz), 0]}>
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[Math.max(0.02, style.radius + 0.008), 0.004, 8, 18]} />
+              <meshStandardMaterial color="#cbd5e1" metalness={0.62} roughness={0.3} />
+            </mesh>
+            <mesh position={[0, 0, 0.028]}>
+              <boxGeometry args={[0.01, 0.012, 0.04]} />
+              <meshStandardMaterial color="#94a3b8" metalness={0.55} roughness={0.32} />
+            </mesh>
+            <mesh position={[0, 0, 0.05]}>
+              <boxGeometry args={[0.046, 0.07, 0.008]} />
+              <meshStandardMaterial color="#cbd5e1" metalness={0.5} roughness={0.35} />
             </mesh>
           </group>
         ))}
