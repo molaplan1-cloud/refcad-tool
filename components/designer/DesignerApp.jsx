@@ -31,6 +31,7 @@ import { applyOutline, bboxOf, clampGroupTranslation, cleanOrthogonal, isRectang
 import { calculateProject, resultFor } from '@/lib/heatLoad'
 import { buildDxf, dxfFilename } from '@/lib/dxf'
 import { buildPdf, pdfFilename } from '@/lib/pdfExport'
+import SchematicView from './SchematicView'
 
 const Scene3D = dynamic(() => import('./Scene3D'), { ssr: false })
 
@@ -207,6 +208,7 @@ export default function DesignerApp({
   initialUnitSystem = 'SI',
   initialPipes = [],
   initialCables = [],
+  initialSchematic = null,
   onPersist,
   user = null,
   persistLabel = 'selaimeen',
@@ -215,6 +217,14 @@ export default function DesignerApp({
   const [rooms, setRooms] = useState(() => normalizeRooms(initialRooms))
   const [pipes, setPipes] = useState(initialPipes || [])
   const [cables, setCables] = useState(initialCables || [])
+  const [schematic, setSchematic] = useState(() => ({
+    refrigerant: 'R449A',
+    teC: -8,
+    tcC: 40,
+    theme: 'dark',
+    overrides: {},
+    ...(initialSchematic || {}),
+  }))
   const [unitSystem, setUnitSystem] = useState(initialUnitSystem === 'IP' ? 'IP' : 'SI')
   const [pipeKind, setPipeKind] = useState('suction')
   const [refrigerant, setRefrigerant] = useState('R449A')
@@ -359,7 +369,7 @@ export default function DesignerApp({
     setSaveState('saving')
     const timer = setTimeout(() => {
       try {
-        onPersist({ name, rooms, unitSystem, pipes, cables })
+        onPersist({ name, rooms, unitSystem, pipes, cables, schematic })
         setSaveState('saved')
       } catch (err) {
         console.error(err)
@@ -367,7 +377,7 @@ export default function DesignerApp({
       }
     }, 500)
     return () => clearTimeout(timer)
-  }, [name, rooms, unitSystem, pipes, cables, onPersist])
+  }, [name, rooms, unitSystem, pipes, cables, schematic, onPersist])
 
   function deleteSelected() {
     const ids = selectedRef.current
@@ -714,12 +724,12 @@ export default function DesignerApp({
   }
 
   function exportPdf() {
-    const doc = buildPdf({ projectName: name, userEmail: user?.email || '', rooms, unitSystem, pipes, cables })
+    const doc = buildPdf({ projectName: name, userEmail: user?.email || '', rooms, unitSystem, pipes, cables, schematic })
     doc.save(pdfFilename(name))
   }
 
   function exportDxf() {
-    const text = buildDxf({ projectName: name, rooms, pipes, cables })
+    const text = buildDxf({ projectName: name, rooms, pipes, cables, schematic })
     const bytes = new Uint8Array(text.length)
     for (let i = 0; i < text.length; i += 1) {
       const code = text.charCodeAt(i)
@@ -734,7 +744,7 @@ export default function DesignerApp({
   }
 
   function exportJson() {
-    const blob = new Blob([JSON.stringify({ projectName: name, rooms, unitSystem, pipes, cables }, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify({ projectName: name, rooms, unitSystem, pipes, cables, schematic }, null, 2)], { type: 'application/json' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
     link.download = `${(name || 'refcad').replace(/\s+/g, '_')}.json`
@@ -756,6 +766,7 @@ export default function DesignerApp({
         setRooms(normalizeRooms(data.rooms))
         setPipes(Array.isArray(data.pipes) ? data.pipes : [])
         setCables(Array.isArray(data.cables) ? data.cables : [])
+        if (data.schematic && typeof data.schematic === 'object') setSchematic((current) => ({ ...current, ...data.schematic }))
         if (data.unitSystem === 'IP' || data.unitSystem === 'SI') setUnitSystem(data.unitSystem)
         setNotice('Tuotu JSON-tiedosto.')
       } catch {
@@ -856,6 +867,7 @@ export default function DesignerApp({
           <button type="button" title="Pohjakuva" style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
           <button type="button" data-testid="view-3d" title="Kolmiulotteinen näkymä" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
           <button type="button" data-testid="view-split" title="Pohja ja 3D rinnakkain" style={textBtn(view === 'split')} onClick={() => setView('split')}>Jaettu</button>
+          <button type="button" data-testid="view-schematic" title="Periaatekaavio" style={textBtn(view === 'schematic')} onClick={() => setView('schematic')}>Kaavio</button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
           <button type="button" data-testid="unit-si" title="SI-yksiköt" style={textBtn(unitSystem === 'SI')} onClick={() => setUnitSystem('SI')}>SI</button>
@@ -1017,7 +1029,15 @@ export default function DesignerApp({
         </aside>
 
         <main style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-          {view === 'split' ? (
+          {view === 'schematic' ? (
+            <SchematicView
+              rooms={rooms}
+              projectName={name}
+              settings={schematic}
+              onChange={setSchematic}
+              loads={Object.fromEntries((result.rooms || []).map((room) => [room.id, room.total]))}
+            />
+          ) : view === 'split' ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%' }}>
               <PlanView {...planProps} />
               <div style={{ borderLeft: '1px solid #d6d3d1' }}>
@@ -1029,7 +1049,7 @@ export default function DesignerApp({
           ) : (
             <PlanView {...planProps} />
           )}
-          {(tool === 'pipe' || tool === 'cable') && view !== '3d' && (
+          {(tool === 'pipe' || tool === 'cable') && view !== '3d' && view !== 'schematic' && (
             <div data-testid="pipe-settings" style={{ position: 'absolute', top: 12, right: 12, zIndex: 4, display: 'flex', gap: 6, alignItems: 'center', background: 'rgba(255,255,255,0.96)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '6px 8px' }}>
               {tool === 'pipe' && (
                 <select aria-label="Putkityyppi" value={pipeKind} onChange={(e) => setPipeKind(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
@@ -1054,7 +1074,7 @@ export default function DesignerApp({
               )}
             </div>
           )}
-          {pipes.length > 0 && view !== '3d' && (
+          {pipes.length > 0 && view !== '3d' && view !== 'schematic' && (
             <div data-testid="pipe-legend" style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 4, background: 'rgba(255,255,255,0.94)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '8px 10px', maxWidth: 320 }}>
               {['suction', 'liquid', 'liquidReturn', 'hotgas', 'drain', 'drainHeat'].map((key) => (
                 <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
@@ -1065,7 +1085,7 @@ export default function DesignerApp({
               <div style={{ fontSize: 10, color: '#78716c', marginTop: 4, lineHeight: 1.35 }}>{INTERNAL_LIQUID_TRAIN}</div>
             </div>
           )}
-          {rooms.length === 0 && view !== '3d' && (
+          {rooms.length === 0 && view !== '3d' && view !== 'schematic' && (
             <div style={{
               position: 'absolute', left: 0, right: 0, top: 72, textAlign: 'center', pointerEvents: 'none',
             }}>
@@ -1075,7 +1095,7 @@ export default function DesignerApp({
           )}
         </main>
 
-        <aside style={{ width: 340, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #e7e5e4' }}>
+        {view !== 'schematic' && <aside style={{ width: 340, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #e7e5e4' }}>
           <HeatLoadPanel
             room={selectedRoom}
             rooms={rooms}
@@ -1103,7 +1123,7 @@ export default function DesignerApp({
             }}
             onDeleteEquipment={deleteSelected}
           />
-        </aside>
+        </aside>}
       </div>
       {menu && (
         <ContextMenu

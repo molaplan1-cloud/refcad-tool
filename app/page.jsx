@@ -26,6 +26,7 @@ export default function Page() {
       pipes: data.pipes || [],
       cables: data.cables || [],
       unitSystem: data.unitSystem,
+      schematic: data.schematic || null,
       dimUnit: data.unitSystem === 'IP' ? 'ft' : 'm',
       lastSaved: new Date().toISOString(),
     }))
@@ -41,6 +42,7 @@ export default function Page() {
       initialRooms={saved?.rooms || []}
       initialPipes={saved?.pipes || []}
       initialCables={saved?.cables || []}
+      initialSchematic={saved?.schematic || null}
       initialUnitSystem={saved?.unitSystem || (saved?.dimUnit === 'ft' ? 'IP' : 'SI')}
       onPersist={onPersist}
       persistLabel="selaimeen"

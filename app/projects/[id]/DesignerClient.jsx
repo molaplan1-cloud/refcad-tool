@@ -31,7 +31,7 @@ export default function DesignerClient({ user, projectId }) {
   const onPersist = useCallback((data) => {
     lsUpdate(projectId, {
       name: data.name,
-      data: { rooms: data.rooms, pipes: data.pipes || [], cables: data.cables || [], unitSystem: data.unitSystem, dimUnit: data.unitSystem === 'IP' ? 'ft' : 'm' },
+      data: { rooms: data.rooms, pipes: data.pipes || [], cables: data.cables || [], unitSystem: data.unitSystem, dimUnit: data.unitSystem === 'IP' ? 'ft' : 'm', schematic: data.schematic || null },
     })
   }, [projectId])
 
@@ -46,6 +46,7 @@ export default function DesignerClient({ user, projectId }) {
       initialRooms={initial.data?.rooms || []}
       initialPipes={initial.data?.pipes || []}
       initialCables={initial.data?.cables || []}
+      initialSchematic={initial.data?.schematic || null}
       initialUnitSystem={initial.data?.unitSystem || 'SI'}
       onPersist={onPersist}
       user={user}
