@@ -6,7 +6,8 @@ import { applyType, internalDims } from '@/lib/geometry'
 import { isCustomOutline, polygonMetrics } from '@/lib/cadDraw'
 import { formatKw, formatPower, fromLength, fromTemp, lengthUnit, tempUnit, toLength, toTemp } from '@/lib/units'
 import { capacityCheck, suggestPackage } from '@/lib/selection'
-import { routeLength, sizePipe, REFRIGERANT_IDS as PIPE_REFS } from '@/lib/pipeSizing'
+import { routeLength, REFRIGERANT_IDS as PIPE_REFS } from '@/lib/pipeSizing'
+import { sizePlacedPipe } from '@/lib/pipeDuty'
 import { defaultElevation, mountLabel } from '@/lib/placement'
 
 const labelStyle = {
@@ -421,29 +422,33 @@ function CapacityBlock({ room, roomResult }) {
 }
 
 function PipeCard({ pipe, rooms, result, onPatch, onDelete }) {
-  const point = pipe.points?.[0]
-  const host = point ? rooms.find((room) => Math.abs(point.x - room.x) <= room.width / 2 && Math.abs(point.z - room.z) <= room.depth / 2) : null
-  const duty = host && isRefrigerated(host.type)
-    ? (result.rooms.find((item) => item.id === host.id)?.total || 0) / 1000
-    : (pipe.capacityKw || 0)
-  const sized = sizePipe(pipe, {
-    capacityKw: duty || pipe.capacityKw || 0,
-    roomTempC: pipe.roomTempC ?? host?.temp ?? 2,
-    lengthM: routeLength(pipe.points),
-  })
+  const { duty, sized } = sizePlacedPipe(pipe, rooms, result.rooms)
+  const source = duty.source === 'evaporator' ? 'höyrystimestä' : duty.source === 'room' ? 'huoneen tarpeesta' : duty.source === 'manual' ? 'käsin' : duty.source === 'drain' ? 'kondenssivesi' : 'ei kytkettyä tehoa'
   return (
     <div data-testid="pipe-audit" style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
       <div style={{ fontSize: 13, fontWeight: 750, marginBottom: 4 }}>{sized.label}</div>
-      <div style={{ fontSize: 11, color: '#57534e', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, color: '#57534e', marginBottom: 6 }}>
         Pituus {routeLength(pipe.points).toFixed(1)} m
         {sized.velocity ? ` · nopeus ${sized.velocity.toFixed(1)} m/s` : ''}
         {sized.equivalentTempK ? ` · ${sized.equivalentTempK.toFixed(2)} K` : ''}
+      </div>
+      <div data-testid="pipe-duty" style={{ fontSize: 11, color: '#115e59', marginBottom: 8, lineHeight: 1.4 }}>
+        Q {duty.kw.toFixed(2)} kW · {source}
+        <div style={{ color: '#78716c' }}>{duty.note}</div>
       </div>
       {sized.warnings.map((warning) => (
         <div key={warning} style={{ fontSize: 11, color: '#9a3412', marginBottom: 6 }}>{warning}</div>
       ))}
       {pipe.kind !== 'drain' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <Num
+            label="Teho"
+            unit="kW"
+            value={pipe.capacityManual ? pipe.capacityKw : duty.kw}
+            step={0.1}
+            min={0}
+            onChange={(v) => onPatch?.({ capacityKw: v, capacityManual: true })}
+          />
           <label style={{ display: 'block' }}>
             <span style={labelStyle}>Kylmäaine</span>
             <select value={pipe.refrigerant || 'R449A'} onChange={(e) => onPatch?.({ refrigerant: e.target.value })} style={inputStyle}>
@@ -453,6 +458,11 @@ function PipeCard({ pipe, rooms, result, onPatch, onDelete }) {
           <Num label="Nousu" unit="m" value={pipe.riseM || 0} step={0.5} onChange={(v) => onPatch?.({ riseM: v })} />
           <Num label="Te" unit="°C" value={pipe.teC ?? -8} step={1} onChange={(v) => onPatch?.({ teC: v })} />
           <Num label="Tc" unit="°C" value={pipe.tcC ?? 40} step={1} onChange={(v) => onPatch?.({ tcC: v })} />
+          {pipe.capacityManual && (
+            <button type="button" onClick={() => onPatch?.({ capacityManual: false })} style={{ gridColumn: '1 / -1', justifySelf: 'start', border: 'none', background: 'transparent', color: '#0f766e', fontWeight: 700, cursor: 'pointer', padding: 0, transform: 'none', fontSize: 11 }}>
+              Käytä kytkettyä tehoa
+            </button>
+          )}
         </div>
       )}
       {sized.steps.map((step) => (
