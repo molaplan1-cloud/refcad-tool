@@ -70,6 +70,7 @@ export default function TechnicalSheet({ circuit, themeName = 'light' }) {
           transform={label.rotate ? `rotate(-90 ${label.x} ${label.y})` : undefined}
         >{label.text}</text>
       ))}
+      <TerminalTable circuit={circuit} theme={theme} />
       <PartsTable circuit={circuit} theme={theme} />
       <PidTitle circuit={circuit} theme={theme} />
     </g>
@@ -136,7 +137,14 @@ function PidLine({ line, theme }) {
       {arrows.map((arrow) => (
         <polygon key={`${arrow.x}-${arrow.y}`} points="-7,-2.6 0,0 -7,2.6" fill={color} transform={`translate(${arrow.x} ${arrow.y}) rotate(${arrow.angle})`} />
       ))}
-      {line.endCap === 'bulb' && <circle cx={end.x} cy={end.y} r="5" fill={theme.paper} stroke={color} strokeWidth="1" />}
+      {line.endCap === 'bulb' && (
+        <g stroke={color} fill="none" strokeWidth="0.9">
+          <circle cx={end.x} cy={end.y} r="5.5" fill={theme.paper} />
+          <line x1={end.x - 8} y1={end.y - 3.5} x2={end.x + 8} y2={end.y - 3.5} />
+          <line x1={end.x - 8} y1={end.y + 3.5} x2={end.x + 8} y2={end.y + 3.5} />
+        </g>
+      )}
+      {line.endCap === 'tee' && <circle cx={end.x} cy={end.y} r="2.6" fill={color} />}
     </g>
   )
 }
@@ -171,7 +179,7 @@ function PidSymbol({ symbol, ink }) {
   if (type === 'checkValve') return <Check w={w} h={h} ink={ink} />
   if (type === 'pressureSwitch' || type === 'probe') return <Bubble w={w} h={h} ink={ink} text={symbol.tag} />
   if (type === 'heater') return <Heater w={w} h={h} ink={ink} />
-  if (type === 'controller') return <Controller w={w} h={h} ink={ink} />
+  if (type === 'controller') return <Controller symbol={symbol} ink={ink} />
   return <rect width={w} height={h} fill="none" stroke={ink} strokeWidth="1.1" />
 }
 
@@ -297,12 +305,41 @@ function Heater({ w, h, ink }) {
   )
 }
 
-function Controller({ w, h, ink }) {
+function Controller({ symbol, ink }) {
+  const { w, h, terminals = [] } = symbol
   return (
     <g fill="none" stroke={ink} strokeWidth="1.15">
       <rect x="0.5" y="0.5" width={w - 1} height={h - 1} />
-      <text x="8" y="16" fill={ink} stroke="none" fontSize="11" fontWeight="700">TC</text>
-      {[0, 1, 2, 3, 4].map((index) => <circle key={index} cx={18 + index * 16} cy={h - 14} r="2.2" fill={ink} stroke="none" />)}
+      <text x={w / 2} y="16" fill={ink} stroke="none" fontSize="11" fontWeight="700" textAnchor="middle">TC</text>
+      {terminals.map((term) => {
+        const onLeft = term.x < w / 2
+        return (
+          <g key={term.n}>
+            <circle cx={term.x} cy={term.y} r="2.5" fill={ink} stroke="none" />
+            <text x={onLeft ? 8 : w - 8} y={term.y + 3} fill={ink} stroke="none" fontSize="8" fontWeight="700" textAnchor={onLeft ? 'start' : 'end'}>{term.n}</text>
+          </g>
+        )
+      })}
+    </g>
+  )
+}
+
+function TerminalTable({ circuit, theme }) {
+  const rows = circuit.terminals || []
+  if (!rows.length) return null
+  const x = 860
+  const y = 568
+  const w = 250
+  const rowH = 13
+  const h = 18 + rows.length * rowH
+  return (
+    <g data-testid="schematic-terminals" fontSize="8">
+      <rect x={x} y={y} width={w} height={h} fill={theme.paper} stroke={theme.ink} strokeWidth="0.7" />
+      <text x={x + 6} y={y + 12} fontWeight="700" fill={theme.ink}>TC-liittimet</text>
+      <text x={x + 78} y={y + 12} fontWeight="700" fill={theme.ink}>Signaali</text>
+      {rows.map((row, index) => (
+        <text key={row.n} x={x + 6} y={y + 26 + index * rowH} fill={theme.ink}>{`${row.n}   ${row.signal}   ${row.note}`}</text>
+      ))}
     </g>
   )
 }
