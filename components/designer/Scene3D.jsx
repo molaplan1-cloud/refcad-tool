@@ -6,6 +6,7 @@ import { ContactShadows, Edges, Grid, Html, OrbitControls, RoundedBox } from '@r
 import * as THREE from 'three'
 import { insetOrthogonal, outlineOf } from '@/lib/cadDraw'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
+import { pipeSupports } from '@/lib/pipeTopology'
 import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
 
 const SceneTheme = createContext(null)
@@ -449,42 +450,55 @@ function useSickleGeometry(radius) {
   return useMemo(() => {
     const shape = new THREE.Shape()
     const r = radius
-    shape.moveTo(r * 0.2, r * 0.012)
-    shape.quadraticCurveTo(r * 0.48, r * 0.2, r * 0.96, r * 0.04)
-    shape.quadraticCurveTo(r * 1.01, 0.004, r * 0.92, -r * 0.018)
-    shape.quadraticCurveTo(r * 0.5, r * 0.05, r * 0.2, -r * 0.012)
+    shape.moveTo(r * 0.16, r * 0.028)
+    shape.quadraticCurveTo(r * 0.46, r * 0.34, r * 0.98, r * 0.1)
+    shape.quadraticCurveTo(r * 1.04, 0.01, r * 0.92, -r * 0.06)
+    shape.quadraticCurveTo(r * 0.42, r * 0.02, r * 0.16, -r * 0.028)
     shape.closePath()
-    const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.003, bevelEnabled: false, curveSegments: 10 })
-    geom.translate(0, 0, -0.0015)
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.006, bevelEnabled: false, curveSegments: 10 })
+    geom.translate(0, 0, -0.003)
     return geom
   }, [radius])
 }
 
 function GuardedFan({ radius }) {
   const blade = useSickleGeometry(radius)
-  const ring = 0.0032
+  const wire = 0.0016
   useEffect(() => () => blade.dispose(), [blade])
+  const steel = { color: '#d5dde6', metalness: 0.86, roughness: 0.2 }
   return (
     <group>
-      {[0, 1, 2].map((index) => (
-        <mesh key={`blade-${index}`} geometry={blade} rotation={[0, 0, (index * 2 * Math.PI) / 3]} position={[0, 0, -0.01]}>
-          <meshStandardMaterial color="#475569" metalness={0.45} roughness={0.38} side={THREE.DoubleSide} />
-        </mesh>
-      ))}
-      <mesh position={[0, 0, -0.008]}>
-        <cylinderGeometry args={[radius * 0.16, radius * 0.16, 0.016, 16]} />
-        <meshStandardMaterial color="#e2e8f0" metalness={0.62} roughness={0.28} />
+      <mesh position={[0, 0, -0.05]}>
+        <circleGeometry args={[radius * 0.94, 36]} />
+        <meshStandardMaterial color="#020617" roughness={0.9} metalness={0.04} />
       </mesh>
-      {[0.34, 0.66, 0.96].map((scale) => (
-        <mesh key={`ring-${scale}`} position={[0, 0, 0.012]}>
-          <torusGeometry args={[radius * scale, ring, 8, 40]} />
-          <meshStandardMaterial color="#1e293b" metalness={0.62} roughness={0.32} />
+      {[0, 1, 2].map((index) => (
+        <mesh key={`blade-${index}`} geometry={blade} rotation={[0, 0, (index * 2 * Math.PI) / 3]} position={[0, 0, -0.032]}>
+          <meshStandardMaterial color="#1e293b" metalness={0.4} roughness={0.48} side={THREE.DoubleSide} />
         </mesh>
       ))}
-      {[0, 1, 2, 3].map((index) => (
-        <mesh key={`spoke-${index}`} position={[0, 0, 0.012]} rotation={[0, 0, (index * Math.PI) / 4]}>
-          <boxGeometry args={[radius * 1.9, 0.005, 0.003]} />
-          <meshStandardMaterial color="#334155" metalness={0.55} roughness={0.35} />
+      <mesh position={[0, 0, -0.02]}>
+        <cylinderGeometry args={[radius * 0.18, radius * 0.22, 0.02, 16]} />
+        <meshStandardMaterial color="#f1f5f9" metalness={0.7} roughness={0.24} />
+      </mesh>
+      <mesh position={[0, 0, -0.006]}>
+        <cylinderGeometry args={[radius * 1.04, radius * 0.98, 0.03, 40, 1, true]} />
+        <meshStandardMaterial color="#e7eef3" metalness={0.28} roughness={0.42} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, 0, 0.01]}>
+        <torusGeometry args={[radius * 1.02, 0.006, 10, 40]} />
+        <meshStandardMaterial color="#cbd5e1" metalness={0.45} roughness={0.38} />
+      </mesh>
+      {[0.34, 0.64, 0.92].map((scale) => (
+        <mesh key={`ring-${scale}`} position={[0, 0, 0.024]}>
+          <torusGeometry args={[radius * scale, wire, 12, 56]} />
+          <meshStandardMaterial {...steel} />
+        </mesh>
+      ))}
+      {[0, 1, 2, 3, 4, 5].map((index) => (
+        <mesh key={`spoke-${index}`} position={[0, 0, 0.024]} rotation={[0, 0, (index * Math.PI) / 6]}>
+          <cylinderGeometry args={[wire, wire, radius * 1.84, 8]} />
+          <meshStandardMaterial {...steel} />
         </mesh>
       ))}
     </group>
@@ -1085,26 +1099,6 @@ function tubeStyle(pipe) {
   return { radius: Math.max(0.01, copper), color: '#1d4ed8', metalness: 0.2, roughness: 0.4 }
 }
 
-function clipPoints(sharp) {
-  const clips = []
-  for (let i = 1; i < sharp.length; i += 1) {
-    const a = sharp[i - 1]
-    const b = sharp[i]
-    const horiz = Math.hypot(b[0] - a[0], b[2] - a[2])
-    if (horiz < 0.42 || Math.abs(b[1] - a[1]) > 0.08) continue
-    const count = Math.max(1, Math.round(horiz / 0.72))
-    for (let step = 1; step <= count; step += 1) {
-      const t = step / (count + 1)
-      clips.push([
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-      ])
-    }
-  }
-  return clips
-}
-
 function traceBeside(sharp) {
   let ox = 0.03
   let oz = 0
@@ -1228,6 +1222,7 @@ function PipeRuns({ rooms, pipes }) {
     })
     if (sharp.length < 2) return null
     const encoded = JSON.stringify(sharp)
+    const supports = (pipe.kind === 'suction' || pipe.kind === 'liquid') ? pipeSupports(sharp, rooms) : { hangers: [], wallClips: [] }
     return (
       <group key={pipe.id}>
         <SmoothTube encoded={encoded} radius={style.radius} color={style.color} metalness={style.metalness} roughness={style.roughness} />
@@ -1258,19 +1253,35 @@ function PipeRuns({ rooms, pipes }) {
             ))}
           </group>
         )}
-        {(pipe.kind === 'suction' || pipe.kind === 'liquid') && clipPoints(sharp).map((clip, index) => (
-          <group key={`clip-${index}`} position={clip}>
+        {supports.hangers.map((hanger, index) => (
+          <group key={`hanger-${index}`} position={[hanger.x, hanger.y, hanger.z]}>
             <mesh position={[0, 0.14, 0]}>
-              <cylinderGeometry args={[0.008, 0.008, 0.28, 8]} />
+              <cylinderGeometry args={[0.004, 0.004, 0.28, 8]} />
               <meshStandardMaterial color="#cbd5e1" metalness={0.62} roughness={0.28} />
             </mesh>
             <mesh position={[0, 0.275, 0]}>
-              <boxGeometry args={[0.07, 0.014, 0.032]} />
+              <boxGeometry args={[0.07, 0.01, 0.028]} />
               <meshStandardMaterial color="#94a3b8" metalness={0.55} roughness={0.32} />
             </mesh>
             <mesh position={[0, 0, 0]}>
-              <boxGeometry args={[Math.max(0.055, style.radius * 3.2), 0.02, 0.022]} />
+              <boxGeometry args={[Math.max(0.055, style.radius * 3.2), 0.016, 0.018]} />
               <meshStandardMaterial color="#e2e8f0" metalness={0.5} roughness={0.3} />
+            </mesh>
+          </group>
+        ))}
+        {supports.wallClips.map((clip, index) => (
+          <group key={`wall-clip-${index}`} position={[clip.x, clip.y, clip.z]} rotation={[0, Math.atan2(clip.nx, clip.nz), 0]}>
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[Math.max(0.02, style.radius + 0.008), 0.004, 8, 18]} />
+              <meshStandardMaterial color="#cbd5e1" metalness={0.62} roughness={0.3} />
+            </mesh>
+            <mesh position={[0, 0, 0.028]}>
+              <boxGeometry args={[0.01, 0.012, 0.04]} />
+              <meshStandardMaterial color="#94a3b8" metalness={0.55} roughness={0.32} />
+            </mesh>
+            <mesh position={[0, 0, 0.05]}>
+              <boxGeometry args={[0.046, 0.07, 0.008]} />
+              <meshStandardMaterial color="#cbd5e1" metalness={0.5} roughness={0.35} />
             </mesh>
           </group>
         ))}
