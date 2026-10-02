@@ -242,6 +242,7 @@ export default function DesignerApp({
   const [selectedIds, setSelectedIds] = useState([])
   const [placingId, setPlacingId] = useState(null)
   const [notice, setNotice] = useState('')
+  const [pipeOffer, setPipeOffer] = useState(null)
   const [snapOn, setSnapOn] = useState(true)
   const [gridSize, setGridSize] = useState(0.1)
   const [fitToken, setFitToken] = useState(1)
@@ -509,18 +510,55 @@ export default function DesignerApp({
     setNotice(warning || `${eq.name} sijoitettiin huoneeseen ${room.label}.`)
   }
 
-  function runAutoPipe() {
-    const result = autoCircuit(roomsRef.current, { refrigerant, teC, tcC, id: genId })
-    if (!result.ok) {
-      setNotice(result.hint)
-      return
-    }
+  function commitPipes(result) {
     pushUndo()
     const kept = pipesRef.current.filter((pipe) => pipe.kind === 'cable')
     setPipes([...kept, ...result.pipes])
-    setView('2d')
     setSelectedIds(result.pipes[0] ? [result.pipes[0].id] : [])
     setNotice(result.notice)
+    setPipeOffer(null)
+  }
+
+  function runAutoPipe() {
+    const result = autoCircuit(roomsRef.current, { refrigerant, teC, tcC, id: genId })
+    if (result.offerMove) {
+      setPipeOffer(result.moves)
+      setNotice(result.hint)
+      return
+    }
+    if (!result.ok) {
+      setPipeOffer(null)
+      setNotice(result.hint)
+      return
+    }
+    commitPipes(result)
+  }
+
+  function acceptOutdoorMove() {
+    if (!pipeOffer?.length) return
+    const next = roomsRef.current.map((room) => ({
+      ...room,
+      equipment: (room.equipment || []).map((eq) => {
+        const move = pipeOffer.find((item) => item.roomId === room.id && item.eqId === eq.id)
+        if (!move) return eq
+        return {
+          ...eq,
+          x: move.x - room.x,
+          z: move.z - room.z,
+          rotation: move.rotation,
+          mount: move.mount,
+          elevation: move.elevation,
+        }
+      }),
+    }))
+    const result = autoCircuit(next, { refrigerant, teC, tcC, id: genId })
+    if (!result.ok) {
+      setPipeOffer(null)
+      setNotice(result.hint)
+      return
+    }
+    commitPipes(result)
+    setRooms(next)
   }
 
   function onCreateRoute(points) {
@@ -1033,6 +1071,14 @@ export default function DesignerApp({
         </aside>
 
         <main style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+          {pipeOffer && (
+            <div data-testid="outdoor-move-offer" style={{ position: 'absolute', top: 12, left: 12, zIndex: 6, maxWidth: 420, padding: '10px 12px', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
+              <div style={{ fontSize: 13, color: '#78350f', lineHeight: 1.4 }}>{notice}</div>
+              <button type="button" data-testid="accept-outdoor-move" onClick={acceptOutdoorMove} style={{ marginTop: 8, padding: '6px 10px', borderRadius: 8, border: 'none', background: '#0f766e', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+                Siirrä ulkoseinälle ja putkita
+              </button>
+            </div>
+          )}
           {view === 'schematic' ? (
             <SchematicView
               rooms={rooms}

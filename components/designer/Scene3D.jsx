@@ -330,8 +330,8 @@ function EvaporatorMesh({ room, eq, onSelect, onContext }) {
         <boxGeometry args={[w * 1.02, 0.03, d * 0.98]} />
         <meshStandardMaterial color="#d5dee8" metalness={0.28} roughness={0.42} />
       </mesh>
-      <mesh position={[0, -0.045, d * 0.22]} rotation={[0.4, 0, 0]}>
-        <cylinderGeometry args={[0.012, 0.012, 0.09, 10]} />
+      <mesh position={[0, 0.02, d / 2 + 0.02]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.014, 0.014, 0.05, 10]} />
         <meshStandardMaterial color="#cbd5e1" metalness={0.45} roughness={0.35} />
       </mesh>
       {[-1, 1].map((side) => [-1, 1].map((end) => (
@@ -346,12 +346,16 @@ function EvaporatorMesh({ room, eq, onSelect, onContext }) {
           </mesh>
         </group>
       )))}
-      {[[-0.28, '#1c1917'], [0.28, '#c47a3a']].map(([offset, color]) => (
+      {[[-0.28, '#1c1917', 0.018], [0.28, '#c47a3a', 0.01]].map(([offset, color, radius]) => (
         <mesh key={offset} position={[w * offset, h * 0.42, d / 2 + 0.03]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[offset < 0 ? 0.018 : 0.01, offset < 0 ? 0.018 : 0.01, 0.07, 10]} />
+          <cylinderGeometry args={[radius, radius, 0.07, 10]} />
           <meshStandardMaterial color={color} metalness={offset < 0 ? 0.08 : 0.7} roughness={offset < 0 ? 0.8 : 0.32} />
         </mesh>
       ))}
+      <mesh position={[0, 0.045, d / 2 + 0.025]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.014, 0.012, 0.07, 10]} />
+        <meshStandardMaterial color="#a8a29e" metalness={0.35} roughness={0.4} />
+      </mesh>
       {slant ? fanLayout.map((fan, index) => (
         <SlantFan key={index} position={fan.position} quaternion={fan.quaternion} radius={fan.fanR} color="#1e293b" />
       )) : Array.from({ length: fans }, (_, index) => (
@@ -361,14 +365,21 @@ function EvaporatorMesh({ room, eq, onSelect, onContext }) {
   )
 }
 
-function ServiceValves({ w, h, d }) {
+function ServiceValves({ depth, y, valves }) {
+  const back = depth / 2
   return (
     <group>
-      {[-0.16, 0.16].map((offset) => (
-        <mesh key={offset} position={[w * offset, h * 0.32, -d / 2 - 0.03]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.028, 0.02, 0.09, 12]} />
-          <meshStandardMaterial color="#b45309" metalness={0.72} roughness={0.28} />
-        </mesh>
+      {valves.map((valve) => (
+        <group key={valve.x} position={[valve.x, y, -back - 0.012]}>
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[valve.radius, valve.radius * 0.78, 0.055, 12]} />
+            <meshStandardMaterial color="#e0b15a" metalness={0.7} roughness={0.32} />
+          </mesh>
+          <mesh position={[0, valve.radius * 0.15, 0.006]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.005, 0.005, 0.016, 6]} />
+            <meshStandardMaterial color="#e2e8f0" metalness={0.72} roughness={0.28} />
+          </mesh>
+        </group>
       ))}
     </group>
   )
@@ -411,7 +422,11 @@ function CondenserMesh({ room, eq, onSelect, onContext }) {
       {Array.from({ length: fans }, (_, index) => (
         <FanDisc key={index} x={(index - (fans - 1) / 2) * (w * 0.42)} y={h * 0.9} z={0} radius={fanR} flat />
       ))}
-      <ServiceValves w={w} h={h} d={d} />
+      <ServiceValves
+        depth={eq.depth || d}
+        y={h * 0.34}
+        valves={[{ x: -(eq.width || w) * 0.18, radius: 0.016 }, { x: (eq.width || w) * 0.18, radius: 0.012 }]}
+      />
     </EquipFrame>
   )
 }
@@ -425,18 +440,21 @@ function ComboMesh({ room, eq, onSelect, onContext }) {
   const valveY = Math.min((eq.height || h) * 0.4, 0.48)
   return (
     <EquipFrame room={room} eq={eq} onSelect={onSelect} onContext={onContext}>
-      {[-1, 1].map((side) => (
-        <group key={`bracket-${side}`}>
-          <mesh position={[side * w * 0.28, 0.04, -d * 0.15]} castShadow>
-            <boxGeometry args={[w * 0.16, 0.045, d * 0.72]} />
-            <meshStandardMaterial color="#64748b" metalness={0.55} roughness={0.38} />
-          </mesh>
-          <mesh position={[side * w * 0.28, 0.16, -d / 2 - 0.1]} castShadow>
-            <boxGeometry args={[0.045, 0.28, 0.22]} />
-            <meshStandardMaterial color="#475569" metalness={0.5} roughness={0.4} />
-          </mesh>
-        </group>
-      ))}
+      {[-1, 1].map((side) => {
+        const reach = d * 0.38 + 0.12
+        return (
+          <group key={`bracket-${side}`}>
+            <mesh position={[side * w * 0.3, 0.028, -d / 2 - 0.12 + reach / 2]} castShadow>
+              <boxGeometry args={[0.048, 0.016, reach]} />
+              <meshStandardMaterial color="#cbd5e1" metalness={0.64} roughness={0.32} />
+            </mesh>
+            <mesh position={[side * w * 0.3, -0.045, -d / 2 - 0.115]} castShadow>
+              <boxGeometry args={[0.062, 0.15, 0.01]} />
+              <meshStandardMaterial color="#94a3b8" metalness={0.6} roughness={0.34} />
+            </mesh>
+          </group>
+        )
+      })}
       <mesh position={[0, h * 0.52, 0]} castShadow>
         <boxGeometry args={[w, h * 0.92, d * 0.92]} />
         <meshStandardMaterial color="#e8eef2" metalness={0.22} roughness={0.4} />
@@ -457,7 +475,14 @@ function ComboMesh({ room, eq, onSelect, onContext }) {
         <meshStandardMaterial color="#334155" metalness={0.4} roughness={0.4} />
       </mesh>
       <FanDisc x={0} y={h * 0.52} z={d / 2 + 0.02} radius={fanR} />
-      <ServiceValves w={w} h={valveY / 0.32} d={d} />
+      <ServiceValves
+        depth={eq.depth || d}
+        y={valveY}
+        valves={[
+          { x: -(eq.width || w) / 2 + 0.18, radius: 0.026 },
+          { x: -(eq.width || w) / 2 + 0.34, radius: 0.018 },
+        ]}
+      />
     </EquipFrame>
   )
 }
@@ -663,7 +688,7 @@ function RoomMesh({ room, selected, onSelect, onContext }) {
         }}
         onContextMenu={(event) => openMenu(event, onContext, room.id, 'room')}
       >
-        <meshStandardMaterial color={palette.wall} transparent opacity={selected ? palette.wallOpacity + 0.08 : palette.wallOpacity} roughness={0.06} metalness={0.02} depthWrite={false} side={THREE.DoubleSide} />
+        <meshStandardMaterial color={palette.wall} roughness={0.78} metalness={0.02} side={THREE.FrontSide} />
         <Edges threshold={12} color={selected ? '#ffffff' : palette.edge} />
       </mesh>
       <mesh geometry={floor} position={[0, 0.02, 0]} receiveShadow>
@@ -778,6 +803,7 @@ function serviceCeiling(rooms, point) {
 }
 
 function anchorHeight(rooms, point, kind, atPort) {
+  if (Number.isFinite(point?.y)) return point.y
   if (atPort) {
     let best = null
     for (const room of rooms) {
@@ -816,19 +842,21 @@ function elbowRuns(a, b, ya, yb) {
   const dx = b.x - a.x
   const dz = b.z - a.z
   const horiz = Math.hypot(dx, dz)
-  if (horiz < 0.04 && Math.abs(ya - yb) < 0.04) return []
+  const dy = yb - ya
+  if (horiz < 0.04 && Math.abs(dy) < 0.04) return []
   const legs = []
   const axis = Math.abs(dx) < 0.04 || Math.abs(dz) < 0.04
+  // Condensate falls a few percent along one axis. Refrigerant changes height on its own vertical.
+  if (axis && horiz >= 0.04 && Math.abs(dy) / horiz <= 0.08) {
+    pushLeg(legs, a.x, ya, a.z, b.x, yb, b.z)
+    return legs
+  }
   if (!axis) {
     const y = Math.max(ya, yb)
     pushLeg(legs, a.x, ya, a.z, a.x, y, a.z)
     pushLeg(legs, a.x, y, a.z, b.x, y, a.z)
     pushLeg(legs, b.x, y, a.z, b.x, y, b.z)
     pushLeg(legs, b.x, y, b.z, b.x, yb, b.z)
-    return legs
-  }
-  if (Math.abs(ya - yb) < 0.05) {
-    pushLeg(legs, a.x, ya, a.z, b.x, yb, b.z)
     return legs
   }
   if (yb < ya) {
@@ -863,7 +891,7 @@ function filletPath(points, radius) {
     outDir.multiplyScalar(1 / outLen)
     const angle = Math.acos(THREE.MathUtils.clamp(inDir.dot(outDir), -1, 1))
     if (angle < 0.15) continue
-    const trim = Math.min(radius, inLen * 0.45, outLen * 0.45)
+    const trim = Math.min(radius, 0.06, inLen * 0.45, outLen * 0.45)
     const start = curr.clone().addScaledVector(inDir, -trim)
     const end = curr.clone().addScaledVector(outDir, trim)
     if (cursor.distanceTo(start) > 1e-3) path.add(new THREE.LineCurve3(cursor, start))
@@ -878,7 +906,7 @@ function filletPath(points, radius) {
 function SmoothTube({ encoded, radius, color, metalness = 0.25, roughness = 0.4 }) {
   const geom = useMemo(() => {
     const pts = JSON.parse(encoded)
-    const path = filletPath(pts, Math.max(0.16, radius * 4))
+    const path = filletPath(pts, 0.05)
     if (!path) return null
     const length = path.getLength()
     if (length < 0.05) return null
@@ -895,39 +923,16 @@ function SmoothTube({ encoded, radius, color, metalness = 0.25, roughness = 0.4 
 
 function tubeStyle(pipe) {
   const od = Number(pipe?.odMm) || Number(pipe?.sizeMm) || 0
-  const copper = od > 4 ? od / 2000 : pipe?.kind === 'suction' ? 0.011 : pipe?.kind === 'hotgas' ? 0.008 : pipe?.kind === 'liquid' ? 0.0065 : 0.01
-  if (pipe?.kind === 'suction') return { radius: copper + 0.016, color: '#1c1917', metalness: 0.06, roughness: 0.88 }
-  if (pipe?.kind === 'liquid') return { radius: Math.max(0.012, copper), color: '#d4894a', metalness: 0.78, roughness: 0.28 }
-  if (pipe?.kind === 'hotgas') return { radius: copper + 0.012, color: '#7f1d1d', metalness: 0.18, roughness: 0.62 }
-  if (pipe?.kind === 'drain') return { radius: 0.014, color: pipe.roomTempC < 0 ? '#9a3412' : '#e7e5e4', metalness: 0.08, roughness: 0.55 }
-  return { radius: Math.max(0.01, copper), color: '#1d4ed8', metalness: 0.2, roughness: 0.4 }
-}
-
-function wallCrossings(rooms, points) {
-  const hits = []
-  const hostAt = (x, z) => (rooms || []).find((room) => room.type !== 'yard' && pointInOutline(x, z, outlineOf(room)))
-  for (let i = 1; i < points.length; i += 1) {
-    const a = points[i - 1]
-    const b = points[i]
-    let prev = hostAt(a[0], a[2])
-    const steps = 12
-    for (let step = 1; step <= steps; step += 1) {
-      const t = step / steps
-      const p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-      const next = hostAt(p[0], p[2])
-      if ((prev?.id || '') !== (next?.id || '')) {
-        const dx = b[0] - a[0]
-        const dy = b[1] - a[1]
-        const dz = b[2] - a[2]
-        const len = Math.hypot(dx, dy, dz) || 1
-        const hit = { x: p[0], y: p[1], z: p[2], dx: dx / len, dy: dy / len, dz: dz / len }
-        const prior = hits[hits.length - 1]
-        if (!prior || Math.hypot(prior.x - hit.x, prior.y - hit.y, prior.z - hit.z) > 0.45) hits.push(hit)
-      }
-      prev = next
-    }
+  const copper = od > 4 ? od / 2000 : pipe?.kind === 'suction' ? 0.011 : pipe?.kind === 'hotgas' ? 0.008 : pipe?.kind === 'liquid' ? 0.0048 : 0.01
+  const freezer = pipe?.roomTempC < 0
+  if (pipe?.kind === 'suction') return { radius: copper + 0.019, color: '#1c1917', metalness: 0.02, roughness: 0.94 }
+  if (pipe?.kind === 'liquid') {
+    if (freezer) return { radius: copper + 0.013, color: '#292524', metalness: 0.02, roughness: 0.94 }
+    return { radius: Math.max(0.006, copper), color: '#d4894a', metalness: 0.78, roughness: 0.28 }
   }
-  return hits
+  if (pipe?.kind === 'hotgas') return { radius: copper + 0.013, color: '#44403c', metalness: 0.04, roughness: 0.9 }
+  if (pipe?.kind === 'drain') return { radius: 0.02, color: '#f5f5f4', metalness: 0.06, roughness: 0.55 }
+  return { radius: Math.max(0.01, copper), color: '#1d4ed8', metalness: 0.2, roughness: 0.4 }
 }
 
 function clipPoints(sharp) {
@@ -936,8 +941,8 @@ function clipPoints(sharp) {
     const a = sharp[i - 1]
     const b = sharp[i]
     const horiz = Math.hypot(b[0] - a[0], b[2] - a[2])
-    if (horiz < 0.9 || Math.abs(b[1] - a[1]) > 0.08) continue
-    const count = Math.max(1, Math.round(horiz / 1.25))
+    if (horiz < 0.42 || Math.abs(b[1] - a[1]) > 0.08) continue
+    const count = Math.max(1, Math.round(horiz / 0.72))
     for (let step = 1; step <= count; step += 1) {
       const t = step / (count + 1)
       clips.push([
@@ -950,22 +955,112 @@ function clipPoints(sharp) {
   return clips
 }
 
-function Sleeve({ x, y, z, dx, dy, dz, radius }) {
-  const ref = useRef()
-  useEffect(() => {
-    if (!ref.current) return
-    ref.current.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx, dy, dz))
-  }, [dx, dy, dz])
+function traceBeside(sharp) {
+  let ox = 0.03
+  let oz = 0
+  for (let i = 1; i < sharp.length; i += 1) {
+    const dx = sharp[i][0] - sharp[i - 1][0]
+    const dz = sharp[i][2] - sharp[i - 1][2]
+    const len = Math.hypot(dx, dz)
+    if (len < 0.2) continue
+    ox = (-dz / len) * 0.03
+    oz = (dx / len) * 0.03
+    break
+  }
+  return sharp.map((point) => [point[0] + ox, point[1], point[2] + oz])
+}
+
+function Sleeve({ x, y, z, dx, dz, width, height, length, round = false }) {
+  const yaw = Math.atan2(dx, dz)
+  const ring = (round ? width : Math.max(width, height)) + 0.016
   return (
-    <mesh ref={ref} position={[x, y, z]}>
-      <cylinderGeometry args={[radius, radius, 0.16, 14]} />
-      <meshStandardMaterial color="#f5f5f4" metalness={0.28} roughness={0.42} />
-    </mesh>
+    <group position={[x, y, z]} rotation={[0, yaw, 0]}>
+      {round ? (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[width / 2, width / 2, length, 20]} />
+          <meshStandardMaterial color="#f5f5f4" metalness={0.12} roughness={0.55} />
+        </mesh>
+      ) : (
+        <mesh>
+          <boxGeometry args={[width, height, length]} />
+          <meshStandardMaterial color="#f5f5f4" metalness={0.12} roughness={0.55} />
+        </mesh>
+      )}
+      {[1, -1].map((face) => (
+        <mesh key={face} position={[0, 0, face * (length / 2 + 0.003)]} rotation={round ? [Math.PI / 2, 0, 0] : [0, 0, 0]}>
+          {round ? (
+            <cylinderGeometry args={[ring / 2, ring / 2, 0.005, 20]} />
+          ) : (
+            <boxGeometry args={[width + 0.016, height + 0.016, 0.005]} />
+          )}
+          <meshStandardMaterial color="#d6d3d1" metalness={0.05} roughness={0.75} />
+        </mesh>
+      ))}
+    </group>
   )
 }
 
+function clusterSleeves(rooms, pipes) {
+  const marks = []
+  ;(pipes || []).forEach((pipe) => {
+    ;(pipe.points || []).forEach((point) => {
+      if (!point.sleeve) return
+      marks.push({ ...point, y: point.y || 0, kind: pipe.kind, temp: pipe.roomTempC })
+    })
+  })
+  const groups = []
+  marks.forEach((mark) => {
+    const group = groups.find((item) => {
+      const sameFamily = (item.kind === 'drain') === (mark.kind === 'drain')
+      return sameFamily
+        && Math.abs(item.y - mark.y) < 0.08
+        && Math.hypot(item.x - mark.x, item.z - mark.z) < 0.35
+    })
+    if (!group) {
+      groups.push({
+        x: mark.x, y: mark.y, z: mark.z, ox: mark.sox || 0, oz: mark.soz || 1, kind: mark.kind, members: [mark],
+      })
+      return
+    }
+    group.members.push(mark)
+    if (mark.sox || mark.soz) {
+      group.ox = mark.sox || 0
+      group.oz = mark.soz || 0
+    }
+  })
+  return groups.map((group) => {
+    const n = group.members.length
+    const x = group.members.reduce((sum, mark) => sum + mark.x, 0) / n
+    const y = group.members.reduce((sum, mark) => sum + mark.y, 0) / n
+    const z = group.members.reduce((sum, mark) => sum + mark.z, 0) / n
+    const room = (rooms || []).find((item) => pointInOutline(x, z, outlineOf(item))) || rooms?.[0]
+    const thick = Math.max(0.08, room?.wallThickness || 0.1)
+    const len = Math.hypot(group.ox, group.oz) || 1
+    const dx = group.ox / len
+    const dz = group.oz / len
+    const radii = group.members.map((mark) => tubeStyle({ kind: mark.kind, roomTempC: mark.temp }).radius)
+    const maxR = Math.max(...radii)
+    const along = group.members.map((mark) => Math.abs((mark.x - x) * -dz + (mark.z - z) * dx) + tubeStyle({ kind: mark.kind, roomTempC: mark.temp }).radius)
+    const half = Math.max(...along)
+    const drain = group.kind === 'drain'
+    return {
+      x, y, z, dx, dz,
+      width: drain ? (maxR + 0.01) * 2 : half * 2 + 0.02,
+      height: maxR * 2 + 0.02,
+      length: thick,
+      round: drain,
+    }
+  })
+}
+
 function PipeRuns({ rooms, pipes }) {
-  return (pipes || []).map((pipe) => {
+  const sleeves = clusterSleeves(rooms, pipes)
+  return (
+    <group>
+      {sleeves.map((sleeve, index) => (
+        <Sleeve key={`sleeve-${index}`} x={sleeve.x} y={sleeve.y} z={sleeve.z} dx={sleeve.dx} dz={sleeve.dz} width={sleeve.width} height={sleeve.height} length={sleeve.length} round={sleeve.round} />
+      ))}
+      {(pipes || []).map((pipe) => {
     const traced = pipe.kind === 'drain' && pipe.roomTempC < 0
     const style = tubeStyle(pipe)
     const points = pipe.points || []
@@ -983,37 +1078,39 @@ function PipeRuns({ rooms, pipes }) {
     })
     if (sharp.length < 2) return null
     const encoded = JSON.stringify(sharp)
-    const sleeves = wallCrossings(rooms, sharp)
     return (
       <group key={pipe.id}>
         <SmoothTube encoded={encoded} radius={style.radius} color={style.color} metalness={style.metalness} roughness={style.roughness} />
         {traced && (
           <SmoothTube
-            encoded={JSON.stringify(sharp.map((point) => [point[0], point[1] + style.radius + 0.01, point[2]]))}
-            radius={0.006}
-            color="#fdba74"
-            metalness={0.2}
-            roughness={0.45}
+            encoded={JSON.stringify(traceBeside(sharp))}
+            radius={0.009}
+            color="#f97316"
+            metalness={0.25}
+            roughness={0.4}
           />
         )}
-        {sleeves.map((sleeve, index) => (
-          <Sleeve key={index} x={sleeve.x} y={sleeve.y} z={sleeve.z} dx={sleeve.dx} dy={sleeve.dy} dz={sleeve.dz} radius={style.radius + 0.02} />
-        ))}
         {(pipe.kind === 'suction' || pipe.kind === 'liquid') && clipPoints(sharp).map((clip, index) => (
           <group key={`clip-${index}`} position={clip}>
-            <mesh position={[0, 0.045, 0]}>
-              <cylinderGeometry args={[0.004, 0.004, 0.09, 6]} />
-              <meshStandardMaterial color="#94a3b8" metalness={0.6} roughness={0.32} />
+            <mesh position={[0, 0.14, 0]}>
+              <cylinderGeometry args={[0.008, 0.008, 0.28, 8]} />
+              <meshStandardMaterial color="#cbd5e1" metalness={0.62} roughness={0.28} />
             </mesh>
-            <mesh position={[0, 0.012, 0]}>
-              <boxGeometry args={[style.radius * 2.4, 0.012, 0.012]} />
-              <meshStandardMaterial color="#cbd5e1" metalness={0.55} roughness={0.34} />
+            <mesh position={[0, 0.275, 0]}>
+              <boxGeometry args={[0.07, 0.014, 0.032]} />
+              <meshStandardMaterial color="#94a3b8" metalness={0.55} roughness={0.32} />
+            </mesh>
+            <mesh position={[0, 0, 0]}>
+              <boxGeometry args={[Math.max(0.055, style.radius * 3.2), 0.02, 0.022]} />
+              <meshStandardMaterial color="#e2e8f0" metalness={0.5} roughness={0.3} />
             </mesh>
           </group>
         ))}
       </group>
     )
-  })
+      })}
+    </group>
+  )
 }
 
 function ViewBridge({ rigRef, onHeading }) {
@@ -1041,7 +1138,9 @@ function ViewBridge({ rigRef, onHeading }) {
         controls.update()
       },
     }
-    return () => { rigRef.current = null }
+    return () => {
+      rigRef.current = null
+    }
   }, [camera, controls, rigRef])
   return null
 }
