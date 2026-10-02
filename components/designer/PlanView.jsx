@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
-import { isRefrigerated } from '@/lib/catalog'
-import { nearestPort, pointInEquipment } from '@/lib/placement'
+import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
+import { pointInEquipment } from '@/lib/placement'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
+import { highlightedPorts, pipeAppearance, snapPort } from '@/lib/pipeTopology'
 import { calculateProject } from '@/lib/heatLoad'
 import {
   applyBox,
@@ -234,13 +235,19 @@ function EquipmentMark({ eq, scale }) {
     return <rect x={-w / 2} y={-d / 2} width={w} height={d} fill="#d6d3d1" stroke="#57534e" strokeWidth={sw * 1.4} />
   }
   if (eq.category === 'evaporator' && eq.style === 'slant') {
-    const fans = w > 1.7 ? 3 : 2
+    const fans = fanCountForWidth(w)
+    const fanR = Math.min(d * 0.2, (w * 0.72) / fans / 2.3)
     return (
       <g>
-        <path d={`M ${-w / 2} ${-d / 2} L ${w / 2} ${-d / 2} L ${w * 0.34} ${d / 2} L ${-w * 0.34} ${d / 2} Z`} fill="#e0f2fe" stroke="#0369a1" strokeWidth={sw} />
-        {Array.from({ length: fans }, (_, index) => (
-          <circle key={index} cx={(index - (fans - 1) / 2) * w * 0.28} cy={d * 0.05} r={Math.min(d * 0.22, w / fans / 2.4)} fill="#fff" stroke="#0f172a" strokeWidth={sw} />
+        <rect x={-w / 2} y={-d / 2} width={w} height={d} fill="#f8fafc" stroke="#64748b" strokeWidth={sw} />
+        <line x1={-w / 2} y1={-d * 0.22} x2={w / 2} y2={-d * 0.22} stroke="#94a3b8" strokeWidth={sw} />
+        {[-1, 1].map((side) => (
+          <rect key={side} x={side * w * 0.42 - 0.03} y={-d / 2 - 0.05} width={0.06} height={0.08} fill="#94a3b8" />
         ))}
+        {Array.from({ length: fans }, (_, index) => (
+          <circle key={index} cx={(index - (fans - 1) / 2) * ((w * 0.72) / fans)} cy={d * 0.08} r={fanR} fill="#eff6ff" stroke="#1d4ed8" strokeWidth={sw * 1.4} />
+        ))}
+        <circle cx={0} cy={d * 0.34} r={0.035} fill="#64748b" />
       </g>
     )
   }
@@ -269,6 +276,13 @@ function EquipmentMark({ eq, scale }) {
         {rack && [-0.24, 0, 0.24].slice(0, w > 1 ? 3 : 2).map((offset) => (
           <circle key={offset} cx={w * offset} cy={0} r={Math.min(0.16, d * 0.22)} fill="#1f2937" />
         ))}
+        {(rack || combo) && (
+          <g>
+            <rect x={w * 0.02} y={-d / 2 - 0.02} width={w * 0.16} height={0.07} rx={0.02} fill="#e2e8f0" stroke="#334155" strokeWidth={sw} />
+            <circle cx={w * 0.24} cy={-d / 2 + 0.015} r={0.035} fill="#fff" stroke="#334155" strokeWidth={sw} />
+            <circle cx={w * 0.33} cy={-d / 2 + 0.015} r={0.028} fill="#dbeafe" stroke="#1d4ed8" strokeWidth={sw} />
+          </g>
+        )}
         <circle cx={-w * 0.12} cy={-d / 2} r={0.045} fill="#b45309" />
         <circle cx={w * 0.12} cy={-d / 2} r={0.045} fill="#b45309" />
       </g>
@@ -805,7 +819,7 @@ export default function PlanView({
         point = { x: origin.x + (dx / mag) * typedLength, z: origin.z + (dz / mag) * typedLength }
       }
       if (p.tool === 'pipe') {
-        const port = nearestPort(p.rooms, point.x, point.z, p.pipeKind)
+        const port = snapPort(p.rooms, point.x, point.z, p.pipeKind, polyRef.current)
         if (port) point = { x: port.x, z: port.z }
       }
       polyTyped.current = ''
@@ -1116,25 +1130,69 @@ export default function PlanView({
           })}
           {(() => {
             const projectNow = calculateProject(rooms)
+            const placedLabels = []
             return pipes.map((pipe) => {
               const points = pipe.points || []
               if (points.length < 2) return null
-              const { sized } = sizePlacedPipe(pipe, rooms, projectNow.rooms)
+              const { sized } = sizePlacedPipe(pipe, rooms, projectNow.rooms, pipes)
               const traced = pipe.kind === 'drain' && sized.heatTraced
-              const color = pipe.kind === 'suction' ? '#1d4ed8' : pipe.kind === 'liquid' ? '#15803d' : '#c2410c'
+              const look = pipeAppearance(pipe, traced)
+              const color = look.color
               const mid = longestMid(points)
               const active = selected.has(pipe.id)
-              const side = pipe.kind === 'suction' ? -1 : 1
-              const labelX = mid.x + mid.nx * (20 / view.scale) * side
-              const labelZ = mid.z + mid.nz * (20 / view.scale) * side
+              const side = pipe.kind === 'suction' ? -1.7
+                : pipe.kind === 'hotgas' ? 1.85
+                  : pipe.kind === 'drain' ? 2.6
+                    : pipe.segment === 'return' ? -2.55
+                      : 1
+              const along = pipe.kind === 'hotgas' ? 0.22 : pipe.segment === 'return' ? -0.2 : pipe.kind === 'drain' ? 0.28 : 0
+              const planText = sized.odMm
+                ? `${look.short || look.legend} ${Number(sized.odMm).toFixed(1)} mm`
+                : sized.label
+              let labelX = mid.x + mid.nx * (22 / view.scale) * side + mid.nz * (28 / view.scale) * along
+              let labelZ = mid.z + mid.nz * (22 / view.scale) * side - mid.nx * (28 / view.scale) * along
+              const halfW = (planText.length * 3.2) / view.scale
+              const halfH = 7 / view.scale
+              const overlaps = (x, z) => placedLabels.some((box) => Math.abs(box.x - x) < box.hw + halfW && Math.abs(box.z - z) < box.hh + halfH)
+              const nudge = [
+                [mid.nx, mid.nz], [-mid.nx, -mid.nz], [mid.nz, -mid.nx], [-mid.nz, mid.nx],
+              ]
+              if (overlaps(labelX, labelZ)) {
+                const step = 20 / view.scale
+                let clear = false
+                for (let ring = 1; ring <= 8 && !clear; ring += 1) {
+                  for (const [dx, dz] of nudge) {
+                    const x = labelX + dx * step * ring
+                    const z = labelZ + dz * step * ring
+                    if (!overlaps(x, z)) {
+                      labelX = x
+                      labelZ = z
+                      clear = true
+                      break
+                    }
+                  }
+                }
+              }
+              placedLabels.push({ x: labelX, z: labelZ, hw: halfW, hh: halfH })
+              let arrow = null
+              let bestLen = 0
+              for (let i = 1; i < points.length; i += 1) {
+                const len = Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z)
+                if (len < bestLen) continue
+                bestLen = len
+                const ax = points[i - 1].x + (points[i].x - points[i - 1].x) * 0.62
+                const az = points[i - 1].z + (points[i].z - points[i - 1].z) * 0.62
+                const ang = Math.atan2(points[i].z - points[i - 1].z, points[i].x - points[i - 1].x) * 180 / Math.PI
+                arrow = { x: ax, z: az, ang }
+              }
               return (
-                <g key={pipe.id} data-pipe={pipe.id}>
+                <g key={pipe.id} data-pipe={pipe.id} data-kind={pipe.kind} data-segment={pipe.segment || ''}>
                   <polyline
                     points={points.map((point) => `${point.x},${point.z}`).join(' ')}
                     fill="none"
                     stroke={color}
-                    strokeWidth={(traced ? 2.6 : 1.7) / view.scale}
-                    strokeDasharray={pipe.kind === 'drain' ? `${0.22} ${0.14}` : undefined}
+                    strokeWidth={(traced ? 3.4 : 2.8) / view.scale}
+                    strokeDasharray={look.dash ? look.dash.split(' ').map((part) => Number(part)).join(' ') : undefined}
                   />
                   {traced && (
                     <polyline
@@ -1145,11 +1203,38 @@ export default function PlanView({
                       strokeDasharray={`${0.08} ${0.1}`}
                     />
                   )}
+                  {points.map((point, index) => {
+                    if (!point.sleeve && !point.riser && !point.vertical) return null
+                    const prev = points[Math.max(0, index - 1)]
+                    const next = points[Math.min(points.length - 1, index + 1)]
+                    const dx = next.x - prev.x
+                    const dz = next.z - prev.z
+                    const span = Math.hypot(dx, dz) || 1
+                    const nx = (-dz / span) * 0.16
+                    const nz = (dx / span) * 0.16
+                    return (
+                      <g key={`${pipe.id}-mark-${index}`}>
+                        {point.sleeve && (
+                          <line x1={point.x - nx} y1={point.z - nz} x2={point.x + nx} y2={point.z + nz} stroke={color} strokeWidth={1.4 / view.scale} />
+                        )}
+                        {point.vertical && (
+                          <text x={point.x + nx} y={point.z + nz} fontSize={9 / view.scale} fill={color} fontFamily="ui-sans-serif, system-ui, sans-serif">{point.vertical}</text>
+                        )}
+                      </g>
+                    )
+                  })}
+                  {arrow && bestLen > 0.35 && (
+                    <polygon
+                      transform={`translate(${arrow.x} ${arrow.z}) rotate(${arrow.ang})`}
+                      points="0,-0.1 0.24,0 0,0.1"
+                      fill={color}
+                    />
+                  )}
                   <g>
                     <rect
-                      x={labelX - (sized.label.length * 3.15) / view.scale}
+                      x={labelX - halfW}
                       y={labelZ - 8 / view.scale}
-                      width={(sized.label.length * 6.3) / view.scale}
+                      width={halfW * 2}
                       height={13 / view.scale}
                       rx={0.05}
                       fill="rgba(255,255,255,0.94)"
@@ -1166,13 +1251,19 @@ export default function PlanView({
                       fontWeight="700"
                       fontFamily="ui-sans-serif, system-ui, sans-serif"
                     >
-                      {sized.label}
+                      {planText}
                     </text>
                   </g>
                 </g>
               )
             })
           })()}
+          {tool === 'pipe' && highlightedPorts(rooms, pipeKind, poly).map((port) => (
+            <g key={port.id} data-port={port.id}>
+              <circle cx={port.x} cy={port.z} r={7 / view.scale} fill={pipeAppearance({ kind: port.kind, segment: port.key === 'liquidIn' ? 'return' : null }).color} fillOpacity="0.18" stroke={pipeAppearance({ kind: port.kind }).color} strokeWidth={1.4 / view.scale} />
+              <text x={port.x + 8 / view.scale} y={port.z - 6 / view.scale} fontSize={9 / view.scale} fill="#1c1917" fontFamily="ui-sans-serif, system-ui, sans-serif">{port.label}</text>
+            </g>
+          ))}
           {cables.map((cable) => (
             <polyline
               key={cable.id}

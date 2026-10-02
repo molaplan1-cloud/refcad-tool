@@ -110,6 +110,7 @@ export default function HeatLoadPanel({
   onBlurEdit,
   selectedEquipment,
   selectedPipe,
+  pipes,
   onPatchEquipment,
   onPatchPipe,
   onDeleteEquipment,
@@ -332,7 +333,7 @@ export default function HeatLoadPanel({
         </>
       )}
       {selectedPipe && (
-        <PipeCard pipe={selectedPipe} rooms={rooms} result={result} onPatch={onPatchPipe} onDelete={onDeleteEquipment} />
+        <PipeCard pipe={selectedPipe} rooms={rooms} result={result} pipes={pipes} onPatch={onPatchPipe} onDelete={onDeleteEquipment} />
       )}
       {selectedEquipment && (
         <div style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
@@ -421,9 +422,9 @@ function CapacityBlock({ room, roomResult }) {
   )
 }
 
-function PipeCard({ pipe, rooms, result, onPatch, onDelete }) {
-  const { duty, sized } = sizePlacedPipe(pipe, rooms, result.rooms)
-  const source = duty.source === 'evaporator' ? 'höyrystimestä' : duty.source === 'room' ? 'huoneen tarpeesta' : duty.source === 'manual' ? 'käsin' : duty.source === 'drain' ? 'kondenssivesi' : 'ei kytkettyä tehoa'
+function PipeCard({ pipe, rooms, result, pipes, onPatch, onDelete }) {
+  const { duty, sized } = sizePlacedPipe(pipe, rooms, result.rooms, pipes)
+  const source = duty.source === 'evaporator' ? 'höyrystimestä' : duty.source === 'circuit' ? 'piiristä' : duty.source === 'room' ? 'huoneen tarpeesta' : duty.source === 'manual' ? 'käsin' : duty.source === 'drain' ? 'kondenssivesi' : 'ei kytkettyä tehoa'
   return (
     <div data-testid="pipe-audit" style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
       <div style={{ fontSize: 13, fontWeight: 750, marginBottom: 4 }}>{sized.label}</div>
