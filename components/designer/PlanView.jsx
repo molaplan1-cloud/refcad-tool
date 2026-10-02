@@ -7,10 +7,13 @@ import {
   applyBox,
   applyOutline,
   bboxOf,
+  clampGroupTranslation,
+  clampResizeBox,
   cleanOrthogonal,
   doorSymbol,
   edgesOf,
   fitView,
+  footprintInside,
   gridSpec,
   insetOrthogonal,
   isCustomOutline,
@@ -96,8 +99,12 @@ function hitEquipment(rooms, x, z) {
     for (const eq of room.equipment || []) {
       const wx = room.x + eq.x
       const wz = room.z + eq.z
-      const hw = (eq.rotation === 90 ? eq.depth : eq.width) / 2
-      const hd = (eq.rotation === 90 ? eq.width : eq.depth) / 2
+      const verticalDoor = eq.category === 'door' && (
+        eq.wall === 'e' || eq.wall === 'w' || (eq.rotation === 90 && eq.wall !== 'n' && eq.wall !== 's')
+      )
+      const alongX = eq.category === 'door' ? !verticalDoor : eq.rotation !== 90
+      const hw = (alongX ? eq.width : eq.depth) / 2
+      const hd = (alongX ? eq.depth : eq.width) / 2
       if (Math.abs(x - wx) <= hw + 0.08 && Math.abs(z - wz) <= hd + 0.08) return { room, eq }
     }
   }
@@ -491,16 +498,15 @@ export default function PlanView({
           flags: { ...p.snapFlags, ortho: false },
           ignoreIds: g.ignoreIds,
         })
-        const dx = anchor.x - anchorX
-        const dz = anchor.z - anchorZ
+        const limited = clampGroupTranslation(g.orig, g.ids, anchor.x - anchorX, anchor.z - anchorZ)
         setCursor((prev) => ({ ...(prev || world), kind: anchor.kind }))
         p.onPreview(g.orig.map((room) => {
           if (!g.ids.has(room.id)) return room
           return {
             ...room,
-            x: room.x + dx,
-            z: room.z + dz,
-            outline: translateOutline(room.outline, dx, dz),
+            x: room.x + limited.dx,
+            z: room.z + limited.dz,
+            outline: translateOutline(room.outline, limited.dx, limited.dz),
           }
         }))
         return
@@ -525,7 +531,11 @@ export default function PlanView({
           if (handle.includes('s')) bottom = top + 1
           else top = bottom - 1
         }
-        p.onPreview(g.orig.map((item) => (item.id === room.id ? applyBox(item, left, top, right, bottom) : item)))
+        const limited = clampResizeBox(room, g.orig, left, top, right, bottom)
+        if (!limited) return
+        p.onPreview(g.orig.map((item) => (
+          item.id === room.id ? applyBox(item, limited.left, limited.top, limited.right, limited.bottom) : item
+        )))
         return
       }
       if (g.kind === 'edge' || g.kind === 'vertex') {
@@ -534,7 +544,12 @@ export default function PlanView({
           ? moveEdge(outlineOf(room), g.index, snapped.x, snapped.z)
           : moveVertex(outlineOf(room), g.index, snapped.x, snapped.z)
         if (points.length < 4 || selfIntersects(points) || polygonArea(points) < 0.5) return
-        p.onPreview(g.orig.map((item) => (item.id === room.id ? applyOutline(item, points) : item)))
+        const proposed = applyOutline(room, points)
+        const parent = room.parentId ? g.orig.find((item) => item.id === room.parentId) : null
+        if (parent && !footprintInside(parent, proposed)) return
+        const children = g.orig.filter((item) => item.parentId === room.id)
+        if (children.some((child) => !footprintInside(proposed, child))) return
+        p.onPreview(g.orig.map((item) => (item.id === room.id ? proposed : item)))
         return
       }
       if (g.kind === 'equip') {

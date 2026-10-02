@@ -14,7 +14,7 @@ import {
   makeEquipment,
   normalizeRooms,
 } from '@/lib/geometry'
-import { applyOutline, bboxOf, cleanOrthogonal, isRectangleOutline, scaleOutline, selfIntersects, translateOutline } from '@/lib/cadDraw'
+import { applyOutline, bboxOf, clampGroupTranslation, cleanOrthogonal, isRectangleOutline, scaleOutline, selfIntersects, translateOutline } from '@/lib/cadDraw'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
 import { buildDxf, dxfFilename } from '@/lib/dxf'
 import { buildPdf, pdfFilename } from '@/lib/pdfExport'
@@ -220,9 +220,13 @@ export default function DesignerApp({
         const dz = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
         const ids = new Set(selectedRef.current)
         if (!ids.size) return
+        const current = roomsRef.current
+        selectedRef.current.forEach((id) => descendantIds(current, id).forEach((child) => ids.add(child)))
+        const limited = clampGroupTranslation(current, ids, dx, dz)
+        if (Math.abs(limited.dx) < 1e-6 && Math.abs(limited.dz) < 1e-6) return
         pushUndo()
-        setRooms(roomsRef.current.map((room) => (
-          ids.has(room.id) ? { ...room, x: room.x + dx, z: room.z + dz, outline: translateOutline(room.outline, dx, dz) } : room
+        setRooms(current.map((room) => (
+          ids.has(room.id) ? { ...room, x: room.x + limited.dx, z: room.z + limited.dz, outline: translateOutline(room.outline, limited.dx, limited.dz) } : room
         )))
       }
     }

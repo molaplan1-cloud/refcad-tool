@@ -114,6 +114,11 @@ export default function HeatLoadPanel({
   const setLength = (key, display) => onPatch({ [key]: fromLength(display, unitSystem) })
   const setTemp = (key, display) => onPatch({ [key]: fromTemp(display, unitSystem) })
   const setLoad = (key, value) => onPatch({ load: { ...room.load, [key]: value } })
+  const commitToggle = (key, value) => {
+    onFocusEdit?.()
+    setLoad(key, value)
+    onBlurEdit?.()
+  }
   const setLoadTemp = (key, display) => setLoad(key, fromTemp(display, unitSystem))
 
   const maxAbs = roomResult ? Math.max(1, ...roomResult.lines.map((item) => Math.abs(item.watts))) : 1
@@ -270,7 +275,7 @@ export default function HeatLoadPanel({
             <input
               type="checkbox"
               checked={!!room.load.pullDownEnabled}
-              onChange={(e) => setLoad('pullDownEnabled', e.target.checked)}
+              onChange={(e) => commitToggle('pullDownEnabled', e.target.checked)}
             />
             Laatan jäähtyminen mukaan
           </label>
@@ -286,7 +291,7 @@ export default function HeatLoadPanel({
               <input
                 type="checkbox"
                 checked={!!room.load.ceilingToParent}
-                onChange={(e) => setLoad('ceilingToParent', e.target.checked)}
+                onChange={(e) => commitToggle('ceilingToParent', e.target.checked)}
               />
               Katto emohuoneen ilmaan (ei ulkovaippaan)
             </label>
