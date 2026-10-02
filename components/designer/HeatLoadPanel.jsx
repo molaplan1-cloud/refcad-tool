@@ -2,15 +2,16 @@
 
 import { PRODUCTS, ROOM_TYPES, getProduct } from '@/lib/catalog'
 import { applyType, internalDims } from '@/lib/geometry'
+import { isCustomOutline, polygonMetrics } from '@/lib/cadDraw'
 import { formatKw, formatPower, fromLength, fromTemp, lengthUnit, tempUnit, toLength, toTemp } from '@/lib/units'
 
 const labelStyle = {
-  fontSize: 10, color: 'rgba(255,255,255,0.5)', fontWeight: 700,
+  fontSize: 10, color: '#78716c', fontWeight: 700,
   letterSpacing: 0.4, display: 'block', marginBottom: 4,
 }
 const inputStyle = {
-  width: '100%', padding: '6px 8px', background: '#0f172a', color: '#f8fafc',
-  border: '1px solid #334155', borderRadius: 6, fontSize: 12,
+  width: '100%', padding: '6px 8px', background: '#fff', color: '#1c1917',
+  border: '1px solid #d6d3d1', borderRadius: 6, fontSize: 12,
 }
 
 function Num({ label, value, onChange, step = 0.1, unit, min, onFocus, onBlur }) {
@@ -35,18 +36,18 @@ function Num({ label, value, onChange, step = 0.1, unit, min, onFocus, onBlur })
 }
 
 function LineRow({ item, unitSystem }) {
-  const color = item.watts < -1 ? '#86efac' : '#e2e8f0'
+  const color = item.watts < -1 ? '#047857' : '#1c1917'
   return (
-    <div style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+    <div style={{ padding: '6px 0', borderBottom: '1px solid #e7e5e4' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
-        <span style={{ color: '#f8fafc' }}>{item.label}</span>
+        <span style={{ color: '#292524' }}>{item.label}</span>
         <span style={{ color, fontWeight: 700, whiteSpace: 'nowrap' }}>{Math.round(item.watts)} W</span>
       </div>
-      <div style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'ui-monospace, monospace', marginTop: 2 }}>
+      <div style={{ fontSize: 10, color: '#78716c', fontFamily: 'ui-monospace, monospace', marginTop: 2 }}>
         {item.formula}
       </div>
       {unitSystem === 'IP' && (
-        <div style={{ fontSize: 10, color: '#67e8f9' }}>{formatPower(item.watts, 'IP')}</div>
+        <div style={{ fontSize: 10, color: '#0f766e' }}>{formatPower(item.watts, 'IP')}</div>
       )}
     </div>
   )
@@ -76,20 +77,20 @@ export default function HeatLoadPanel({
   return (
     <div data-testid="heat-panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div>
-        <div style={{ fontSize: 10, letterSpacing: 1, color: 'rgba(255,255,255,0.45)', fontWeight: 700 }}>KOKO KOHDE</div>
-        <div style={{ fontSize: 26, fontWeight: 800, color: '#f8fafc', lineHeight: 1.1 }}>
+        <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>KOKO KOHDE</div>
+        <div style={{ fontSize: 26, fontWeight: 800, color: '#1c1917', lineHeight: 1.1 }}>
           {formatKw(result.total)}
         </div>
-        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+        <div style={{ fontSize: 11, color: '#78716c', marginTop: 2 }}>
           {Math.round(result.total).toLocaleString('fi-FI')} W · {formatPower(result.total, 'IP')}
         </div>
-        <div style={{ fontSize: 11, color: '#67e8f9', marginTop: 6 }}>
+        <div style={{ fontSize: 11, color: '#0f766e', marginTop: 6 }}>
           {result.suggestedEvap.count} × {result.suggestedEvap.template.name} koko kohteelle
         </div>
       </div>
 
       {!room && (
-        <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 12, color: '#78716c', lineHeight: 1.5 }}>
           Valitse huone pohjasta tai listasta. Kuorma, mitat ja väliseinät päivittyvät heti.
         </div>
       )}
@@ -111,9 +112,9 @@ export default function HeatLoadPanel({
           </div>
           <InternalNote room={room} unitSystem={unitSystem} />
           <div data-testid="heat-breakdown">
-            <div style={{ fontSize: 10, letterSpacing: 1, color: 'rgba(255,255,255,0.45)', fontWeight: 700, marginBottom: 4 }}>ERITTELY</div>
+            <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700, marginBottom: 4 }}>ERITTELY</div>
             {roomResult.lines.map((item) => <LineRow key={item.key} item={item} unitSystem={unitSystem} />)}
-            <div style={{ padding: 10, borderRadius: 8, background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.35)', marginTop: 8 }}>
+            <div style={{ padding: 10, borderRadius: 8, background: '#f0fdfa', border: '1px solid #99f6e4', marginTop: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                 <span>Välisumma</span><span>{Math.round(roomResult.subtotal)} W</span>
               </div>
@@ -121,7 +122,7 @@ export default function HeatLoadPanel({
                 <span>× varmuus {roomResult.safetyFactor.toFixed(2)}</span>
                 <strong>{formatKw(roomResult.total)}</strong>
               </div>
-              <div style={{ fontSize: 12, color: '#67e8f9', marginTop: 6 }}>
+              <div style={{ fontSize: 12, color: '#0f766e', marginTop: 6 }}>
                 Huoneen höyrystin: {roomResult.suggestedEvap.count} × {roomResult.suggestedEvap.template.name}
               </div>
             </div>
@@ -142,7 +143,7 @@ export default function HeatLoadPanel({
             </select>
           </label>
 
-          <div style={{ fontSize: 10, letterSpacing: 1, color: 'rgba(255,255,255,0.45)', fontWeight: 700 }}>MITAT</div>
+          <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>MITAT</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <Num {...field} label="Pituus" unit={lengthUnit(unitSystem)} value={length(room.width)} step={unitSystem === 'IP' ? 0.1 : 0.1} onChange={(v) => setLength('width', v)} />
             <Num {...field} label="Leveys" unit={lengthUnit(unitSystem)} value={length(room.depth)} onChange={(v) => setLength('depth', v)} />
@@ -153,7 +154,7 @@ export default function HeatLoadPanel({
             }} />
           </div>
 
-          <div style={{ fontSize: 10, letterSpacing: 1, color: 'rgba(255,255,255,0.45)', fontWeight: 700 }}>OLOSUHTEET</div>
+          <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>OLOSUHTEET</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <Num {...field} label="Huone" unit={tempUnit(unitSystem)} value={temp(room.temp)} step={0.5} onChange={(v) => setTemp('temp', v)} />
             <Num {...field} label="Ulkoilma" unit={tempUnit(unitSystem)} value={temp(room.ambientTemp)} step={0.5} onChange={(v) => setTemp('ambientTemp', v)} />
@@ -163,7 +164,7 @@ export default function HeatLoadPanel({
             <Num {...field} label="U lattia" unit="W/m²K" value={room.uFloor} step={0.01} onChange={(v) => onPatch({ uFloor: v })} />
           </div>
 
-          <div style={{ fontSize: 10, letterSpacing: 1, color: 'rgba(255,255,255,0.45)', fontWeight: 700 }}>TUOTE</div>
+          <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>TUOTE</div>
           <label style={{ display: 'block' }}>
             <span style={labelStyle}>Tuoteryhmä</span>
             <select
@@ -186,7 +187,7 @@ export default function HeatLoadPanel({
             <Num {...field} label="Hengitys" unit="W/kg" value={room.load.respirationWPerKg} step={0.01} onChange={(v) => setLoad('respirationWPerKg', v)} />
           </div>
 
-          <div style={{ fontSize: 10, letterSpacing: 1, color: 'rgba(255,255,255,0.45)', fontWeight: 700 }}>OVET, IHMISET, VALOT</div>
+          <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>OVET, IHMISET, VALOT</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <Num {...field} label="Avauksia" unit="/vrk" value={room.load.doorOpeningsPerDay} step={1} onChange={(v) => setLoad('doorOpeningsPerDay', v)} />
             <Num {...field} label="Auki" unit="s" value={room.load.doorOpenSeconds} step={1} onChange={(v) => setLoad('doorOpenSeconds', v)} />
@@ -200,7 +201,7 @@ export default function HeatLoadPanel({
             <Num {...field} label="Varmuus" value={room.load.safetyFactor} step={0.05} onChange={(v) => setLoad('safetyFactor', v)} />
           </div>
 
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#e2e8f0' }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#44403c' }}>
             <input
               type="checkbox"
               checked={!!room.load.pullDownEnabled}
@@ -216,7 +217,7 @@ export default function HeatLoadPanel({
             </div>
           )}
           {room.parentId && (
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#e2e8f0' }}>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#44403c' }}>
               <input
                 type="checkbox"
                 checked={!!room.load.ceilingToParent}
@@ -233,9 +234,9 @@ export default function HeatLoadPanel({
       )}
 
       {selectedEquipment && (
-        <div style={{ padding: 10, borderRadius: 8, border: '1px solid #334155', background: 'rgba(15,23,42,0.6)' }}>
+        <div style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{selectedEquipment.name}</div>
-          <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: '#78716c', marginBottom: 8 }}>
             {selectedEquipment.width} × {selectedEquipment.depth} × {selectedEquipment.height} m
             {selectedEquipment.capacityKw ? ` · ${selectedEquipment.capacityKw} kW` : ''}
             {selectedEquipment.fanW ? ` · puhallin ${selectedEquipment.fanW} W` : ''}
@@ -245,7 +246,7 @@ export default function HeatLoadPanel({
             onClick={onDeleteEquipment}
             style={{
               padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(220,38,38,0.45)',
-              background: 'rgba(220,38,38,0.15)', color: '#fecaca', fontSize: 12, cursor: 'pointer',
+              background: '#fef2f2', color: '#991b1b', fontSize: 12, cursor: 'pointer', transform: 'none',
             }}
           >
             Poista laite
@@ -257,9 +258,9 @@ export default function HeatLoadPanel({
 }
 
 function InternalNote({ room, unitSystem }) {
-  const dims = internalDims(room)
+  const dims = isCustomOutline(room) ? polygonMetrics(room).dims : internalDims(room)
   return (
-    <div style={{ fontSize: 11, color: '#67e8f9', lineHeight: 1.45 }}>
+    <div style={{ fontSize: 11, color: '#0f766e', lineHeight: 1.45 }}>
       Sisämitta {formatLen(dims.width, unitSystem)} × {formatLen(dims.depth, unitSystem)} × {formatLen(dims.height, unitSystem)}
       <br />
       {dims.area.toFixed(1)} m² · {dims.volume.toFixed(1)} m³

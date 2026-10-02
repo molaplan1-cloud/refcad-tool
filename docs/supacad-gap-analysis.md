@@ -28,9 +28,11 @@ The public page and the project page now use one designer. An old browser save s
 | --- | --- |
 | Draw and resize, live update | **Done.** Drag a rectangle, or drag an edge or corner. The opposite corner stays put. External dimensions, internal clear size, and the heat load update while the pointer moves. SI (m, °C, W) and IP (ft-in on the plan, °F, BTU/h) switch without converting the stored model. |
 | Partitions | **Done** for rectangles. The Väliseinä tool draws inside a room, assigns the next label (`J1`, `P1`, `S1`, `B1`, `T1`), and shows internal size as external size minus the panels. A full-height partition that sits on the outer shell takes that strip of envelope; heat that crosses the internal face is added to the colder room and subtracted from the parent. |
+| Polygon footprints | **Done** for orthogonal rooms. The Monikulmio tool places straight wall segments, so an L-shape or a jog is a closed outline rather than a bounding box. Floor area, wall length, the plan, the 3D shell, and the DXF follow that outline. Curves and non-orthogonal edges are not in the tool. |
+| Drawing surface | **Done.** Paper canvas, major and minor grid, scale bar, zoom-to-cursor, trackpad pan, middle-mouse and space-drag pan, snap to grid, endpoints, midpoints and walls, live dimensions, typed sizes while drawing, marquee multi-select, undo and redo, and fit-to-view. |
 | Heat load | **Done**, per room, with every line written as a formula. Transmission `U·A·ΔT` on internal surfaces, product sensible load, respiration, door air, optional air changes, people, lighting, evaporator fan heat, other equipment, slab pull-down, then a safety factor. The method is in `lib/heatLoad.js`. |
 | Door and evaporator templates | **Done.** Pick a template and click the room. Doors snap to the nearest wall. Evaporators stay inside and hang from the ceiling in 3D. Condensers, condensing units, and a rack template are still placeable. |
-| 2D and 3D | **Done.** Plan, isometric, or both. Doors and evaporators are on both. Orbit, pan, and zoom work in 3D. |
+| 2D and 3D | **Done.** The plan shows panel thickness, door swings, and evaporator airflow. The 3D view is a lit model with orbit controls: panel shells, floors, translucent ceilings, doors, and evaporators. |
 | PDF | **Done.** Cover, scaled plan, isometric line drawing, per-room breakdown, and a door and equipment schedule. |
 | DXF | **Done.** R12 ASCII, 1 unit = 1 mm. Layers `WALLS`, `PARTITIONS`, `DOORS`, `EVAPORATORS`, `EQUIPMENT`, `DIMS`, `TEXT`, `TITLE`, `SCHEDULE`, plus a title block and a schedule. |
 | Worked example | **Done.** “Esimerkki 8×12×6” builds a 12 m × 8 m × 6 m vegetable chiller with a corner freezer, a door, and an evaporator in each room. |
@@ -39,10 +41,9 @@ The public page and the project page now use one designer. An old browser save s
 
 These are not started. They are larger than a coherent slice of the drawing and load workflow, and a half-built version would be worse than a clear list.
 
-1. **Polygon footprints.** L-shapes and jogs around columns need a real polygon model, wall edits, and a heat-load area that is not `width × depth`. The drawing tool is rectangles only.
-2. **Discovery sizing.** Daily kilograms are an input to the product load. SKU count and pack height do not yet produce storage capacity, a rack layout, or a suggested ceiling height, and racks are not checked against aisles.
-3. **View-only share link.** There is no tokenised read-only URL. Projects are still per browser. The server project API is not what the designer saves to, and login is the demo user in `lib/auth.js`.
-4. **Finer equipment and export fit.** No manufacturer catalogue, no door-swing clearance check, no imperial U-values (U stays in W/m²K), and the PDF isometric is a line drawing rather than a shaded render of the same camera the user left on screen.
+1. **Discovery sizing.** Daily kilograms are an input to the product load. SKU count and pack height do not yet produce storage capacity, a rack layout, or a suggested ceiling height, and racks are not checked against aisles.
+2. **View-only share link.** There is no tokenised read-only URL. Projects are still per browser. The server project API is not what the designer saves to, and login is the demo user in `lib/auth.js`.
+3. **Finer equipment and export fit.** No manufacturer catalogue, no door-swing clearance check, and no imperial U-values (U stays in W/m²K). The PDF isometric is still a line drawing. Non-orthogonal walls (angled jogs that are not horizontal or vertical) are not supported.
 
 ## Where the numbers come from
 
