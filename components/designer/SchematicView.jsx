@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { REFRIGERANT_IDS } from '@/lib/pipeSizing'
 import { ACCESSORY_FIELDS, buildSchematics } from '@/lib/schematic'
+import TechnicalSheet from '@/components/designer/TechnicalSchematic'
 
 const THEMES = {
   dark: {
@@ -326,7 +327,10 @@ export default function SchematicView({ rooms, projectName, settings, onChange, 
     date: drawn,
   }), [rooms, settings, projectName, loads, drawn])
   const circuit = model.circuits.find((item) => item.id === circuitId) || model.circuits[0] || null
-  const theme = THEMES[settings?.theme === 'light' ? 'light' : 'dark']
+  const themeName = settings?.theme === 'dark' ? 'dark' : 'light'
+  const technical = circuit?.drawing !== 'presentation'
+  const theme = THEMES[themeName]
+  const paper = technical && themeName === 'light' ? '#ffffff' : theme.bg
 
   function patch(partial) {
     onChange({ ...settings, ...partial })
@@ -357,7 +361,7 @@ export default function SchematicView({ rooms, projectName, settings, onChange, 
     canvas.width = width * 2
     canvas.height = height * 2
     const ctx = canvas.getContext('2d')
-    ctx.fillStyle = theme.bg
+    ctx.fillStyle = paper
     ctx.fillRect(0, 0, canvas.width, canvas.height)
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
     URL.revokeObjectURL(url)
@@ -368,7 +372,7 @@ export default function SchematicView({ rooms, projectName, settings, onChange, 
   }
 
   return (
-    <div data-testid="schematic-view" style={{ display: 'flex', height: '100%', minWidth: 0, background: theme.bg }}>
+    <div data-testid="schematic-view" style={{ display: 'flex', height: '100%', minWidth: 0, background: paper }}>
       <div style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: 12 }}>
         {!circuit && (
           <div style={{ color: theme.title, padding: 24 }}>Lisää höyrystin pohjaan, niin periaatekaavio rakentuu.</div>
@@ -377,42 +381,47 @@ export default function SchematicView({ rooms, projectName, settings, onChange, 
           <svg
             ref={svgRef}
             data-testid="schematic-sheet"
-            data-theme={settings?.theme === 'light' ? 'light' : 'dark'}
+            data-theme={themeName}
+            data-drawing={technical ? 'technical' : 'presentation'}
             data-remote={circuit.remote ? 'true' : 'false'}
             viewBox={`0 0 ${circuit.width} ${circuit.height}`}
             width="100%"
-            style={{ display: 'block', maxWidth: circuit.width, background: theme.bg, color: theme.title }}
+            style={{ display: 'block', maxWidth: circuit.width, background: paper, color: theme.title, fontFamily: technical ? '"Liberation Sans", "Nimbus Sans", Arial, Helvetica, sans-serif' : undefined }}
           >
-            <defs>
-              <filter id="schematic-glow" x="-40%" y="-40%" width="180%" height="180%">
-                <feGaussianBlur stdDeviation="4" />
-              </filter>
-            </defs>
-            <rect width={circuit.width} height={circuit.height} fill={theme.bg} />
-            {circuit.boxes.map((box) => (
-              <g key={box.id} data-role={box.role}>
-                <rect x={box.x} y={box.y} width={box.w} height={box.h} rx="14" fill={theme.box} stroke={theme.boxStroke} strokeWidth="1.6" strokeDasharray="8 6" />
-                <text x={box.x + 14} y={box.y + 22} fill={theme.muted} fontSize="14" fontWeight="700">{box.title}</text>
-              </g>
-            ))}
-            {circuit.lines.map((line) => <Poly key={line.id} line={line} theme={theme} />)}
-            {circuit.symbols.map((symbol) => (
-              <g key={symbol.id} data-symbol={symbol.type} transform={`translate(${symbol.x} ${symbol.y})`}>
-                <SymbolArt symbol={symbol} />
-              </g>
-            ))}
-            {circuit.labels.map((label) => (
-              <g key={label.id} data-testid="schematic-label">
-                <rect x={label.x - label.w / 2} y={label.y - 12} width={label.w} height={18} rx="4" fill={theme.labelBg} stroke={colorOf(theme, label.kind)} />
-                <text x={label.x} y={label.y + 1} textAnchor="middle" fill={colorOf(theme, label.kind)} fontSize="12" fontWeight="700">{label.text}</text>
-              </g>
-            ))}
-            <TitleBlock circuit={circuit} theme={theme} />
+            {technical ? <TechnicalSheet circuit={circuit} themeName={themeName} /> : (
+              <>
+                <defs>
+                  <filter id="schematic-glow" x="-40%" y="-40%" width="180%" height="180%">
+                    <feGaussianBlur stdDeviation="4" />
+                  </filter>
+                </defs>
+                <rect width={circuit.width} height={circuit.height} fill={theme.bg} />
+                {circuit.boxes.map((box) => (
+                  <g key={box.id} data-role={box.role}>
+                    <rect x={box.x} y={box.y} width={box.w} height={box.h} rx="14" fill={theme.box} stroke={theme.boxStroke} strokeWidth="1.6" strokeDasharray="8 6" />
+                    <text x={box.x + 14} y={box.y + 22} fill={theme.muted} fontSize="14" fontWeight="700">{box.title}</text>
+                  </g>
+                ))}
+                {circuit.lines.map((line) => <Poly key={line.id} line={line} theme={theme} />)}
+                {circuit.symbols.map((symbol) => (
+                  <g key={symbol.id} data-symbol={symbol.type} transform={`translate(${symbol.x} ${symbol.y})`}>
+                    <SymbolArt symbol={symbol} />
+                  </g>
+                ))}
+                {circuit.labels.map((label) => (
+                  <g key={label.id} data-testid="schematic-label">
+                    <rect x={label.x - label.w / 2} y={label.y - 12} width={label.w} height={18} rx="4" fill={theme.labelBg} stroke={colorOf(theme, label.kind)} />
+                    <text x={label.x} y={label.y + 1} textAnchor="middle" fill={colorOf(theme, label.kind)} fontSize="12" fontWeight="700">{label.text}</text>
+                  </g>
+                ))}
+                <TitleBlock circuit={circuit} theme={theme} />
+              </>
+            )}
           </svg>
         )}
       </div>
       <aside data-testid="schematic-panel" style={{ width: 280, flexShrink: 0, overflowY: 'auto', background: '#14181f', color: '#f5f5f4', borderLeft: '1px solid #0c0f14', padding: 12 }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>Periaatekaavio</div>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>{technical ? 'Kylmäkaavio' : 'Esityskaavio'}</div>
         {model.circuits.length > 1 && (
           <select aria-label="Piiri" value={circuit?.id || ''} onChange={(event) => setCircuitId(event.target.value)} style={field}>
             {model.circuits.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
@@ -463,13 +472,16 @@ export default function SchematicView({ rooms, projectName, settings, onChange, 
           ))}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-          <button type="button" data-testid="schematic-theme" onClick={() => patch({ theme: settings.theme === 'light' ? 'dark' : 'light' })} style={btn}>
-            {settings.theme === 'light' ? 'Tumma' : 'Vaalea'}
+          <button type="button" data-testid="schematic-drawing" onClick={() => patch({ drawing: technical ? 'presentation' : 'technical' })} style={btn}>
+            {technical ? 'Esitys' : 'Tekninen'}
+          </button>
+          <button type="button" data-testid="schematic-theme" onClick={() => patch({ theme: themeName === 'light' ? 'dark' : 'light' })} style={btn}>
+            {themeName === 'light' ? 'Tumma' : 'Vaalea'}
           </button>
           <button type="button" data-testid="schematic-png" onClick={exportPng} style={btn}>PNG</button>
         </div>
         <p style={{ fontSize: 11, color: '#a8a29e', lineHeight: 1.45, marginTop: 12 }}>
-          Kaavio lukee pohjan laitteet ja mitoittaa putket samalla seulonnalla. Vastaanotinlinja on yhtä kokoa suurempi. Vastaanotin, kuivain ja näkölasi ovat kompressoriyksikön sisällä.
+          Tekninen kaavio on virtauskaavio EN 1861 / ISO 14617 -symbolein. Esitys on havainnekuva. Putket seulotaan samalla mitoituksella kuin pohja. Vastaanotinlinja on yhtä kokoa suurempi.
         </p>
       </aside>
     </div>
