@@ -46,6 +46,44 @@ function vertexAverage(points) {
   }
 }
 
+function labelAnchor(room, inner, scale, line1, line2) {
+  const box = bboxOf(inner)
+  const center = vertexAverage(inner)
+  const px = Math.max(line1.length, line2.length) * 7.1 + 22
+  const chipW = Math.min(box.width * 0.78, px / Math.max(scale, 1))
+  const chipH = 34 / Math.max(scale, 1)
+  const candidates = [
+    center,
+    { x: center.x, z: box.top + box.depth * 0.22 },
+    { x: center.x, z: box.bottom - box.depth * 0.22 },
+    { x: box.left + box.width * 0.24, z: center.z },
+    { x: box.right - box.width * 0.24, z: center.z },
+    { x: box.left + box.width * 0.26, z: box.top + box.depth * 0.26 },
+    { x: box.right - box.width * 0.26, z: box.bottom - box.depth * 0.26 },
+  ]
+  const blocks = (room.equipment || []).map((eq) => {
+    const alongX = eq.rotation !== 90
+    const halfW = (alongX ? eq.width : eq.depth) / 2 + 0.28
+    const halfD = (alongX ? eq.depth : eq.width) / 2 + 0.28
+    return { x: room.x + eq.x, z: room.z + eq.z, halfW, halfD }
+  })
+  const clear = (point) => {
+    const corners = [
+      [point.x - chipW / 2, point.z - chipH / 2],
+      [point.x + chipW / 2, point.z - chipH / 2],
+      [point.x - chipW / 2, point.z + chipH / 2],
+      [point.x + chipW / 2, point.z + chipH / 2],
+    ]
+    if (corners.some(([x, z]) => !pointInPolygon(x, z, inner))) return false
+    return !blocks.some((block) => (
+      Math.abs(point.x - block.x) < chipW / 2 + block.halfW
+      && Math.abs(point.z - block.z) < chipH / 2 + block.halfD
+    ))
+  }
+  const point = candidates.find(clear) || center
+  return { ...point, w: chipW, h: chipH }
+}
+
 function hitRoom(rooms, x, z) {
   const hits = rooms.filter((room) => pointInPolygon(x, z, outlineOf(room)))
   hits.sort((a, b) => polygonArea(outlineOf(a)) - polygonArea(outlineOf(b)))
@@ -173,6 +211,7 @@ export default function PlanView({
   const [polyHover, setPolyHover] = useState(null)
   const [spaceDown, setSpaceDown] = useState(false)
   const gesture = useRef(null)
+  const autoFit = useRef(true)
   const typed = useRef({ field: 'w', w: '', d: '' })
   const polyTyped = useRef('')
   const polyRef = useRef([])
@@ -191,7 +230,13 @@ export default function PlanView({
   useEffect(() => {
     const host = hostRef.current
     if (!host) return undefined
-    const measure = () => setSize({ w: host.clientWidth, h: host.clientHeight })
+    const measure = () => {
+      const next = { w: host.clientWidth, h: host.clientHeight }
+      setSize(next)
+      if (autoFit.current && next.w > 40 && next.h > 40) {
+        setCamera(fitView(propsRef.current.rooms, next.w, next.h))
+      }
+    }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(host)
@@ -199,19 +244,29 @@ export default function PlanView({
   }, [])
 
   useEffect(() => {
-    const host = hostRef.current
-    if (!host) return
-    setCamera(fitView(propsRef.current.rooms, host.clientWidth, host.clientHeight))
+    autoFit.current = true
+    const frame = requestAnimationFrame(() => {
+      const host = hostRef.current
+      if (!host) return
+      setCamera(fitView(propsRef.current.rooms, host.clientWidth, host.clientHeight))
+    })
+    return () => cancelAnimationFrame(frame)
   }, [fitToken])
 
   const roomCount = rooms.length
   const seenRooms = useRef(0)
   useEffect(() => {
     if (seenRooms.current === 0 && roomCount > 0) {
-      const host = hostRef.current
-      if (host) setCamera(fitView(propsRef.current.rooms, host.clientWidth, host.clientHeight))
+      autoFit.current = true
+      const frame = requestAnimationFrame(() => {
+        const host = hostRef.current
+        if (host) setCamera(fitView(propsRef.current.rooms, host.clientWidth, host.clientHeight))
+      })
+      seenRooms.current = roomCount
+      return () => cancelAnimationFrame(frame)
     }
     seenRooms.current = roomCount
+    return undefined
   }, [roomCount])
 
   useEffect(() => {
@@ -226,6 +281,7 @@ export default function PlanView({
     if (!host) return undefined
     const onWheel = (event) => {
       event.preventDefault()
+      autoFit.current = false
       const current = viewRef.current
       const rect = host.getBoundingClientRect()
       const px = event.clientX - rect.left
@@ -381,6 +437,7 @@ export default function PlanView({
         return
       }
       if (g.kind === 'pan') {
+        autoFit.current = false
         setCamera({
           ...current,
           offsetX: g.offsetX + (event.clientX - g.sx),
@@ -728,8 +785,10 @@ export default function PlanView({
             const inner = insetOrthogonal(outer, room.wallThickness) || outer
             const active = selected.has(room.id)
             const hot = hoverId === room.id
-            const center = vertexAverage(inner)
             const dims = metricsOf(room)
+            const line1 = `${room.label}  ${formatTemp(room.temp, unitSystem, 0)}`
+            const line2 = `${dims.area.toFixed(1)} m²`
+            const label = labelAnchor(room, inner, view.scale, line1, line2)
             const showHandles = active && selectedIds.length === 1 && tool === 'select' && !placing
             const rectLike = !isCustomOutline(room)
             return (
@@ -798,12 +857,39 @@ export default function PlanView({
                     </g>
                   )
                 })}
-                <text x={center.x} y={center.z - 0.18} textAnchor="middle" fill={INK} fontSize={13 / view.scale} fontWeight="700">
-                  {room.label}  {room.name}
-                </text>
-                <text x={center.x} y={center.z + 0.16} textAnchor="middle" fill="#57534e" fontSize={11 / view.scale}>
-                  {formatTemp(room.temp, unitSystem, 0)} · {dims.area.toFixed(1)} m²
-                </text>
+                <g style={{ pointerEvents: 'none' }}>
+                  <rect
+                    x={label.x - label.w / 2}
+                    y={label.z - label.h / 2}
+                    width={label.w}
+                    height={label.h}
+                    rx={0.08}
+                    fill="rgba(255,255,255,0.94)"
+                    stroke="#e7e5e4"
+                    strokeWidth={1 / view.scale}
+                  />
+                  <text
+                    x={label.x}
+                    y={label.z - 4 / view.scale}
+                    textAnchor="middle"
+                    fill={INK}
+                    fontSize={12 / view.scale}
+                    fontWeight="700"
+                    fontFamily="ui-sans-serif, system-ui, sans-serif"
+                  >
+                    {line1}
+                  </text>
+                  <text
+                    x={label.x}
+                    y={label.z + 8 / view.scale}
+                    textAnchor="middle"
+                    fill="#57534e"
+                    fontSize={10 / view.scale}
+                    fontFamily="ui-sans-serif, system-ui, sans-serif"
+                  >
+                    {line2}
+                  </text>
+                </g>
                 {active && (rectLike ? (
                   <>
                     <DimLine

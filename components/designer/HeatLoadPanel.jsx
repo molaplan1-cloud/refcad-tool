@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { PRODUCTS, ROOM_TYPES, getProduct } from '@/lib/catalog'
 import { applyType, internalDims } from '@/lib/geometry'
 import { isCustomOutline, polygonMetrics } from '@/lib/cadDraw'
@@ -35,20 +36,61 @@ function Num({ label, value, onChange, step = 0.1, unit, min, onFocus, onBlur })
   )
 }
 
-function LineRow({ item, unitSystem }) {
-  const color = item.watts < -1 ? '#047857' : '#1c1917'
+const GROUP_LABELS = [
+  ['transmission', 'Siirtymä'],
+  ['product', 'Tuote'],
+  ['infiltration', 'Ilma ja ovet'],
+  ['people', 'Henkilöt'],
+  ['lighting', 'Valaistus'],
+  ['equipment', 'Laitteet'],
+  ['pulldown', 'Jäähtyminen'],
+  ['transfer', 'Siirto huoneiden välillä'],
+]
+
+function LineRow({ item, unitSystem, maxAbs, subtotal }) {
+  const credit = item.watts < -1
+  const pct = subtotal ? (item.watts / subtotal) * 100 : 0
+  const width = maxAbs > 0 ? Math.min(100, (Math.abs(item.watts) / maxAbs) * 100) : 0
+  const pctLabel = Math.abs(pct) < 0.5 && Math.abs(item.watts) > 1 ? '<1%' : `${Math.round(pct)}%`
   return (
-    <div style={{ padding: '6px 0', borderBottom: '1px solid #e7e5e4' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
+    <div style={{ padding: '5px 0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, alignItems: 'baseline' }}>
         <span style={{ color: '#292524' }}>{item.label}</span>
-        <span style={{ color, fontWeight: 700, whiteSpace: 'nowrap' }}>{Math.round(item.watts)} W</span>
+        <span style={{ color: credit ? '#047857' : '#1c1917', fontWeight: 700, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+          {Math.round(item.watts).toLocaleString('fi-FI')} W
+          <span style={{ marginLeft: 6, color: '#a8a29e', fontWeight: 600, fontSize: 11 }}>{pctLabel}</span>
+        </span>
       </div>
-      <div style={{ fontSize: 10, color: '#78716c', fontFamily: 'ui-monospace, monospace', marginTop: 2 }}>
+      <div style={{ height: 4, marginTop: 4, borderRadius: 99, background: '#f5f5f4', overflow: 'hidden' }}>
+        <div style={{ width: `${width}%`, height: '100%', borderRadius: 99, background: credit ? '#34d399' : '#0f766e' }} />
+      </div>
+      <div style={{ fontSize: 10, color: '#a8a29e', fontFamily: 'ui-monospace, SFMono-Regular, monospace', marginTop: 3, lineHeight: 1.35 }}>
         {item.formula}
       </div>
       {unitSystem === 'IP' && (
         <div style={{ fontSize: 10, color: '#0f766e' }}>{formatPower(item.watts, 'IP')}</div>
       )}
+    </div>
+  )
+}
+
+function Fold({ title, children, open = false }) {
+  const [on, setOn] = useState(open)
+  return (
+    <div style={{ borderTop: '1px solid #e7e5e4' }}>
+      <button
+        type="button"
+        onClick={() => setOn((value) => !value)}
+        style={{
+          width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '9px 0', background: 'transparent', border: 'none', cursor: 'pointer',
+          color: '#44403c', fontSize: 11, fontWeight: 700, letterSpacing: 0.6, transform: 'none',
+        }}
+      >
+        <span>{title}</span>
+        <span>{on ? '−' : '+'}</span>
+      </button>
+      {on && <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 10 }}>{children}</div>}
     </div>
   )
 }
@@ -74,21 +116,46 @@ export default function HeatLoadPanel({
   const setLoad = (key, value) => onPatch({ load: { ...room.load, [key]: value } })
   const setLoadTemp = (key, display) => setLoad(key, fromTemp(display, unitSystem))
 
+  const maxAbs = roomResult ? Math.max(1, ...roomResult.lines.map((item) => Math.abs(item.watts))) : 1
+  const grouped = roomResult
+    ? GROUP_LABELS.map(([id, label]) => ({ id, label, lines: roomResult.lines.filter((item) => item.group === id) })).filter((group) => group.lines.length)
+    : []
+
   return (
-    <div data-testid="heat-panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div>
-        <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>KOKO KOHDE</div>
-        <div style={{ fontSize: 26, fontWeight: 800, color: '#1c1917', lineHeight: 1.1 }}>
+    <div data-testid="heat-panel" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 2, background: '#fafaf9',
+        padding: '12px 14px 10px', borderBottom: '1px solid #e7e5e4',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.8, color: '#78716c', fontWeight: 700 }}>KOKO KOHDE</div>
+          <div style={{ fontSize: 11, color: '#0f766e' }}>{result.suggestedEvap.count} × {result.suggestedEvap.template.name}</div>
+        </div>
+        <div style={{ fontSize: 26, fontWeight: 750, color: '#1c1917', lineHeight: 1.05, letterSpacing: -0.4, marginTop: 2 }}>
           {formatKw(result.total)}
         </div>
         <div style={{ fontSize: 11, color: '#78716c', marginTop: 2 }}>
           {Math.round(result.total).toLocaleString('fi-FI')} W · {formatPower(result.total, 'IP')}
         </div>
-        <div style={{ fontSize: 11, color: '#0f766e', marginTop: 6 }}>
-          {result.suggestedEvap.count} × {result.suggestedEvap.template.name} koko kohteelle
-        </div>
+        {room && roomResult && (
+          <div style={{
+            marginTop: 8, padding: '8px 10px', borderRadius: 8,
+            background: '#f0fdfa', border: '1px solid #99f6e4',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+          }}>
+            <div>
+              <div style={{ fontSize: 11, color: '#115e59', fontWeight: 700 }}>{room.label} yhteensä</div>
+              <div style={{ fontSize: 10, color: '#0f766e' }}>× {roomResult.safetyFactor.toFixed(2)} · {roomResult.suggestedEvap.count} × {roomResult.suggestedEvap.template.name}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 16, fontWeight: 750, color: '#134e4a' }}>{formatKw(roomResult.total)}</div>
+              <div style={{ fontSize: 10, color: '#115e59' }}>{Math.round(roomResult.subtotal).toLocaleString('fi-FI')} W</div>
+            </div>
+          </div>
+        )}
       </div>
 
+      <div style={{ padding: '10px 14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
       {!room && (
         <div style={{ fontSize: 12, color: '#78716c', lineHeight: 1.5 }}>
           Valitse huone pohjasta tai listasta. Kuorma, mitat ja väliseinät päivittyvät heti.
@@ -112,22 +179,18 @@ export default function HeatLoadPanel({
           </div>
           <InternalNote room={room} unitSystem={unitSystem} />
           <div data-testid="heat-breakdown">
-            <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700, marginBottom: 4 }}>ERITTELY</div>
-            {roomResult.lines.map((item) => <LineRow key={item.key} item={item} unitSystem={unitSystem} />)}
-            <div style={{ padding: 10, borderRadius: 8, background: '#f0fdfa', border: '1px solid #99f6e4', marginTop: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span>Välisumma</span><span>{Math.round(roomResult.subtotal)} W</span>
+            <div style={{ fontSize: 10, letterSpacing: 0.8, color: '#78716c', fontWeight: 700, marginBottom: 4 }}>ERITTELY</div>
+            {grouped.map((group) => (
+              <div key={group.id} style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#a8a29e', letterSpacing: 0.4 }}>{group.label}</div>
+                {group.lines.map((item) => (
+                  <LineRow key={item.key} item={item} unitSystem={unitSystem} maxAbs={maxAbs} subtotal={roomResult.subtotal} />
+                ))}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginTop: 4 }}>
-                <span>× varmuus {roomResult.safetyFactor.toFixed(2)}</span>
-                <strong>{formatKw(roomResult.total)}</strong>
-              </div>
-              <div style={{ fontSize: 12, color: '#0f766e', marginTop: 6 }}>
-                Huoneen höyrystin: {roomResult.suggestedEvap.count} × {roomResult.suggestedEvap.template.name}
-              </div>
-            </div>
+            ))}
           </div>
 
+          <Fold title="Huonetyyppi ja mitat">
           <label style={{ display: 'block' }}>
             <span style={labelStyle}>Huonetyyppi</span>
             <select
@@ -143,7 +206,6 @@ export default function HeatLoadPanel({
             </select>
           </label>
 
-          <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>MITAT</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <Num {...field} label="Pituus" unit={lengthUnit(unitSystem)} value={length(room.width)} step={unitSystem === 'IP' ? 0.1 : 0.1} onChange={(v) => setLength('width', v)} />
             <Num {...field} label="Leveys" unit={lengthUnit(unitSystem)} value={length(room.depth)} onChange={(v) => setLength('depth', v)} />
@@ -153,8 +215,9 @@ export default function HeatLoadPanel({
               onPatch({ wallThickness: metres, ceilingThickness: metres, floorThickness: metres })
             }} />
           </div>
+          </Fold>
 
-          <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>OLOSUHTEET</div>
+          <Fold title="Olosuhteet">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <Num {...field} label="Huone" unit={tempUnit(unitSystem)} value={temp(room.temp)} step={0.5} onChange={(v) => setTemp('temp', v)} />
             <Num {...field} label="Ulkoilma" unit={tempUnit(unitSystem)} value={temp(room.ambientTemp)} step={0.5} onChange={(v) => setTemp('ambientTemp', v)} />
@@ -163,8 +226,9 @@ export default function HeatLoadPanel({
             <Num {...field} label="U katto" unit="W/m²K" value={room.uCeiling} step={0.01} onChange={(v) => onPatch({ uCeiling: v })} />
             <Num {...field} label="U lattia" unit="W/m²K" value={room.uFloor} step={0.01} onChange={(v) => onPatch({ uFloor: v })} />
           </div>
+          </Fold>
 
-          <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>TUOTE</div>
+          <Fold title="Tuote">
           <label style={{ display: 'block' }}>
             <span style={labelStyle}>Tuoteryhmä</span>
             <select
@@ -186,8 +250,9 @@ export default function HeatLoadPanel({
             <Num {...field} label="cp" unit="kJ/kg·K" value={room.load.cp} step={0.05} onChange={(v) => setLoad('cp', v)} />
             <Num {...field} label="Hengitys" unit="W/kg" value={room.load.respirationWPerKg} step={0.01} onChange={(v) => setLoad('respirationWPerKg', v)} />
           </div>
+          </Fold>
 
-          <div style={{ fontSize: 10, letterSpacing: 1, color: '#78716c', fontWeight: 700 }}>OVET, IHMISET, VALOT</div>
+          <Fold title="Ovet, ihmiset, valot">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <Num {...field} label="Avauksia" unit="/vrk" value={room.load.doorOpeningsPerDay} step={1} onChange={(v) => setLoad('doorOpeningsPerDay', v)} />
             <Num {...field} label="Auki" unit="s" value={room.load.doorOpenSeconds} step={1} onChange={(v) => setLoad('doorOpenSeconds', v)} />
@@ -226,13 +291,13 @@ export default function HeatLoadPanel({
               Katto emohuoneen ilmaan (ei ulkovaippaan)
             </label>
           )}
+          </Fold>
 
-          <div style={{ fontSize: 10, color: '#64748b', lineHeight: 1.4 }}>
-            Sisäpinnat, U·A·ΔT. Väliseinän U on pienempi kahdesta. Emohuoneen läpi kulkeva lämpö vähennetään emolta, jotta sitä ei lasketa kahdesti. Puhallinlämpö tulee höyrystimistä. Lauhdutin oletetaan ulos.
+          <div style={{ fontSize: 10, color: '#a8a29e', lineHeight: 1.4 }}>
+            Sisäpinnat, U·A·ΔT. Väliseinän U on pienempi kahdesta. Emohuoneen läpi kulkeva lämpö vähennetään emolta. Puhallinlämpö tulee höyrystimistä.
           </div>
         </>
       )}
-
       {selectedEquipment && (
         <div style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{selectedEquipment.name}</div>
@@ -253,6 +318,7 @@ export default function HeatLoadPanel({
           </button>
         </div>
       )}
+      </div>
     </div>
   )
 }
