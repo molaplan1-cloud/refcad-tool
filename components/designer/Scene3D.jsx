@@ -6,6 +6,7 @@ import { ContactShadows, Edges, Grid, Html, OrbitControls, RoundedBox } from '@r
 import * as THREE from 'three'
 import { insetOrthogonal, outlineOf } from '@/lib/cadDraw'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
+import { condenserFanSpec } from '@/lib/fanGuard'
 import { pipeSupports } from '@/lib/pipeTopology'
 import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
 
@@ -463,41 +464,37 @@ function useSickleGeometry(radius) {
 
 function GuardedFan({ radius }) {
   const blade = useSickleGeometry(radius)
-  const wire = 0.0016
+  const spec = condenserFanSpec(radius)
   useEffect(() => () => blade.dispose(), [blade])
   const steel = { color: '#d5dde6', metalness: 0.86, roughness: 0.2 }
   return (
     <group>
-      <mesh position={[0, 0, -0.05]}>
-        <circleGeometry args={[radius * 0.94, 36]} />
+      <mesh position={[0, 0, spec.recessZ]}>
+        <circleGeometry args={[spec.recessR, 36]} />
         <meshStandardMaterial color="#020617" roughness={0.9} metalness={0.04} />
       </mesh>
       {[0, 1, 2].map((index) => (
-        <mesh key={`blade-${index}`} geometry={blade} rotation={[0, 0, (index * 2 * Math.PI) / 3]} position={[0, 0, -0.032]}>
-          <meshStandardMaterial color="#1e293b" metalness={0.4} roughness={0.48} side={THREE.DoubleSide} />
+        <mesh key={`blade-${index}`} geometry={blade} rotation={[0, 0, (index * 2 * Math.PI) / 3]} position={[0, 0, spec.bladeZ]}>
+          <meshStandardMaterial color="#1e293b" metalness={0.35} roughness={0.5} side={THREE.DoubleSide} />
         </mesh>
       ))}
-      <mesh position={[0, 0, -0.02]}>
-        <cylinderGeometry args={[radius * 0.18, radius * 0.22, 0.02, 16]} />
-        <meshStandardMaterial color="#f1f5f9" metalness={0.7} roughness={0.24} />
+      <mesh position={[0, 0, spec.hubZ]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[spec.hubR * 0.85, spec.hubR, spec.hubLength, 16]} />
+        <meshStandardMaterial color="#f8fafc" metalness={0.7} roughness={0.24} />
       </mesh>
-      <mesh position={[0, 0, -0.006]}>
-        <cylinderGeometry args={[radius * 1.04, radius * 0.98, 0.03, 40, 1, true]} />
-        <meshStandardMaterial color="#e7eef3" metalness={0.28} roughness={0.42} side={THREE.DoubleSide} />
-      </mesh>
-      <mesh position={[0, 0, 0.01]}>
-        <torusGeometry args={[radius * 1.02, 0.006, 10, 40]} />
-        <meshStandardMaterial color="#cbd5e1" metalness={0.45} roughness={0.38} />
+      <mesh position={[0, 0, spec.shroudZ]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[spec.shroudR, spec.shroudR, spec.shroudLength, 40, 1, true]} />
+        <meshStandardMaterial color="#cbd5e1" metalness={0.4} roughness={0.42} side={THREE.DoubleSide} />
       </mesh>
       {[0.34, 0.64, 0.92].map((scale) => (
-        <mesh key={`ring-${scale}`} position={[0, 0, 0.024]}>
-          <torusGeometry args={[radius * scale, wire, 12, 56]} />
+        <mesh key={`ring-${scale}`} position={[0, 0, spec.grilleZ]}>
+          <torusGeometry args={[radius * scale, spec.wire, 12, 56]} />
           <meshStandardMaterial {...steel} />
         </mesh>
       ))}
       {[0, 1, 2, 3, 4, 5].map((index) => (
-        <mesh key={`spoke-${index}`} position={[0, 0, 0.024]} rotation={[0, 0, (index * Math.PI) / 6]}>
-          <cylinderGeometry args={[wire, wire, radius * 1.84, 8]} />
+        <mesh key={`spoke-${index}`} position={[0, 0, spec.grilleZ]} rotation={[0, 0, (index * Math.PI) / 6]}>
+          <cylinderGeometry args={[spec.wire, spec.wire, radius * 1.84, 8]} />
           <meshStandardMaterial {...steel} />
         </mesh>
       ))}
@@ -636,7 +633,7 @@ function ComboMesh({ room, eq, onSelect, onContext }) {
           </mesh>
         ))}
       </group>
-      <group position={[0, h * 0.52, casingD / 2 + 0.004]}>
+      <group position={[0, h * 0.52, casingD / 2]}>
         <GuardedFan radius={fanR} />
       </group>
       <SideServiceValves
