@@ -1,198 +1,607 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { formatLength } from '@/lib/units'
-import { externalRect, internalDims, roomsOverlap, snap, snapDoorToWall } from '@/lib/geometry'
+import { formatLength, formatTemp } from '@/lib/units'
+import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
+import {
+  applyBox,
+  applyOutline,
+  bboxOf,
+  clampGroupTranslation,
+  clampResizeBox,
+  cleanOrthogonal,
+  doorSymbol,
+  edgesOf,
+  fitView,
+  footprintInside,
+  gridSpec,
+  insetOrthogonal,
+  isCustomOutline,
+  outlineOf,
+  pointInPolygon,
+  polygonArea,
+  polygonMetrics,
+  scaleBarMetres,
+  selfIntersects,
+  snapLabel,
+  snapWorld,
+  translateOutline,
+} from '@/lib/cadDraw'
 
-const HANDLE = 7
+const PAPER = '#f4f1ea'
+const INK = '#292524'
+const TEAL = '#0f766e'
 
-function worldFromEvent(e, host, view) {
-  const rect = host.getBoundingClientRect()
-  const px = e.clientX - rect.left
-  const py = e.clientY - rect.top
+function metricsOf(room) {
+  return isCustomOutline(room) ? polygonMetrics(room).dims : internalDims(room)
+}
+
+function pathOf(points) {
+  if (!points?.length) return ''
+  return `${points.map((point, index) => `${index ? 'L' : 'M'}${point.x} ${point.z}`).join(' ')} Z`
+}
+
+function vertexAverage(points) {
+  const n = points.length || 1
   return {
-    x: (px - view.offsetX) / view.scale,
-    z: (py - view.offsetY) / view.scale,
-    px,
-    py,
+    x: points.reduce((sum, point) => sum + point.x, 0) / n,
+    z: points.reduce((sum, point) => sum + point.z, 0) / n,
   }
+}
+
+function labelAnchor(room, inner, scale, line1, line2) {
+  const box = bboxOf(inner)
+  const center = vertexAverage(inner)
+  const px = Math.max(line1.length, line2.length) * 7.1 + 22
+  const chipW = Math.min(box.width * 0.78, px / Math.max(scale, 1))
+  const chipH = 34 / Math.max(scale, 1)
+  const candidates = [
+    center,
+    { x: center.x, z: box.top + box.depth * 0.22 },
+    { x: center.x, z: box.bottom - box.depth * 0.22 },
+    { x: box.left + box.width * 0.24, z: center.z },
+    { x: box.right - box.width * 0.24, z: center.z },
+    { x: box.left + box.width * 0.26, z: box.top + box.depth * 0.26 },
+    { x: box.right - box.width * 0.26, z: box.bottom - box.depth * 0.26 },
+  ]
+  const blocks = (room.equipment || []).map((eq) => {
+    const alongX = eq.rotation !== 90
+    const halfW = (alongX ? eq.width : eq.depth) / 2 + 0.28
+    const halfD = (alongX ? eq.depth : eq.width) / 2 + 0.28
+    return { x: room.x + eq.x, z: room.z + eq.z, halfW, halfD }
+  })
+  const clear = (point) => {
+    const corners = [
+      [point.x - chipW / 2, point.z - chipH / 2],
+      [point.x + chipW / 2, point.z - chipH / 2],
+      [point.x - chipW / 2, point.z + chipH / 2],
+      [point.x + chipW / 2, point.z + chipH / 2],
+    ]
+    if (corners.some(([x, z]) => !pointInPolygon(x, z, inner))) return false
+    return !blocks.some((block) => (
+      Math.abs(point.x - block.x) < chipW / 2 + block.halfW
+      && Math.abs(point.z - block.z) < chipH / 2 + block.halfD
+    ))
+  }
+  const point = candidates.find(clear) || center
+  return { ...point, w: chipW, h: chipH }
+}
+
+function hitRoom(rooms, x, z) {
+  const hits = rooms.filter((room) => pointInPolygon(x, z, outlineOf(room)))
+  hits.sort((a, b) => polygonArea(outlineOf(a)) - polygonArea(outlineOf(b)))
+  return hits[0] || null
+}
+
+function hitEquipment(rooms, x, z) {
+  const ordered = [...rooms].sort((a, b) => a.width * a.depth - b.width * b.depth)
+  for (const room of ordered) {
+    for (const eq of room.equipment || []) {
+      const wx = room.x + eq.x
+      const wz = room.z + eq.z
+      const verticalDoor = eq.category === 'door' && (
+        eq.wall === 'e' || eq.wall === 'w' || (eq.rotation === 90 && eq.wall !== 'n' && eq.wall !== 's')
+      )
+      const alongX = eq.category === 'door' ? !verticalDoor : eq.rotation !== 90
+      const hw = (alongX ? eq.width : eq.depth) / 2
+      const hd = (alongX ? eq.depth : eq.width) / 2
+      if (Math.abs(x - wx) <= hw + 0.08 && Math.abs(z - wz) <= hd + 0.08) return { room, eq }
+    }
+  }
+  return null
+}
+
+function moveEdge(points, index, x, z) {
+  const a = points[index]
+  const b = points[(index + 1) % points.length]
+  const horizontal = Math.abs(a.z - b.z) <= Math.abs(a.x - b.x)
+  const next = points.map((point) => ({ ...point }))
+  const end = (index + 1) % points.length
+  if (horizontal) {
+    next[index] = { ...next[index], z }
+    next[end] = { ...next[end], z }
+  } else {
+    next[index] = { ...next[index], x }
+    next[end] = { ...next[end], x }
+  }
+  return cleanOrthogonal(next)
+}
+
+function moveVertex(points, index, x, z) {
+  const count = points.length
+  const prevI = (index - 1 + count) % count
+  const nextI = (index + 1) % count
+  const prev = points[prevI]
+  const current = points[index]
+  const nextP = points[nextI]
+  const prevHoriz = Math.abs(prev.z - current.z) <= Math.abs(prev.x - current.x)
+  const nextHoriz = Math.abs(nextP.z - current.z) <= Math.abs(nextP.x - current.x)
+  const out = points.map((point) => ({ ...point }))
+  out[index] = { x, z }
+  out[prevI] = prevHoriz ? { ...out[prevI], z } : { ...out[prevI], x }
+  out[nextI] = nextHoriz ? { ...out[nextI], z } : { ...out[nextI], x }
+  return cleanOrthogonal(out)
+}
+
+function DimLine({ x1, z1, x2, z2, scale, text }) {
+  const dx = x2 - x1
+  const dz = z2 - z1
+  const len = Math.hypot(dx, dz) || 1
+  const tick = 5 / scale
+  const mx = (x1 + x2) / 2
+  const mz = (z1 + z2) / 2
+  return (
+    <g>
+      <line x1={x1} y1={z1} x2={x2} y2={z2} stroke="#44403c" strokeWidth={0.9 / scale} />
+      <line x1={x1 - (dz / len) * tick} y1={z1 + (dx / len) * tick} x2={x1 + (dz / len) * tick} y2={z1 - (dx / len) * tick} stroke="#44403c" strokeWidth={0.9 / scale} />
+      <line x1={x2 - (dz / len) * tick} y1={z2 + (dx / len) * tick} x2={x2 + (dz / len) * tick} y2={z2 - (dx / len) * tick} stroke="#44403c" strokeWidth={0.9 / scale} />
+      <g>
+        <rect x={mx - (text.length * 3.1) / scale} y={mz - 6 / scale} width={(text.length * 6.2) / scale} height={12 / scale} fill={PAPER} opacity="0.92" />
+        <text x={mx} y={mz} textAnchor="middle" dominantBaseline="middle" fill={INK} fontSize={11 / scale} fontFamily="ui-sans-serif, sans-serif">
+          {text}
+        </text>
+      </g>
+    </g>
+  )
+}
+
+function edgeDimension(edge, points, scale, unitSystem) {
+  const len = edge.len || 1
+  let nx = -(edge.z2 - edge.z1) / len
+  let nz = (edge.x2 - edge.x1) / len
+  const mx = (edge.x1 + edge.x2) / 2
+  const mz = (edge.z1 + edge.z2) / 2
+  if (pointInPolygon(mx + nx * 0.05, mz + nz * 0.05, points)) {
+    nx = -nx
+    nz = -nz
+  }
+  const off = 0.42
+  return (
+    <DimLine
+      x1={edge.x1 + nx * off}
+      z1={edge.z1 + nz * off}
+      x2={edge.x2 + nx * off}
+      z2={edge.z2 + nz * off}
+      scale={scale}
+      text={formatLength(len, unitSystem)}
+    />
+  )
 }
 
 export default function PlanView({
   rooms,
-  selectedId,
+  selectedIds = [],
   tool,
   placing,
   unitSystem,
   gridSize,
   snapOn,
+  snapFlags,
+  fitToken = 0,
   onSelect,
   onPreview,
   onGestureStart,
   onGestureEnd,
   onCreateRect,
+  onCreatePolygon,
   onPlace,
   notice,
 }) {
   const hostRef = useRef(null)
-  const viewRef = useRef({ scale: 28, offsetX: 420, offsetY: 280 })
+  const viewRef = useRef({ scale: 36, offsetX: 480, offsetY: 320 })
   const [view, setView] = useState(viewRef.current)
-  const [draft, setDraft] = useState(null)
+  const [size, setSize] = useState({ w: 800, h: 600 })
   const [cursor, setCursor] = useState(null)
+  const [hoverId, setHoverId] = useState(null)
+  const [draft, setDraft] = useState(null)
+  const [poly, setPoly] = useState([])
+  const [polyHover, setPolyHover] = useState(null)
+  const [spaceDown, setSpaceDown] = useState(false)
   const gesture = useRef(null)
+  const autoFit = useRef(true)
+  const typed = useRef({ field: 'w', w: '', d: '' })
+  const polyTyped = useRef('')
+  const polyRef = useRef([])
   const propsRef = useRef({})
+  polyRef.current = poly
   propsRef.current = {
-    rooms, selectedId, tool, placing, gridSize, snapOn,
-    onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onPlace,
+    rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags,
+    onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onPlace,
+  }
+
+  const setCamera = (next) => {
+    viewRef.current = next
+    setView(next)
   }
 
   useEffect(() => {
-    viewRef.current = view
-  }, [view])
-
-  useEffect(() => {
     const host = hostRef.current
-    if (!host) return
-    const fit = () => {
-      const rect = host.getBoundingClientRect()
-      setView((v) => ({ ...v, offsetX: rect.width / 2, offsetY: rect.height / 2 }))
+    if (!host) return undefined
+    const measure = () => {
+      const next = { w: host.clientWidth, h: host.clientHeight }
+      setSize(next)
+      if (autoFit.current && next.w > 40 && next.h > 40) {
+        setCamera(fitView(propsRef.current.rooms, next.w, next.h))
+      }
     }
-    fit()
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(host)
+    return () => observer.disconnect()
   }, [])
 
   useEffect(() => {
+    autoFit.current = true
+    const frame = requestAnimationFrame(() => {
+      const host = hostRef.current
+      if (!host) return
+      setCamera(fitView(propsRef.current.rooms, host.clientWidth, host.clientHeight))
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [fitToken])
+
+  const roomCount = rooms.length
+  const seenRooms = useRef(0)
+  useEffect(() => {
+    if (seenRooms.current === 0 && roomCount > 0) {
+      autoFit.current = true
+      const frame = requestAnimationFrame(() => {
+        const host = hostRef.current
+        if (host) setCamera(fitView(propsRef.current.rooms, host.clientWidth, host.clientHeight))
+      })
+      seenRooms.current = roomCount
+      return () => cancelAnimationFrame(frame)
+    }
+    seenRooms.current = roomCount
+    return undefined
+  }, [roomCount])
+
+  useEffect(() => {
+    if (tool !== 'polygon') {
+      setPoly([])
+      polyTyped.current = ''
+    }
+  }, [tool])
+
+  useEffect(() => {
     const host = hostRef.current
-    if (!host) return
-    const onWheel = (e) => {
-      e.preventDefault()
+    if (!host) return undefined
+    const onWheel = (event) => {
+      event.preventDefault()
+      autoFit.current = false
       const current = viewRef.current
       const rect = host.getBoundingClientRect()
-      const px = e.clientX - rect.left
-      const py = e.clientY - rect.top
+      const px = event.clientX - rect.left
+      const py = event.clientY - rect.top
+      const pinch = event.ctrlKey || event.metaKey
+      const trackpad = !pinch && event.deltaMode === 0 && Math.abs(event.deltaY) < 40 && Math.abs(event.deltaX) < 40
+      if ((trackpad && !event.shiftKey) || event.shiftKey) {
+        const next = {
+          ...current,
+          offsetX: current.offsetX - (event.shiftKey ? event.deltaY : event.deltaX),
+          offsetY: current.offsetY - (event.shiftKey ? 0 : event.deltaY),
+        }
+        setCamera(next)
+        return
+      }
       const worldX = (px - current.offsetX) / current.scale
       const worldZ = (py - current.offsetY) / current.scale
-      const nextScale = Math.max(8, Math.min(140, current.scale * (e.deltaY > 0 ? 0.9 : 1.1)))
-      const next = {
-        scale: nextScale,
-        offsetX: px - worldX * nextScale,
-        offsetY: py - worldZ * nextScale,
-      }
-      viewRef.current = next
-      setView(next)
+      const factor = Math.exp(-event.deltaY * (pinch ? 0.01 : 0.0016))
+      const scale = Math.max(6, Math.min(220, current.scale * factor))
+      setCamera({
+        scale,
+        offsetX: px - worldX * scale,
+        offsetY: py - worldZ * scale,
+      })
     }
     host.addEventListener('wheel', onWheel, { passive: false })
     return () => host.removeEventListener('wheel', onWheel)
   }, [])
 
   useEffect(() => {
-    const move = (e) => {
-      const host = hostRef.current
-      const g = gesture.current
-      if (!host || !g) return
-      const current = viewRef.current
-      const world = worldFromEvent(e, host, current)
-      setCursor(world)
-      if (g.kind === 'pan') {
-        const next = {
-          ...current,
-          offsetX: g.offsetX + (e.clientX - g.sx),
-          offsetY: g.offsetY + (e.clientY - g.sy),
+    const onKey = (event) => {
+      const tag = event.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (event.code === 'Space') {
+        event.preventDefault()
+        setSpaceDown(event.type === 'keydown')
+        return
+      }
+      if (event.type !== 'keydown') return
+      const drawing = gesture.current?.kind === 'draw'
+      const points = polyRef.current
+      if (event.key === 'Escape' && (drawing || points.length)) {
+        gesture.current = null
+        typed.current = { field: 'w', w: '', d: '' }
+        polyTyped.current = ''
+        setDraft(null)
+        setPoly([])
+        event.stopPropagation()
+        return
+      }
+      if (event.key === 'Backspace' && points.length && !drawing) {
+        event.preventDefault()
+        event.stopPropagation()
+        if (polyTyped.current) polyTyped.current = polyTyped.current.slice(0, -1)
+        else setPoly(points.slice(0, -1))
+        return
+      }
+      if (drawing && event.key === 'Tab') {
+        event.preventDefault()
+        typed.current.field = typed.current.field === 'w' ? 'd' : 'w'
+        return
+      }
+      if ((drawing || points.length) && /^[0-9.,]$/.test(event.key)) {
+        event.preventDefault()
+        event.stopPropagation()
+        if (drawing) {
+          const field = typed.current.field
+          typed.current[field] = `${typed.current[field]}${event.key}`.slice(0, 8)
+        } else {
+          polyTyped.current = `${polyTyped.current}${event.key}`.slice(0, 8)
         }
-        viewRef.current = next
-        setView(next)
         return
       }
-      if (g.kind === 'draw') {
-        const grid = propsRef.current.snapOn ? propsRef.current.gridSize : 0
-        setDraft({ x1: g.x1, z1: g.z1, x2: snap(world.x, grid), z2: snap(world.z, grid) })
+      if (event.key === 'Enter' && drawing) {
+        event.preventDefault()
+        event.stopPropagation()
+        const g = gesture.current
+        gesture.current = null
+        setDraft(null)
+        propsRef.current.onCreateRect(g.x1, g.z1, g.x2, g.z2)
+        typed.current = { field: 'w', w: '', d: '' }
         return
       }
-      const dist = Math.hypot(world.x - g.startX, world.z - g.startZ)
-      if (!g.started) {
-        if (dist < 0.04) return
-        g.started = true
-        propsRef.current.onGestureStart()
-      }
-      const grid = propsRef.current.snapOn ? propsRef.current.gridSize : 0
-      const origRooms = g.orig
-      if (g.kind === 'move') {
-        const orig = origRooms.find((r) => r.id === g.id)
-        const x = snap(orig.x + (world.x - g.startX), grid)
-        const z = snap(orig.z + (world.z - g.startZ), grid)
-        const dx = x - orig.x
-        const dz = z - orig.z
-        const ids = new Set([g.id])
-        let grew = true
-        while (grew) {
-          grew = false
-          for (const room of origRooms) {
-            if (room.parentId && ids.has(room.parentId) && !ids.has(room.id)) {
-              ids.add(room.id)
-              grew = true
-            }
+      if (event.key === 'Enter' && points.length) {
+        event.preventDefault()
+        event.stopPropagation()
+        if (polyTyped.current && points.length) {
+          const last = points[points.length - 1]
+          const hover = snapWorld(last.x + 1, last.z, {
+            origin: last,
+            scale: viewRef.current.scale,
+            grid: propsRef.current.snapOn ? propsRef.current.gridSize : 0,
+            rooms: propsRef.current.rooms,
+            flags: propsRef.current.snapFlags,
+          })
+          const length = parseFloat(polyTyped.current.replace(',', '.'))
+          if (Number.isFinite(length) && length >= 0.3) {
+            const dx = hover.x - last.x
+            const dz = hover.z - last.z
+            const mag = Math.hypot(dx, dz) || 1
+            setPoly([...points, { x: last.x + (dx / mag) * length, z: last.z + (dz / mag) * length }])
           }
+          polyTyped.current = ''
+          return
         }
-        propsRef.current.onPreview(origRooms.map((room) => (
-          ids.has(room.id) ? { ...room, x: room.x + dx, z: room.z + dz } : room
-        )))
-      } else if (g.kind === 'resize') {
-        const orig = origRooms.find((r) => r.id === g.id)
-        const x = snap(world.x, grid)
-        const z = snap(world.z, grid)
-        let left = orig.x - orig.width / 2
-        let right = orig.x + orig.width / 2
-        let top = orig.z - orig.depth / 2
-        let bottom = orig.z + orig.depth / 2
-        if (g.corner.includes('w')) left = x
-        if (g.corner.includes('e')) right = x
-        if (g.corner.includes('n')) top = z
-        if (g.corner.includes('s')) bottom = z
+        if (points.length >= 4) {
+          propsRef.current.onCreatePolygon(points)
+          setPoly([])
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('keyup', onKey, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('keyup', onKey, true)
+    }
+  }, [])
+
+  useEffect(() => {
+    const move = (event) => {
+      const host = hostRef.current
+      if (!host) return
+      const current = viewRef.current
+      const rect = host.getBoundingClientRect()
+      const px = event.clientX - rect.left
+      const py = event.clientY - rect.top
+      const world = { x: (px - current.offsetX) / current.scale, z: (py - current.offsetY) / current.scale, px, py }
+      const p = propsRef.current
+      const g = gesture.current
+      if (polyRef.current.length && p.tool === 'polygon') {
+        const last = polyRef.current[polyRef.current.length - 1]
+        let hover = snapWorld(world.x, world.z, {
+          origin: last,
+          scale: current.scale,
+          grid: p.snapOn ? p.gridSize : 0,
+          rooms: p.rooms,
+          flags: { ...p.snapFlags, ortho: true },
+        })
+        const typedLength = parseFloat(polyTyped.current.replace(',', '.'))
+        if (Number.isFinite(typedLength) && typedLength >= 0.3) {
+          const dx = hover.x - last.x
+          const dz = hover.z - last.z
+          const mag = Math.hypot(dx, dz) || 1
+          hover = { ...hover, x: last.x + (dx / mag) * typedLength, z: last.z + (dz / mag) * typedLength, kind: 'ortho' }
+        }
+        setPolyHover(hover)
+      }
+      if (!g) {
+        setCursor({ ...world, kind: null })
+        const eq = hitEquipment(p.rooms, world.x, world.z)
+        setHoverId(eq?.room?.id || hitRoom(p.rooms, world.x, world.z)?.id || null)
+        return
+      }
+      if (g.kind === 'pan') {
+        autoFit.current = false
+        setCamera({
+          ...current,
+          offsetX: g.offsetX + (event.clientX - g.sx),
+          offsetY: g.offsetY + (event.clientY - g.sy),
+        })
+        return
+      }
+      if (g.kind === 'marquee') {
+        setDraft({ kind: 'marquee', x1: g.x1, z1: g.z1, x2: world.x, z2: world.z })
+        return
+      }
+      const snapped = snapWorld(world.x, world.z, {
+        origin: g.kind === 'draw' ? { x: g.x1, z: g.z1 } : null,
+        scale: current.scale,
+        grid: p.snapOn ? p.gridSize : 0,
+        rooms: p.rooms,
+        flags: g.kind === 'draw' ? { ...p.snapFlags, ortho: false } : { ...p.snapFlags, ortho: false },
+        ignoreIds: g.ignoreIds,
+      })
+      setCursor({ ...world, x: snapped.x, z: snapped.z, kind: snapped.kind })
+      if (g.kind === 'draw') {
+        let x2 = snapped.x
+        let z2 = snapped.z
+        const widthText = parseFloat(typed.current.w.replace(',', '.'))
+        const depthText = parseFloat(typed.current.d.replace(',', '.'))
+        if (Number.isFinite(widthText) && widthText >= 0.3) {
+          const sign = snapped.x - g.x1 >= 0 ? 1 : -1
+          x2 = g.x1 + sign * widthText
+        }
+        if (Number.isFinite(depthText) && depthText >= 0.3) {
+          const sign = snapped.z - g.z1 >= 0 ? 1 : -1
+          z2 = g.z1 + sign * depthText
+        }
+        g.x2 = x2
+        g.z2 = z2
+        setDraft({ kind: 'rect', x1: g.x1, z1: g.z1, x2, z2 })
+        return
+      }
+      if (!g.started) {
+        g.started = true
+        p.onGestureStart()
+      }
+      if (g.kind === 'move') {
+        const primary = g.orig.find((room) => room.id === g.id)
+        const anchorX = primary.x - primary.width / 2
+        const anchorZ = primary.z - primary.depth / 2
+        const anchor = snapWorld(anchorX + (world.x - g.startX), anchorZ + (world.z - g.startZ), {
+          scale: current.scale,
+          grid: p.snapOn ? p.gridSize : 0,
+          rooms: p.rooms,
+          flags: { ...p.snapFlags, ortho: false },
+          ignoreIds: g.ignoreIds,
+        })
+        const limited = clampGroupTranslation(g.orig, g.ids, anchor.x - anchorX, anchor.z - anchorZ)
+        setCursor((prev) => ({ ...(prev || world), kind: anchor.kind }))
+        p.onPreview(g.orig.map((room) => {
+          if (!g.ids.has(room.id)) return room
+          return {
+            ...room,
+            x: room.x + limited.dx,
+            z: room.z + limited.dz,
+            outline: translateOutline(room.outline, limited.dx, limited.dz),
+          }
+        }))
+        return
+      }
+      if (g.kind === 'resize') {
+        const room = g.orig.find((item) => item.id === g.id)
+        const box = bboxOf(outlineOf(room))
+        let left = box.left
+        let right = box.right
+        let top = box.top
+        let bottom = box.bottom
+        const handle = g.corner
+        if (handle.includes('e')) right = snapped.x
+        if (handle.includes('w')) left = snapped.x
+        if (handle.includes('s')) bottom = snapped.z
+        if (handle.includes('n')) top = snapped.z
         if (right - left < 1) {
-          if (g.corner.includes('w')) left = right - 1
-          else right = left + 1
+          if (handle.includes('e')) right = left + 1
+          else left = right - 1
         }
         if (bottom - top < 1) {
-          if (g.corner.includes('n')) top = bottom - 1
-          else bottom = top + 1
+          if (handle.includes('s')) bottom = top + 1
+          else top = bottom - 1
         }
-        propsRef.current.onPreview(origRooms.map((room) => (
-          room.id === orig.id
-            ? { ...room, x: (left + right) / 2, z: (top + bottom) / 2, width: right - left, depth: bottom - top }
-            : room
+        const limited = clampResizeBox(room, g.orig, left, top, right, bottom)
+        if (!limited) return
+        p.onPreview(g.orig.map((item) => (
+          item.id === room.id ? applyBox(item, limited.left, limited.top, limited.right, limited.bottom) : item
         )))
-      } else if (g.kind === 'equip') {
-        const room = origRooms.find((r) => r.id === g.roomId)
-        const eq = room.equipment.find((item) => item.id === g.eqId)
-        const localX = snap(eq.x + (world.x - g.startX), grid)
-        const localZ = snap(eq.z + (world.z - g.startZ), grid)
-        const moved = eq.category === 'door'
-          ? { ...eq, ...snapDoorToWall(room, localX, localZ, eq.width) }
-          : { ...eq, x: localX, z: localZ }
-        propsRef.current.onPreview(origRooms.map((item) => {
-          if (item.id !== room.id) return item
+        return
+      }
+      if (g.kind === 'edge' || g.kind === 'vertex') {
+        const room = g.orig.find((item) => item.id === g.id)
+        const points = g.kind === 'edge'
+          ? moveEdge(outlineOf(room), g.index, snapped.x, snapped.z)
+          : moveVertex(outlineOf(room), g.index, snapped.x, snapped.z)
+        if (points.length < 4 || selfIntersects(points) || polygonArea(points) < 0.5) return
+        const proposed = applyOutline(room, points)
+        const parent = room.parentId ? g.orig.find((item) => item.id === room.parentId) : null
+        if (parent && !footprintInside(parent, proposed)) return
+        const children = g.orig.filter((item) => item.parentId === room.id)
+        if (children.some((child) => !footprintInside(proposed, child))) return
+        p.onPreview(g.orig.map((item) => (item.id === room.id ? proposed : item)))
+        return
+      }
+      if (g.kind === 'equip') {
+        const dx = world.x - g.startX
+        const dz = world.z - g.startZ
+        p.onPreview(g.orig.map((room) => {
+          if (room.id !== g.roomId) return room
           return {
-            ...item,
-            equipment: item.equipment.map((piece) => (piece.id === eq.id ? moved : piece)),
+            ...room,
+            equipment: room.equipment.map((eq) => {
+              if (eq.id !== g.eqId) return eq
+              const localX = eq.x + dx
+              const localZ = eq.z + dz
+              if (eq.category === 'door') return { ...eq, ...snapDoorToWall(room, localX, localZ, eq.width) }
+              return { ...eq, x: localX, z: localZ }
+            }),
           }
         }))
       }
     }
-    const up = (e) => {
-      const host = hostRef.current
+    const up = (event) => {
       const g = gesture.current
       gesture.current = null
       if (!g) return
-      if (g.kind === 'draw' && host) {
-        const world = worldFromEvent(e, host, viewRef.current)
-        const grid = propsRef.current.snapOn ? propsRef.current.gridSize : 0
-        const x2 = snap(world.x, grid)
-        const z2 = snap(world.z, grid)
+      const p = propsRef.current
+      if (g.kind === 'draw') {
         setDraft(null)
-        propsRef.current.onCreateRect(g.x1, g.z1, x2, z2)
+        typed.current = { field: 'w', w: '', d: '' }
+        p.onCreateRect(g.x1, g.z1, g.x2 ?? g.x1, g.z2 ?? g.z1)
+      } else if (g.kind === 'marquee') {
+        setDraft(null)
+        const host = hostRef.current
+        const current = viewRef.current
+        const rect = host.getBoundingClientRect()
+        const x2 = (event.clientX - rect.left - current.offsetX) / current.scale
+        const z2 = (event.clientY - rect.top - current.offsetY) / current.scale
+        const left = Math.min(g.x1, x2)
+        const right = Math.max(g.x1, x2)
+        const top = Math.min(g.z1, z2)
+        const bottom = Math.max(g.z1, z2)
+        if (right - left < 0.15 && bottom - top < 0.15) {
+          if (!g.shift) p.onSelect([])
+          return
+        }
+        const hits = p.rooms.filter((room) => {
+          const box = bboxOf(outlineOf(room))
+          return box.right >= left && box.left <= right && box.bottom >= top && box.top <= bottom
+        }).map((room) => room.id)
+        p.onSelect(g.shift ? [...new Set([...p.selectedIds, ...hits])] : hits)
       } else if (g.started) {
-        propsRef.current.onGestureEnd()
+        p.onGestureEnd()
       }
-      setDraft(null)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -202,74 +611,90 @@ export default function PlanView({
     }
   }, [])
 
-  const toScreen = (x, z) => ({
-    px: x * view.scale + view.offsetX,
-    py: z * view.scale + view.offsetY,
-  })
-
-  const hitEquipment = (x, z) => {
-    const ordered = [...rooms].sort((a, b) => a.width * a.depth - b.width * b.depth)
-    for (const room of ordered) {
-      for (const eq of room.equipment || []) {
-        const wx = room.x + eq.x
-        const wz = room.z + eq.z
-        const hw = (eq.width || 0.5) / 2
-        const hd = (eq.depth || 0.5) / 2
-        if (Math.abs(x - wx) <= hw + 0.08 && Math.abs(z - wz) <= hd + 0.08) return { room, eq }
-      }
-    }
-    return null
-  }
-
-  const hitRoom = (x, z) => {
-    const hits = rooms.filter((room) => {
-      const rect = externalRect(room)
-      return x >= rect.left && x <= rect.right && z >= rect.top && z <= rect.bottom
-    })
-    hits.sort((a, b) => a.width * a.depth - b.width * b.depth)
-    return hits[0] || null
-  }
-
-  const onMouseDown = (e) => {
-    if (e.button === 2 || e.button === 1) {
-      gesture.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, offsetX: view.offsetX, offsetY: view.offsetY }
+  const onMouseDown = (event) => {
+    if (event.button === 1 || event.button === 2 || spaceDown) {
+      gesture.current = { kind: 'pan', sx: event.clientX, sy: event.clientY, offsetX: view.offsetX, offsetY: view.offsetY }
       return
     }
-    if (e.button !== 0) return
+    if (event.button !== 0) return
     const host = hostRef.current
-    const world = worldFromEvent(e, host, view)
-    const handle = e.target?.dataset?.handle
-    const handleRoom = e.target?.dataset?.room
+    const world = {
+      x: (event.clientX - host.getBoundingClientRect().left - view.offsetX) / view.scale,
+      z: (event.clientY - host.getBoundingClientRect().top - view.offsetY) / view.scale,
+    }
     const p = propsRef.current
+    const handle = event.target?.dataset?.handle
+    const handleRoom = event.target?.dataset?.room
+    if (p.tool === 'polygon') {
+      if (event.detail >= 2 && polyRef.current.length >= 4) {
+        p.onCreatePolygon(polyRef.current)
+        setPoly([])
+        polyTyped.current = ''
+        return
+      }
+      const origin = polyRef.current.length ? polyRef.current[polyRef.current.length - 1] : null
+      let point = snapWorld(world.x, world.z, {
+        origin,
+        scale: view.scale,
+        grid: p.snapOn ? p.gridSize : 0,
+        rooms: p.rooms,
+        flags: { ...p.snapFlags, ortho: origin ? true : p.snapFlags?.ortho },
+      })
+      const typedLength = parseFloat(polyTyped.current.replace(',', '.'))
+      if (origin && Number.isFinite(typedLength) && typedLength >= 0.3) {
+        const dx = point.x - origin.x
+        const dz = point.z - origin.z
+        const mag = Math.hypot(dx, dz) || 1
+        point = { x: origin.x + (dx / mag) * typedLength, z: origin.z + (dz / mag) * typedLength }
+      }
+      polyTyped.current = ''
+      if (polyRef.current.length >= 3) {
+        const first = polyRef.current[0]
+        if (Math.hypot(point.x - first.x, point.z - first.z) < 16 / view.scale) {
+          p.onCreatePolygon(polyRef.current)
+          setPoly([])
+          return
+        }
+      }
+      setPoly([...polyRef.current, { x: point.x, z: point.z }])
+      return
+    }
     if (p.tool === 'draw' || p.tool === 'partition') {
-      const grid = p.snapOn ? p.gridSize : 0
-      const x1 = snap(world.x, grid)
-      const z1 = snap(world.z, grid)
-      gesture.current = { kind: 'draw', x1, z1, startX: x1, startZ: z1 }
-      setDraft({ x1, z1, x2: x1, z2: z1 })
+      const point = snapWorld(world.x, world.z, {
+        scale: view.scale,
+        grid: p.snapOn ? p.gridSize : 0,
+        rooms: p.rooms,
+        flags: { ...p.snapFlags, ortho: false },
+      })
+      typed.current = { field: 'w', w: '', d: '' }
+      gesture.current = { kind: 'draw', x1: point.x, z1: point.z, x2: point.x, z2: point.z }
+      setDraft({ kind: 'rect', x1: point.x, z1: point.z, x2: point.x, z2: point.z })
       return
     }
     if (p.placing) {
-      const room = hitRoom(world.x, world.z)
+      const room = hitRoom(p.rooms, world.x, world.z)
       if (room) p.onPlace(room.id, world.x, world.z)
       return
     }
     if (handle && handleRoom) {
-      gesture.current = {
-        kind: 'resize',
-        id: handleRoom,
-        corner: handle,
-        startX: world.x,
-        startZ: world.z,
-        orig: p.rooms.map((room) => ({ ...room, equipment: [...(room.equipment || [])] })),
-        started: false,
+      const orig = p.rooms.map((room) => ({ ...room, equipment: [...(room.equipment || [])], outline: room.outline ? room.outline.map((pt) => ({ ...pt })) : null }))
+      if (handle.startsWith('v-') || handle.startsWith('e-')) {
+        gesture.current = {
+          kind: handle.startsWith('v-') ? 'vertex' : 'edge',
+          id: handleRoom,
+          index: Number(handle.slice(2)),
+          orig,
+          started: false,
+        }
+      } else {
+        gesture.current = { kind: 'resize', id: handleRoom, corner: handle, orig, started: false }
       }
-      p.onSelect(handleRoom)
+      p.onSelect([handleRoom])
       return
     }
-    const eqHit = hitEquipment(world.x, world.z)
+    const eqHit = hitEquipment(p.rooms, world.x, world.z)
     if (eqHit) {
-      p.onSelect(eqHit.eq.id)
+      p.onSelect([eqHit.eq.id])
       gesture.current = {
         kind: 'equip',
         roomId: eqHit.room.id,
@@ -281,292 +706,357 @@ export default function PlanView({
       }
       return
     }
-    const room = hitRoom(world.x, world.z)
+    const room = hitRoom(p.rooms, world.x, world.z)
     if (room) {
-      p.onSelect(room.id)
+      const next = event.shiftKey
+        ? (p.selectedIds.includes(room.id) ? p.selectedIds.filter((id) => id !== room.id) : [...p.selectedIds, room.id])
+        : (p.selectedIds.includes(room.id) ? p.selectedIds : [room.id])
+      p.onSelect(next)
+      const ids = new Set(next)
+      next.forEach((id) => descendantIds(p.rooms, id).forEach((child) => ids.add(child)))
       gesture.current = {
         kind: 'move',
         id: room.id,
+        ids,
+        ignoreIds: ids,
         startX: world.x,
         startZ: world.z,
-        orig: p.rooms.map((item) => ({ ...item, equipment: [...(item.equipment || [])] })),
+        orig: p.rooms.map((item) => ({ ...item, equipment: [...(item.equipment || [])], outline: item.outline ? item.outline.map((pt) => ({ ...pt })) : null })),
         started: false,
       }
       return
     }
-    p.onSelect(null)
-    gesture.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, offsetX: view.offsetX, offsetY: view.offsetY }
+    gesture.current = { kind: 'marquee', x1: world.x, z1: world.z, shift: event.shiftKey }
   }
 
-  const onMouseMove = (e) => {
-    const host = hostRef.current
-    if (!host) return
-    setCursor(worldFromEvent(e, host, viewRef.current))
-  }
-
-  const roomKey = rooms.map((room) => room.id).join('|')
-  const fit = () => {
-    const host = hostRef.current
-    const list = propsRef.current.rooms
-    if (!host || !list.length) return
-    let minX = Infinity
-    let minZ = Infinity
-    let maxX = -Infinity
-    let maxZ = -Infinity
-    list.forEach((room) => {
-      const rect = externalRect(room)
-      minX = Math.min(minX, rect.left)
-      maxX = Math.max(maxX, rect.right)
-      minZ = Math.min(minZ, rect.top)
-      maxZ = Math.max(maxZ, rect.bottom)
-    })
-    const pad = 2
-    minX -= pad
-    minZ -= pad
-    maxX += pad
-    maxZ += pad
-    const rect = host.getBoundingClientRect()
-    const scale = Math.max(8, Math.min(80, Math.min(rect.width / (maxX - minX), (rect.height - 36) / (maxZ - minZ))))
-    const next = {
-      scale,
-      offsetX: rect.width / 2 - ((minX + maxX) / 2) * scale,
-      offsetY: (rect.height - 36) / 2 - ((minZ + maxZ) / 2) * scale,
-    }
-    viewRef.current = next
-    setView(next)
-  }
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => fit())
-    return () => cancelAnimationFrame(frame)
-  }, [roomKey])
-
-  const visible = () => {
-    const host = hostRef.current
-    const width = host?.clientWidth || 800
-    const height = host?.clientHeight || 600
-    return {
-      x0: -view.offsetX / view.scale,
-      z0: -view.offsetY / view.scale,
-      x1: (width - view.offsetX) / view.scale,
-      z1: (height - view.offsetY) / view.scale,
-    }
-  }
-  const bounds = visible()
+  const { minor, major } = gridSpec(view.scale)
+  const left = -view.offsetX / view.scale
+  const top = -view.offsetY / view.scale
+  const right = left + size.w / view.scale
+  const bottom = top + size.h / view.scale
   const gridLines = []
-  const startX = Math.floor(bounds.x0)
-  const endX = Math.ceil(bounds.x1)
-  const startZ = Math.floor(bounds.z0)
-  const endZ = Math.ceil(bounds.z1)
-  for (let x = startX; x <= endX; x += 1) {
-    const p1 = toScreen(x, bounds.z0)
-    const p2 = toScreen(x, bounds.z1)
-    gridLines.push({ x1: p1.px, y1: p1.py, x2: p2.px, y2: p2.py, major: true })
+  if (snapOn) {
+    const startX = Math.floor(left / minor) * minor
+    const startZ = Math.floor(top / minor) * minor
+    for (let x = startX; x <= right; x += minor) {
+      const majorLine = Math.abs(x / major - Math.round(x / major)) < 1e-6
+      gridLines.push({ x1: x, z1: top, x2: x, z2: bottom, major: majorLine })
+    }
+    for (let z = startZ; z <= bottom; z += minor) {
+      const majorLine = Math.abs(z / major - Math.round(z / major)) < 1e-6
+      gridLines.push({ x1: left, z1: z, x2: right, z2: z, major: majorLine })
+    }
   }
-  for (let z = startZ; z <= endZ; z += 1) {
-    const p1 = toScreen(bounds.x0, z)
-    const p2 = toScreen(bounds.x1, z)
-    gridLines.push({ x1: p1.px, y1: p1.py, x2: p2.px, y2: p2.py, major: true })
-  }
+  const bar = scaleBarMetres(view.scale)
+  const selected = new Set(selectedIds)
+  const drawing = tool === 'draw' || tool === 'partition' || tool === 'polygon'
+  const hint = tool === 'polygon'
+    ? 'Klikkaa nurkat. Seinä pysyy suorassa. Enter sulkee, askelpalautin peruu pisteen.'
+    : tool === 'draw' || tool === 'partition'
+      ? 'Vedä huone. Näppäile mitta, Tab vaihtaa sivua, Enter vahvistaa.'
+      : 'Vedä siirtää · kahvat mitoittavat · Shift monivalinta · rulla zoomaa · väli tai keskinäppäin panoroi'
 
-  const ordered = [...rooms].sort((a, b) => b.width * b.depth - a.width * a.depth)
-  const overlapIds = new Set()
-  rooms.forEach((room) => {
-    rooms.forEach((other) => {
-      if (roomsOverlap(room, other)) {
-        overlapIds.add(room.id)
-        overlapIds.add(other.id)
-      }
-    })
-  })
-
-  const cursorLabel = tool === 'draw'
-    ? 'Vedä suorakulmio uudeksi huoneeksi'
-    : tool === 'partition'
-      ? 'Vedä väliseinä olemassa olevan huoneen sisään'
-      : placing
-        ? `Sijoita: ${placing.name}. Esc peruuttaa.`
-        : 'Vedä huonetta tai kahvaa. Tyhjä alue siirtää näkymää.'
+  const rectDraft = draft?.kind === 'rect' ? draft : null
+  const draftWidth = rectDraft ? Math.abs(rectDraft.x2 - rectDraft.x1) : 0
+  const draftDepth = rectDraft ? Math.abs(rectDraft.z2 - rectDraft.z1) : 0
 
   return (
     <div
       ref={hostRef}
       data-testid="plan-canvas"
       onMouseDown={onMouseDown}
-      onMouseMove={onMouseMove}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(event) => event.preventDefault()}
+      onMouseLeave={() => { if (!gesture.current) setCursor(null) }}
       style={{
         position: 'relative',
         width: '100%',
         height: '100%',
+        background: PAPER,
         overflow: 'hidden',
-        background: '#070b16',
-        cursor: tool === 'draw' || tool === 'partition' ? 'crosshair' : placing ? 'copy' : 'default',
+        cursor: spaceDown ? 'grab' : drawing || placing ? 'crosshair' : hoverId ? 'move' : 'default',
         userSelect: 'none',
       }}
     >
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-        {gridLines.map((seg, i) => (
-          <line key={i} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2} stroke="#16324f" strokeWidth={seg.major ? 0.6 : 0.3} />
-        ))}
-        {ordered.map((room) => {
-          const rect = externalRect(room)
-          const tl = toScreen(rect.left, rect.top)
-          const w = room.width * view.scale
-          const d = room.depth * view.scale
-          const selected = selectedId === room.id
-          const dims = internalDims(room)
-          const wallPx = Math.max(2, room.wallThickness * view.scale)
-          const overlap = overlapIds.has(room.id)
-          return (
-            <g key={room.id}>
-              <rect
-                x={tl.px}
-                y={tl.py}
-                width={w}
-                height={d}
-                fill={room.color}
-                fillOpacity={selected ? 0.22 : 0.1}
-                stroke={overlap ? '#ef4444' : selected ? '#22d3ee' : '#94a3b8'}
-                strokeWidth={selected ? 2.4 : 1.4}
-              />
-              <rect
-                x={tl.px + wallPx}
-                y={tl.py + wallPx}
-                width={Math.max(0, w - wallPx * 2)}
-                height={Math.max(0, d - wallPx * 2)}
-                fill="none"
-                stroke={room.color}
-                strokeOpacity="0.85"
-                strokeWidth="1.2"
-              />
-              <text x={tl.px + w / 2} y={tl.py + d / 2 - 8} textAnchor="middle" fill="#f8fafc" fontSize="14" fontWeight="700">
-                {room.label}
-              </text>
-              <text x={tl.px + w / 2} y={tl.py + d / 2 + 8} textAnchor="middle" fill="#cbd5e1" fontSize="11">
-                {room.name} · {room.temp}°C
-              </text>
-              <text x={tl.px + w / 2} y={tl.py + d / 2 + 24} textAnchor="middle" fill="#67e8f9" fontSize="10">
-                sisus {formatLength(dims.width, unitSystem)} × {formatLength(dims.depth, unitSystem)}
-              </text>
-              <line x1={tl.px} y1={tl.py - 16} x2={tl.px + w} y2={tl.py - 16} stroke="#fbbf24" strokeWidth="1" />
-              <text x={tl.px + w / 2} y={tl.py - 20} textAnchor="middle" fill="#fbbf24" fontSize="11" fontWeight="700">
-                {formatLength(room.width, unitSystem)}
-              </text>
-              <text x={tl.px - 8} y={tl.py + d / 2} textAnchor="end" fill="#fbbf24" fontSize="11" fontWeight="700">
-                {formatLength(room.depth, unitSystem)}
-              </text>
-              {(room.equipment || []).map((eq) => {
-                const p = toScreen(room.x + eq.x, room.z + eq.z)
-                const ew = eq.width * view.scale
-                const ed = eq.depth * view.scale
-                const selectedEq = selectedId === eq.id
-                if (eq.category === 'door') {
-                  const horizontal = eq.rotation !== 90
+      <svg width="100%" height="100%">
+        <defs>
+          <pattern id="panel-hatch" width="0.18" height="0.18" patternUnits="userSpaceOnUse">
+            <path d="M0 0.18 L0.18 0" stroke="#d6d0c6" strokeWidth="0.012" />
+          </pattern>
+        </defs>
+        <g transform={`translate(${view.offsetX} ${view.offsetY}) scale(${view.scale})`}>
+          {gridLines.map((line, index) => (
+            <line
+              key={index}
+              x1={line.x1}
+              y1={line.z1}
+              x2={line.x2}
+              y2={line.z2}
+              stroke={line.major ? '#d9d3c8' : '#ebe6dc'}
+              strokeWidth={(line.major ? 1.1 : 0.7) / view.scale}
+            />
+          ))}
+          {rooms.map((room) => {
+            const outer = outlineOf(room)
+            const inner = insetOrthogonal(outer, room.wallThickness) || outer
+            const active = selected.has(room.id)
+            const hot = hoverId === room.id
+            const dims = metricsOf(room)
+            const line1 = `${room.label}  ${formatTemp(room.temp, unitSystem, 0)}`
+            const line2 = `${dims.area.toFixed(1)} m²`
+            const label = labelAnchor(room, inner, view.scale, line1, line2)
+            const showHandles = active && selectedIds.length === 1 && tool === 'select' && !placing
+            const rectLike = !isCustomOutline(room)
+            return (
+              <g key={room.id}>
+                <path
+                  data-room={room.id}
+                  d={`${pathOf(outer)} ${pathOf(inner)}`}
+                  fillRule="evenodd"
+                  fill="url(#panel-hatch)"
+                  stroke={active ? TEAL : '#44403c'}
+                  strokeWidth={(active ? 1.8 : 1.15) / view.scale}
+                />
+                <path
+                  data-room={room.id}
+                  d={pathOf(inner)}
+                  fill={room.color || '#3b82f6'}
+                  fillOpacity={active || hot ? 0.22 : 0.12}
+                  stroke="none"
+                />
+                {(room.equipment || []).map((eq) => {
+                  if (eq.category === 'door') {
+                    const symbol = doorSymbol(room, eq)
+                    const thickness = Math.max(room.wallThickness, 0.08)
+                    const gapW = symbol.iz !== 0 ? symbol.width : thickness
+                    const gapD = symbol.ix !== 0 ? symbol.width : thickness
+                    const gx = (symbol.x1 + symbol.x2) / 2 + symbol.ix * thickness / 2
+                    const gz = (symbol.z1 + symbol.z2) / 2 + symbol.iz * thickness / 2
+                    return (
+                      <g key={eq.id} data-eq={eq.id}>
+                        <rect x={gx - gapW / 2} y={gz - gapD / 2} width={gapW} height={gapD} fill={PAPER} />
+                        <polyline
+                          points={symbol.arc.map((point) => `${point.x},${point.z}`).join(' ')}
+                          fill="none"
+                          stroke="#9a3412"
+                          strokeWidth={1 / view.scale}
+                        />
+                        <line x1={symbol.hinge.x} y1={symbol.hinge.z} x2={symbol.open.x} y2={symbol.open.z} stroke="#9a3412" strokeWidth={1.4 / view.scale} />
+                      </g>
+                    )
+                  }
+                  const alongX = eq.rotation !== 90
+                  const w = alongX ? eq.width : eq.depth
+                  const d = alongX ? eq.depth : eq.width
+                  const ex = room.x + eq.x
+                  const ez = room.z + eq.z
+                  const evap = eq.category === 'evaporator'
                   return (
                     <g key={eq.id}>
                       <rect
-                        data-eq={eq.id}
-                        x={p.px - (horizontal ? ew / 2 : 4)}
-                        y={p.py - (horizontal ? 4 : ed / 2)}
-                        width={horizontal ? ew : 8}
-                        height={horizontal ? 8 : ed}
-                        fill="#d6b48a"
-                        stroke={selectedEq ? '#22d3ee' : '#78350f'}
-                        strokeWidth={selectedEq ? 2 : 1}
+                        x={ex - w / 2}
+                        y={ez - d / 2}
+                        width={w}
+                        height={d}
+                        rx={evap ? 0.04 : 0.02}
+                        fill={evap ? '#e0f2fe' : eq.category === 'rack' ? '#ede9fe' : '#fef3c7'}
+                        stroke={evap ? '#0369a1' : '#57534e'}
+                        strokeWidth={1 / view.scale}
                       />
+                      {evap && (
+                        <>
+                          <circle cx={ex} cy={ez} r={Math.min(w, d) * 0.18} fill="none" stroke="#0369a1" strokeWidth={1 / view.scale} />
+                          <path d={`M ${ex - w * 0.28} ${ez} l ${w * 0.16} ${-d * 0.12} l 0 ${d * 0.24} Z`} fill="#0369a1" />
+                          <path d={`M ${ex - w * 0.05} ${ez} l ${w * 0.16} ${-d * 0.12} l 0 ${d * 0.24} Z`} fill="#0369a1" />
+                        </>
+                      )}
                     </g>
                   )
-                }
-                const fill = eq.category === 'evaporator' ? '#7dd3fc' : eq.category === 'condenser' ? '#86efac' : eq.category === 'rack' ? '#c4b5fd' : '#fcd34d'
-                return (
-                  <g key={eq.id}>
-                    <rect
-                      data-eq={eq.id}
-                      x={p.px - ew / 2}
-                      y={p.py - ed / 2}
-                      width={ew}
-                      height={ed}
-                      rx="2"
-                      fill={fill}
-                      stroke={selectedEq ? '#22d3ee' : '#0f172a'}
-                      strokeWidth={selectedEq ? 2 : 1}
-                    />
-                    <text x={p.px} y={p.py + 3} textAnchor="middle" fontSize="9" fill="#0f172a">
-                      {eq.category === 'evaporator' ? `${eq.capacityKw} kW` : eq.category === 'rack' ? 'HYLLY' : eq.category === 'condenser' ? 'LAUH' : 'KONE'}
-                    </text>
-                  </g>
-                )
-              })}
-              {selected && tool === 'select' && !placing && ['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'].map((corner) => {
-                const cx = corner.includes('w') ? tl.px : corner.includes('e') ? tl.px + w : tl.px + w / 2
-                const cy = corner.includes('n') ? tl.py : corner.includes('s') ? tl.py + d : tl.py + d / 2
-                return (
+                })}
+                <g style={{ pointerEvents: 'none' }}>
                   <rect
-                    key={corner}
-                    data-handle={corner}
-                    data-room={room.id}
-                    x={cx - HANDLE / 2}
-                    y={cy - HANDLE / 2}
-                    width={HANDLE}
-                    height={HANDLE}
-                    fill="#22d3ee"
-                    stroke="#fff"
-                    strokeWidth="1"
+                    x={label.x - label.w / 2}
+                    y={label.z - label.h / 2}
+                    width={label.w}
+                    height={label.h}
+                    rx={0.08}
+                    fill="rgba(255,255,255,0.94)"
+                    stroke="#e7e5e4"
+                    strokeWidth={1 / view.scale}
                   />
-                )
-              })}
+                  <text
+                    x={label.x}
+                    y={label.z - 4 / view.scale}
+                    textAnchor="middle"
+                    fill={INK}
+                    fontSize={12 / view.scale}
+                    fontWeight="700"
+                    fontFamily="ui-sans-serif, system-ui, sans-serif"
+                  >
+                    {line1}
+                  </text>
+                  <text
+                    x={label.x}
+                    y={label.z + 8 / view.scale}
+                    textAnchor="middle"
+                    fill="#57534e"
+                    fontSize={10 / view.scale}
+                    fontFamily="ui-sans-serif, system-ui, sans-serif"
+                  >
+                    {line2}
+                  </text>
+                </g>
+                {active && (rectLike ? (
+                  <>
+                    <DimLine
+                      x1={bboxOf(outer).left}
+                      z1={bboxOf(outer).top - 0.45}
+                      x2={bboxOf(outer).right}
+                      z2={bboxOf(outer).top - 0.45}
+                      scale={view.scale}
+                      text={formatLength(room.width, unitSystem)}
+                    />
+                    <DimLine
+                      x1={bboxOf(outer).left - 0.45}
+                      z1={bboxOf(outer).top}
+                      x2={bboxOf(outer).left - 0.45}
+                      z2={bboxOf(outer).bottom}
+                      scale={view.scale}
+                      text={formatLength(room.depth, unitSystem)}
+                    />
+                  </>
+                ) : edgesOf(outer).map((edge) => (
+                  <g key={edge.index}>{edgeDimension(edge, outer, view.scale, unitSystem)}</g>
+                )))}
+                {showHandles && (rectLike ? ['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'] : []).map((corner) => {
+                  const box = bboxOf(outer)
+                  const x = corner.includes('w') ? box.left : corner.includes('e') ? box.right : box.x
+                  const z = corner.includes('n') ? box.top : corner.includes('s') ? box.bottom : box.z
+                  return (
+                    <circle key={corner} data-handle={corner} data-room={room.id} cx={x} cy={z} r={5.5 / view.scale} fill="#fff" stroke={TEAL} strokeWidth={1.4 / view.scale} />
+                  )
+                })}
+                {showHandles && !rectLike && outlineOf(room).map((point, index) => (
+                  <g key={index}>
+                    <circle data-handle={`v-${index}`} data-room={room.id} cx={point.x} cy={point.z} r={5.5 / view.scale} fill="#fff" stroke={TEAL} strokeWidth={1.4 / view.scale} />
+                    <rect
+                      data-handle={`e-${index}`}
+                      data-room={room.id}
+                      x={(point.x + outer[(index + 1) % outer.length].x) / 2 - 4 / view.scale}
+                      y={(point.z + outer[(index + 1) % outer.length].z) / 2 - 4 / view.scale}
+                      width={8 / view.scale}
+                      height={8 / view.scale}
+                      fill={TEAL}
+                    />
+                  </g>
+                ))}
+              </g>
+            )
+          })}
+          {rectDraft && (
+            <g>
+              <rect
+                x={Math.min(rectDraft.x1, rectDraft.x2)}
+                y={Math.min(rectDraft.z1, rectDraft.z2)}
+                width={draftWidth}
+                height={draftDepth}
+                fill="rgba(15,118,110,0.08)"
+                stroke={TEAL}
+                strokeWidth={1.4 / view.scale}
+                strokeDasharray={`${6 / view.scale} ${4 / view.scale}`}
+              />
+              <DimLine
+                x1={Math.min(rectDraft.x1, rectDraft.x2)}
+                z1={Math.min(rectDraft.z1, rectDraft.z2) - 0.35}
+                x2={Math.max(rectDraft.x1, rectDraft.x2)}
+                z2={Math.min(rectDraft.z1, rectDraft.z2) - 0.35}
+                scale={view.scale}
+                text={formatLength(draftWidth, unitSystem)}
+              />
+              <DimLine
+                x1={Math.min(rectDraft.x1, rectDraft.x2) - 0.35}
+                z1={Math.min(rectDraft.z1, rectDraft.z2)}
+                x2={Math.min(rectDraft.x1, rectDraft.x2) - 0.35}
+                z2={Math.max(rectDraft.z1, rectDraft.z2)}
+                scale={view.scale}
+                text={formatLength(draftDepth, unitSystem)}
+              />
             </g>
-          )
-        })}
-        {draft && (
-          <rect
-            x={toScreen(Math.min(draft.x1, draft.x2), Math.min(draft.z1, draft.z2)).px}
-            y={toScreen(Math.min(draft.x1, draft.x2), Math.min(draft.z1, draft.z2)).py}
-            width={Math.abs(draft.x2 - draft.x1) * view.scale}
-            height={Math.abs(draft.z2 - draft.z1) * view.scale}
-            fill="#22d3ee"
-            fillOpacity="0.15"
-            stroke="#22d3ee"
-            strokeDasharray="5 3"
-          />
+          )}
+          {poly.length > 0 && (
+            <g>
+              <polyline
+                points={[...poly, polyHover].filter(Boolean).map((point) => `${point.x},${point.z}`).join(' ')}
+                fill="none"
+                stroke={TEAL}
+                strokeWidth={1.6 / view.scale}
+              />
+              {poly.map((point, index) => (
+                <circle key={index} cx={point.x} cy={point.z} r={4 / view.scale} fill={TEAL} />
+              ))}
+              {polyHover && poly.length > 0 && (
+                <DimLine
+                  x1={poly[poly.length - 1].x}
+                  z1={poly[poly.length - 1].z}
+                  x2={polyHover.x}
+                  z2={polyHover.z}
+                  scale={view.scale}
+                  text={formatLength(Math.hypot(polyHover.x - poly[poly.length - 1].x, polyHover.z - poly[poly.length - 1].z), unitSystem)}
+                />
+              )}
+            </g>
+          )}
+          {draft?.kind === 'marquee' && (
+            <rect
+              x={Math.min(draft.x1, draft.x2)}
+              y={Math.min(draft.z1, draft.z2)}
+              width={Math.abs(draft.x2 - draft.x1)}
+              height={Math.abs(draft.z2 - draft.z1)}
+              fill="rgba(15,118,110,0.08)"
+              stroke={TEAL}
+              strokeWidth={1 / view.scale}
+            />
+          )}
+          {cursor?.kind && (
+            <g>
+              <circle cx={cursor.x} cy={cursor.z} r={6 / view.scale} fill="none" stroke={TEAL} strokeWidth={1.5 / view.scale} />
+              <text x={cursor.x + 10 / view.scale} y={cursor.z - 8 / view.scale} fill={TEAL} fontSize={11 / view.scale} fontWeight="700">
+                {snapLabel(cursor.kind)}
+              </text>
+            </g>
+          )}
+        </g>
+        {drawing && cursor && (
+          <>
+            <line x1={cursor.px} y1={0} x2={cursor.px} y2={size.h} stroke="#a8a29e" strokeWidth="0.6" opacity="0.55" />
+            <line x1={0} y1={cursor.py} x2={size.w} y2={cursor.py} stroke="#a8a29e" strokeWidth="0.6" opacity="0.55" />
+          </>
         )}
       </svg>
-
-      <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <ZoomButton onClick={() => setView((v) => ({ ...v, scale: Math.min(140, v.scale * 1.15) }))}>+</ZoomButton>
-        <ZoomButton onClick={() => setView((v) => ({ ...v, scale: Math.max(8, v.scale * 0.87) }))}>−</ZoomButton>
-        <ZoomButton onClick={fit}>⌂</ZoomButton>
+      <div style={{ position: 'absolute', left: 14, top: 12, display: 'flex', gap: 8, alignItems: 'center', pointerEvents: 'none' }}>
+        <div style={{ width: 22, height: 22, border: '1.5px solid #44403c', borderRadius: 11, position: 'relative' }}>
+          <div style={{ position: 'absolute', left: 10, top: 2, width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: '7px solid #0f766e' }} />
+        </div>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#44403c' }}>POHJOINEN</span>
       </div>
-
+      {notice && (
+        <div style={{ position: 'absolute', left: 14, top: 44, maxWidth: 420, padding: '6px 10px', background: 'rgba(255,251,235,0.95)', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#78350f' }}>
+          {notice}
+        </div>
+      )}
       <div style={{
-        position: 'absolute', left: 0, right: 0, bottom: 0, height: 32,
-        display: 'flex', alignItems: 'center', gap: 14, padding: '0 12px',
-        background: 'rgba(15,23,42,0.94)', borderTop: '1px solid rgba(255,255,255,0.08)',
-        fontSize: 11, color: '#94a3b8', fontFamily: 'ui-monospace, monospace',
+        position: 'absolute', left: 12, right: 12, bottom: 10, display: 'flex', justifyContent: 'space-between', gap: 12,
+        alignItems: 'flex-end', pointerEvents: 'none', fontSize: 11, color: '#57534e',
       }}>
-        <span>X {cursor ? cursor.x.toFixed(2) : '—'} m</span>
-        <span>Y {cursor ? cursor.z.toFixed(2) : '—'} m</span>
-        <span>{Math.round(view.scale / 28 * 100)}%</span>
-        <span style={{ color: snapOn ? '#4ade80' : '#94a3b8' }}>{snapOn ? `ruutu ${gridSize} m` : 'ruutu pois'}</span>
-        <span style={{ color: '#e2e8f0' }}>{notice || cursorLabel}</span>
+        <div>
+          <div style={{ width: bar * view.scale, height: 8, borderLeft: '1.5px solid #44403c', borderRight: '1.5px solid #44403c', borderBottom: '1.5px solid #44403c' }} />
+          <div style={{ marginTop: 2 }}>{formatLength(bar, unitSystem)}</div>
+        </div>
+        <div style={{ textAlign: 'center', maxWidth: 520 }}>{hint}</div>
+        <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+          {cursor ? `X ${formatLength(cursor.x, unitSystem)}   Y ${formatLength(cursor.z, unitSystem)}` : 'X —   Y —'}
+          {cursor?.kind ? ` · ${snapLabel(cursor.kind)}` : ''}
+        </div>
       </div>
     </div>
-  )
-}
-
-function ZoomButton({ children, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseDown={(e) => e.stopPropagation()}
-      style={{
-        width: 32, height: 32, borderRadius: 6, border: '1px solid #334155',
-        background: 'rgba(15,23,42,0.92)', color: '#f8fafc', fontSize: 16, cursor: 'pointer',
-      }}
-    >
-      {children}
-    </button>
   )
 }
