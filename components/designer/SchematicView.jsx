@@ -88,9 +88,9 @@ function SymbolArt({ symbol }) {
         ))}
         {type === 'evaporator' && (
           <g>
-            <rect x={w - 18} y={h * 0.34} width="18" height="16" rx="2" fill="#b45309" stroke="#7c2d12" />
-            {[0.22, 0.48, 0.74].map((t) => (
-              <line key={t} x1={w - 16} y1={h * 0.42} x2={w * 0.62} y2={h * t} stroke="#d97706" strokeWidth="1.3" />
+            <rect x={w - 14} y={14} width="9" height={h - 28} rx="2" fill="#b45309" stroke="#7c2d12" />
+            {[0.34, 0.52, 0.7].map((t) => (
+              <line key={t} x1={w - 14} y1={h * t} x2={w - 24} y2={h * t} stroke="#d97706" strokeWidth="1.5" />
             ))}
           </g>
         )}
@@ -108,8 +108,8 @@ function SymbolArt({ symbol }) {
         <rect x="0" y={h * 0.28} width="42" height={h * 0.48} rx="8" fill="#14532d" stroke="#052e16" strokeWidth="1.5" />
         <rect x="28" y="10" width={w - 46} height={h - 18} rx="20" fill="#15803d" stroke="#052e16" strokeWidth="2" />
         <path d={`M48 16 H${w - 40}`} stroke="#86efac" strokeWidth="6" strokeLinecap="round" opacity="0.45" />
-        <rect x={w - 62} y="16" width="34" height="20" rx="3" fill="#0f172a" stroke="#334155" />
-        <circle cx={w - 45} cy="26" r="3" fill="#4ade80" />
+        <rect x="212" y="28" width="40" height="24" rx="3" fill="#0f172a" stroke="#334155" />
+        <circle cx="232" cy="40" r="3" fill="#4ade80" />
         <rect x="44" y="-10" width="12" height="18" rx="2" fill="#94a3b8" stroke="#334155" />
         <rect x="40" y="-2" width="20" height="8" rx="1" fill="#b45309" stroke="#7c2d12" />
         <rect x="186" y="-10" width="12" height="18" rx="2" fill="#94a3b8" stroke="#334155" />
@@ -180,8 +180,9 @@ function SymbolArt({ symbol }) {
   if (type === 'bulb') {
     return (
       <g>
-        <rect x="0" y="2" width={w} height={h - 4} rx={(h - 4) / 2} fill="#e2e8f0" stroke="#0f172a" />
-        <line x1={w} y1={h / 2} x2={w + 8} y2={h / 2} stroke="#94a3b8" strokeWidth="1.2" />
+        <path d={`M0 1 H-6 V${h - 1} H0`} fill="none" stroke="#0f172a" strokeWidth="1.4" />
+        <rect x="0" y="1" width={w} height={h - 2} rx={(h - 2) / 2} fill="#e2e8f0" stroke="#0f172a" />
+        <line x1={w - 1} y1={h / 2} x2={w + 10} y2={h / 2} stroke="#94a3b8" strokeWidth="1.3" />
       </g>
     )
   }
@@ -223,8 +224,9 @@ function SymbolArt({ symbol }) {
         <line x1="8" y1="0" x2="8" y2="6" stroke="#94a3b8" strokeWidth="1.4" />
         <circle cx="8" cy="11" r="5.5" fill="#e2e8f0" stroke="#0f172a" strokeWidth="1.3" />
         {symbol.captionAt === 'below' && <Caption x={w / 2} y={h + 12} size="10">{label}</Caption>}
+        {symbol.captionAt === 'under' && <Caption x={w + 6} y={h + 14} anchor="start" size="10">{label}</Caption>}
         {symbol.captionAt === 'left' && <Caption x={-4} y={12} anchor="end" size="10">{label}</Caption>}
-        {symbol.captionAt !== 'below' && symbol.captionAt !== 'left' && symbol.captionAt !== 'inside' && (
+        {symbol.captionAt !== 'below' && symbol.captionAt !== 'under' && symbol.captionAt !== 'left' && symbol.captionAt !== 'inside' && (
           <Caption x="18" y="14" anchor="start" size="10">{label}</Caption>
         )}
         {symbol.captionAt === 'inside' && <Caption x={-3} y={11} anchor="end" size="10">{label}</Caption>}
