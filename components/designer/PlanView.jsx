@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
+import { isRefrigerated } from '@/lib/catalog'
+import { nearestPort, pointInEquipment } from '@/lib/placement'
+import { routeLength, sizePipe } from '@/lib/pipeSizing'
+import { calculateProject } from '@/lib/heatLoad'
 import {
   applyBox,
   applyOutline,
@@ -97,18 +101,35 @@ function hitEquipment(rooms, x, z) {
   const ordered = [...rooms].sort((a, b) => a.width * a.depth - b.width * b.depth)
   for (const room of ordered) {
     for (const eq of room.equipment || []) {
-      const wx = room.x + eq.x
-      const wz = room.z + eq.z
-      const verticalDoor = eq.category === 'door' && (
-        eq.wall === 'e' || eq.wall === 'w' || (eq.rotation === 90 && eq.wall !== 'n' && eq.wall !== 's')
-      )
-      const alongX = eq.category === 'door' ? !verticalDoor : eq.rotation !== 90
-      const hw = (alongX ? eq.width : eq.depth) / 2
-      const hd = (alongX ? eq.depth : eq.width) / 2
-      if (Math.abs(x - wx) <= hw + 0.08 && Math.abs(z - wz) <= hd + 0.08) return { room, eq }
+      if (pointInEquipment(room, eq, x, z)) return { room, eq }
     }
   }
   return null
+}
+
+function distToSeg(px, pz, a, b) {
+  const dx = b.x - a.x
+  const dz = b.z - a.z
+  const l2 = dx * dx + dz * dz || 1
+  let t = ((px - a.x) * dx + (pz - a.z) * dz) / l2
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(px - (a.x + dx * t), pz - (a.z + dz * t))
+}
+
+function hitRoute(items, x, z, limit = 0.22) {
+  let best = null
+  for (const item of items || []) {
+    const points = item.points || []
+    for (let i = 1; i < points.length; i += 1) {
+      const dist = distToSeg(x, z, points[i - 1], points[i])
+      if (dist <= limit && (!best || dist < best.dist)) best = { item, dist }
+    }
+  }
+  return best?.item || null
+}
+
+function isRouteTool(tool) {
+  return tool === 'polygon' || tool === 'pipe' || tool === 'cable'
 }
 
 function moveEdge(points, index, x, z) {
@@ -188,6 +209,94 @@ function edgeDimension(edge, points, scale, unitSystem) {
   )
 }
 
+function EquipmentMark({ eq, scale }) {
+  const w = eq.width
+  const d = eq.depth
+  const sw = 1 / Math.max(scale, 1)
+  if (eq.category === 'sensor') {
+    const letter = eq.sensor === 'door' ? 'O' : eq.sensor === 'defrost' ? 'S' : eq.sensor === 'evap' ? 'H' : 'T'
+    return (
+      <g>
+        <circle r={0.13} fill="#fff" stroke="#0369a1" strokeWidth={sw * 1.4} />
+        <text y={4 / scale} textAnchor="middle" fontSize={11 / scale} fill="#0369a1" fontFamily="ui-sans-serif, system-ui, sans-serif">{letter}</text>
+      </g>
+    )
+  }
+  if (eq.category === 'controller') {
+    return (
+      <g>
+        <rect x={-w / 2} y={-d / 2} width={w} height={d} rx={0.03} fill="#ccfbf1" stroke="#0f766e" strokeWidth={sw} />
+        <text y={4 / scale} textAnchor="middle" fontSize={12 / scale} fill="#0f766e" fontFamily="ui-sans-serif, system-ui, sans-serif">S</text>
+      </g>
+    )
+  }
+  if (eq.category === 'column') {
+    return <rect x={-w / 2} y={-d / 2} width={w} height={d} fill="#d6d3d1" stroke="#57534e" strokeWidth={sw * 1.4} />
+  }
+  if (eq.category === 'evaporator' && eq.style === 'slant') {
+    const fans = w > 1.7 ? 3 : 2
+    return (
+      <g>
+        <path d={`M ${-w / 2} ${-d / 2} L ${w / 2} ${-d / 2} L ${w * 0.34} ${d / 2} L ${-w * 0.34} ${d / 2} Z`} fill="#e0f2fe" stroke="#0369a1" strokeWidth={sw} />
+        {Array.from({ length: fans }, (_, index) => (
+          <circle key={index} cx={(index - (fans - 1) / 2) * w * 0.28} cy={d * 0.05} r={Math.min(d * 0.22, w / fans / 2.4)} fill="#fff" stroke="#0f172a" strokeWidth={sw} />
+        ))}
+      </g>
+    )
+  }
+  if (eq.category === 'evaporator') {
+    return (
+      <g>
+        <rect x={-w / 2} y={-d / 2} width={w} height={d} rx={0.04} fill="#e0f2fe" stroke="#0369a1" strokeWidth={sw} />
+        <circle r={Math.min(w, d) * 0.16} fill="none" stroke="#0369a1" strokeWidth={sw} />
+        <path d={`M ${-w * 0.28} 0 l ${w * 0.16} ${-d * 0.12} l 0 ${d * 0.24} Z`} fill="#0369a1" />
+        <path d={`M ${-w * 0.05} 0 l ${w * 0.16} ${-d * 0.12} l 0 ${d * 0.24} Z`} fill="#0369a1" />
+      </g>
+    )
+  }
+  if (eq.category === 'condenser' || eq.category === 'combo' || eq.category === 'unit' || eq.category === 'compressor') {
+    const combo = eq.category === 'combo' || eq.category === 'unit'
+    const rack = eq.category === 'compressor'
+    return (
+      <g>
+        <rect x={-w / 2} y={-d / 2} width={w} height={d} fill="#f8fafc" stroke="#334155" strokeWidth={sw} />
+        <line x1={-w / 2} y1={d / 2 - 0.03} x2={w / 2} y2={d / 2 - 0.03} stroke="#44403c" strokeWidth={sw * 2.2} />
+        {!rack && Array.from({ length: 4 }, (_, index) => (
+          <line key={index} x1={combo ? -w * 0.05 : -w * 0.32} y1={-d * 0.28 + index * d * 0.14} x2={w * 0.36} y2={-d * 0.28 + index * d * 0.14} stroke="#64748b" strokeWidth={sw} />
+        ))}
+        {!rack && <circle cx={combo ? w * 0.12 : 0} cy={0} r={Math.min(w, d) * 0.16} fill="#fff" stroke="#0f172a" strokeWidth={sw} />}
+        {combo && <ellipse cx={-w * 0.28} cy={0} rx={Math.min(w, d) * 0.16} ry={Math.min(w, d) * 0.2} fill="#1f2937" />}
+        {rack && [-0.24, 0, 0.24].slice(0, w > 1 ? 3 : 2).map((offset) => (
+          <circle key={offset} cx={w * offset} cy={0} r={Math.min(0.16, d * 0.22)} fill="#1f2937" />
+        ))}
+        <circle cx={-w * 0.12} cy={-d / 2} r={0.045} fill="#b45309" />
+        <circle cx={w * 0.12} cy={-d / 2} r={0.045} fill="#b45309" />
+      </g>
+    )
+  }
+  return <rect x={-w / 2} y={-d / 2} width={w} height={d} fill={eq.category === 'rack' ? '#ede9fe' : '#fef3c7'} stroke="#57534e" strokeWidth={sw} />
+}
+
+function longestMid(points) {
+  let best = 0
+  let mid = points[0]
+  let dx = 1
+  let dz = 0
+  for (let i = 1; i < points.length; i += 1) {
+    const sx = points[i].x - points[i - 1].x
+    const sz = points[i].z - points[i - 1].z
+    const len = Math.hypot(sx, sz)
+    if (len >= best) {
+      best = len
+      mid = { x: (points[i].x + points[i - 1].x) / 2, z: (points[i].z + points[i - 1].z) / 2 }
+      dx = sx
+      dz = sz
+    }
+  }
+  const span = Math.hypot(dx, dz) || 1
+  return { ...mid, nx: -dz / span, nz: dx / span }
+}
+
 export default function PlanView({
   rooms,
   selectedIds = [],
@@ -204,7 +313,12 @@ export default function PlanView({
   onGestureEnd,
   onCreateRect,
   onCreatePolygon,
+  onCreateRoute,
   onPlace,
+  onContextMenu,
+  pipes = [],
+  cables = [],
+  pipeKind = 'suction',
   notice,
 }) {
   const hostRef = useRef(null)
@@ -225,8 +339,8 @@ export default function PlanView({
   const propsRef = useRef({})
   polyRef.current = poly
   propsRef.current = {
-    rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags,
-    onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onPlace,
+    rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
+    onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
   }
 
   const setCamera = (next) => {
@@ -394,7 +508,11 @@ export default function PlanView({
           polyTyped.current = ''
           return
         }
-        if (points.length >= 4) {
+        const route = propsRef.current.tool === 'pipe' || propsRef.current.tool === 'cable'
+        if (route && points.length >= 2) {
+          propsRef.current.onCreateRoute?.(points)
+          setPoly([])
+        } else if (!route && points.length >= 4) {
           propsRef.current.onCreatePolygon(points)
           setPoly([])
         }
@@ -419,7 +537,7 @@ export default function PlanView({
       const world = { x: (px - current.offsetX) / current.scale, z: (py - current.offsetY) / current.scale, px, py }
       const p = propsRef.current
       const g = gesture.current
-      if (polyRef.current.length && p.tool === 'polygon') {
+      if (polyRef.current.length && isRouteTool(p.tool)) {
         const last = polyRef.current[polyRef.current.length - 1]
         let hover = snapWorld(world.x, world.z, {
           origin: last,
@@ -442,6 +560,12 @@ export default function PlanView({
         const eq = hitEquipment(p.rooms, world.x, world.z)
         setHoverId(eq?.room?.id || hitRoom(p.rooms, world.x, world.z)?.id || null)
         return
+      }
+      if (g.kind === 'right') {
+        if (Math.hypot(event.clientX - g.sx, event.clientY - g.sy) > 4) {
+          g.kind = 'pan'
+          g.moved = true
+        }
       }
       if (g.kind === 'pan') {
         autoFit.current = false
@@ -575,6 +699,25 @@ export default function PlanView({
       gesture.current = null
       if (!g) return
       const p = propsRef.current
+      if (g.kind === 'right') {
+        if (!g.moved) {
+          const eqHit = hitEquipment(p.rooms, g.world.x, g.world.z)
+          const pipeHit = hitRoute(p.pipes, g.world.x, g.world.z)
+          const cableHit = hitRoute(p.cables, g.world.x, g.world.z)
+          const roomHit = hitRoom(p.rooms, g.world.x, g.world.z)
+          const hit = eqHit
+            ? { id: eqHit.eq.id, kind: 'equipment' }
+            : pipeHit
+              ? { id: pipeHit.id, kind: 'pipe' }
+              : cableHit
+                ? { id: cableHit.id, kind: 'cable' }
+                : roomHit
+                  ? { id: roomHit.id, kind: 'room' }
+                  : null
+          if (hit) p.onContextMenu?.({ ...hit, x: event.clientX, y: event.clientY })
+        }
+        return
+      }
       if (g.kind === 'draw') {
         setDraft(null)
         typed.current = { field: 'w', w: '', d: '' }
@@ -612,22 +755,36 @@ export default function PlanView({
   }, [])
 
   const onMouseDown = (event) => {
-    if (event.button === 1 || event.button === 2 || spaceDown) {
-      gesture.current = { kind: 'pan', sx: event.clientX, sy: event.clientY, offsetX: view.offsetX, offsetY: view.offsetY }
-      return
-    }
-    if (event.button !== 0) return
     const host = hostRef.current
     const world = {
       x: (event.clientX - host.getBoundingClientRect().left - view.offsetX) / view.scale,
       z: (event.clientY - host.getBoundingClientRect().top - view.offsetY) / view.scale,
     }
+    if (event.button === 1 || spaceDown) {
+      gesture.current = { kind: 'pan', sx: event.clientX, sy: event.clientY, offsetX: view.offsetX, offsetY: view.offsetY }
+      return
+    }
+    if (event.button === 2) {
+      gesture.current = {
+        kind: 'right',
+        sx: event.clientX,
+        sy: event.clientY,
+        offsetX: view.offsetX,
+        offsetY: view.offsetY,
+        world,
+        moved: false,
+      }
+      return
+    }
+    if (event.button !== 0) return
     const p = propsRef.current
     const handle = event.target?.dataset?.handle
     const handleRoom = event.target?.dataset?.room
-    if (p.tool === 'polygon') {
-      if (event.detail >= 2 && polyRef.current.length >= 4) {
-        p.onCreatePolygon(polyRef.current)
+    if (isRouteTool(p.tool)) {
+      const route = p.tool === 'pipe' || p.tool === 'cable'
+      if (event.detail >= 2 && polyRef.current.length >= (route ? 2 : 4)) {
+        if (route) p.onCreateRoute?.(polyRef.current)
+        else p.onCreatePolygon(polyRef.current)
         setPoly([])
         polyTyped.current = ''
         return
@@ -647,8 +804,12 @@ export default function PlanView({
         const mag = Math.hypot(dx, dz) || 1
         point = { x: origin.x + (dx / mag) * typedLength, z: origin.z + (dz / mag) * typedLength }
       }
+      if (p.tool === 'pipe') {
+        const port = nearestPort(p.rooms, point.x, point.z, p.pipeKind)
+        if (port) point = { x: port.x, z: port.z }
+      }
       polyTyped.current = ''
-      if (polyRef.current.length >= 3) {
+      if (!route && polyRef.current.length >= 3) {
         const first = polyRef.current[0]
         if (Math.hypot(point.x - first.x, point.z - first.z) < 16 / view.scale) {
           p.onCreatePolygon(polyRef.current)
@@ -672,7 +833,11 @@ export default function PlanView({
       return
     }
     if (p.placing) {
-      const room = hitRoom(p.rooms, world.x, world.z)
+      let room = hitRoom(p.rooms, world.x, world.z)
+      const outdoor = ['condenser', 'unit', 'combo', 'compressor'].includes(p.placing.category)
+      if (!room && outdoor) {
+        room = [...p.rooms].sort((a, b) => Math.hypot(a.x - world.x, a.z - world.z) - Math.hypot(b.x - world.x, b.z - world.z))[0]
+      }
       if (room) p.onPlace(room.id, world.x, world.z)
       return
     }
@@ -690,6 +855,16 @@ export default function PlanView({
         gesture.current = { kind: 'resize', id: handleRoom, corner: handle, orig, started: false }
       }
       p.onSelect([handleRoom])
+      return
+    }
+    const pipeHit = hitRoute(p.pipes, world.x, world.z)
+    if (pipeHit && p.tool === 'select') {
+      p.onSelect([pipeHit.id])
+      return
+    }
+    const cableHit = hitRoute(p.cables, world.x, world.z)
+    if (cableHit && p.tool === 'select') {
+      p.onSelect([cableHit.id])
       return
     }
     const eqHit = hitEquipment(p.rooms, world.x, world.z)
@@ -749,12 +924,16 @@ export default function PlanView({
   }
   const bar = scaleBarMetres(view.scale)
   const selected = new Set(selectedIds)
-  const drawing = tool === 'draw' || tool === 'partition' || tool === 'polygon'
-  const hint = tool === 'polygon'
-    ? 'Klikkaa nurkat. Seinä pysyy suorassa. Enter sulkee, askelpalautin peruu pisteen.'
-    : tool === 'draw' || tool === 'partition'
-      ? 'Vedä huone. Näppäile mitta, Tab vaihtaa sivua, Enter vahvistaa.'
-      : 'Vedä siirtää · kahvat mitoittavat · Shift monivalinta · rulla zoomaa · väli tai keskinäppäin panoroi'
+  const drawing = tool === 'draw' || tool === 'partition' || isRouteTool(tool)
+  const hint = tool === 'pipe'
+    ? 'Putki: klikkaa pisteet, suora kulma napsahtaa. Enter päättää, portti napsahtaa laitteeseen.'
+    : tool === 'cable'
+      ? 'Kaapeli: klikkaa reitti anturista säätimelle. Enter päättää.'
+      : tool === 'polygon'
+        ? 'Klikkaa nurkat. Seinä pysyy suorassa. Enter sulkee, askelpalautin peruu pisteen.'
+        : tool === 'draw' || tool === 'partition'
+          ? 'Vedä huone tai muu tila. Näppäile mitta, Tab vaihtaa sivua, Enter vahvistaa.'
+          : 'Vedä siirtää · oikea näppäin valikko · kahvat mitoittavat · rulla zoomaa'
 
   const rectDraft = draft?.kind === 'rect' ? draft : null
   const draftWidth = rectDraft ? Math.abs(rectDraft.x2 - rectDraft.x1) : 0
@@ -810,19 +989,22 @@ export default function PlanView({
               <g key={room.id}>
                 <path
                   data-room={room.id}
-                  d={`${pathOf(outer)} ${pathOf(inner)}`}
+                  d={isRefrigerated(room.type) ? `${pathOf(outer)} ${pathOf(inner)}` : pathOf(outer)}
                   fillRule="evenodd"
-                  fill="url(#panel-hatch)"
-                  stroke={active ? TEAL : '#44403c'}
+                  fill={isRefrigerated(room.type) ? 'url(#panel-hatch)' : (room.type === 'yard' ? '#d9e7c4' : '#f5f5f4')}
+                  stroke={active ? TEAL : isRefrigerated(room.type) ? '#44403c' : '#78716c'}
                   strokeWidth={(active ? 1.8 : 1.15) / view.scale}
+                  strokeDasharray={isRefrigerated(room.type) ? undefined : `${0.18} ${0.12}`}
                 />
-                <path
-                  data-room={room.id}
-                  d={pathOf(inner)}
-                  fill={room.color || '#3b82f6'}
-                  fillOpacity={active || hot ? 0.22 : 0.12}
-                  stroke="none"
-                />
+                {isRefrigerated(room.type) && (
+                  <path
+                    data-room={room.id}
+                    d={pathOf(inner)}
+                    fill={room.color || '#3b82f6'}
+                    fillOpacity={active || hot ? 0.22 : 0.12}
+                    stroke="none"
+                  />
+                )}
                 {(room.equipment || []).map((eq) => {
                   if (eq.category === 'door') {
                     const symbol = doorSymbol(room, eq)
@@ -844,31 +1026,11 @@ export default function PlanView({
                       </g>
                     )
                   }
-                  const alongX = eq.rotation !== 90
-                  const w = alongX ? eq.width : eq.depth
-                  const d = alongX ? eq.depth : eq.width
                   const ex = room.x + eq.x
                   const ez = room.z + eq.z
-                  const evap = eq.category === 'evaporator'
                   return (
-                    <g key={eq.id}>
-                      <rect
-                        x={ex - w / 2}
-                        y={ez - d / 2}
-                        width={w}
-                        height={d}
-                        rx={evap ? 0.04 : 0.02}
-                        fill={evap ? '#e0f2fe' : eq.category === 'rack' ? '#ede9fe' : '#fef3c7'}
-                        stroke={evap ? '#0369a1' : '#57534e'}
-                        strokeWidth={1 / view.scale}
-                      />
-                      {evap && (
-                        <>
-                          <circle cx={ex} cy={ez} r={Math.min(w, d) * 0.18} fill="none" stroke="#0369a1" strokeWidth={1 / view.scale} />
-                          <path d={`M ${ex - w * 0.28} ${ez} l ${w * 0.16} ${-d * 0.12} l 0 ${d * 0.24} Z`} fill="#0369a1" />
-                          <path d={`M ${ex - w * 0.05} ${ez} l ${w * 0.16} ${-d * 0.12} l 0 ${d * 0.24} Z`} fill="#0369a1" />
-                        </>
-                      )}
+                    <g key={eq.id} data-eq={eq.id} data-cat={eq.category} data-style={eq.style || ''} transform={`translate(${ex} ${ez}) rotate(${eq.rotation || 0})`}>
+                      <EquipmentMark eq={eq} scale={view.scale} />
                     </g>
                   )
                 })}
@@ -952,6 +1114,83 @@ export default function PlanView({
               </g>
             )
           })}
+          {(() => {
+            const projectNow = calculateProject(rooms)
+            return pipes.map((pipe) => {
+              const points = pipe.points || []
+              if (points.length < 2) return null
+              const room = hitRoom(rooms, points[0].x, points[0].z)
+              const duty = room && isRefrigerated(room.type)
+                ? (projectNow.rooms.find((item) => item.id === room.id)?.total || 0) / 1000
+                : (pipe.capacityKw || 0)
+              const sized = sizePipe(pipe, {
+                capacityKw: duty || pipe.capacityKw || 0,
+                roomTempC: pipe.roomTempC ?? room?.temp ?? 2,
+                lengthM: routeLength(points),
+              })
+              const traced = pipe.kind === 'drain' && sized.heatTraced
+              const color = pipe.kind === 'suction' ? '#1d4ed8' : pipe.kind === 'liquid' ? '#15803d' : '#c2410c'
+              const mid = longestMid(points)
+              const active = selected.has(pipe.id)
+              const side = pipe.kind === 'suction' ? -1 : 1
+              const labelX = mid.x + mid.nx * (20 / view.scale) * side
+              const labelZ = mid.z + mid.nz * (20 / view.scale) * side
+              return (
+                <g key={pipe.id} data-pipe={pipe.id}>
+                  <polyline
+                    points={points.map((point) => `${point.x},${point.z}`).join(' ')}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={(traced ? 2.6 : 1.7) / view.scale}
+                    strokeDasharray={pipe.kind === 'drain' ? `${0.22} ${0.14}` : undefined}
+                  />
+                  {traced && (
+                    <polyline
+                      points={points.map((point) => `${point.x},${point.z - 0.08}`).join(' ')}
+                      fill="none"
+                      stroke="#fdba74"
+                      strokeWidth={1.1 / view.scale}
+                      strokeDasharray={`${0.08} ${0.1}`}
+                    />
+                  )}
+                  <g>
+                    <rect
+                      x={labelX - (sized.label.length * 3.15) / view.scale}
+                      y={labelZ - 8 / view.scale}
+                      width={(sized.label.length * 6.3) / view.scale}
+                      height={13 / view.scale}
+                      rx={0.05}
+                      fill="rgba(255,255,255,0.94)"
+                      stroke={color}
+                      strokeWidth={1 / view.scale}
+                    />
+                    <text
+                      data-testid="pipe-label"
+                      x={labelX}
+                      y={labelZ + 1.5 / view.scale}
+                      textAnchor="middle"
+                      fill={active ? TEAL : color}
+                      fontSize={10 / view.scale}
+                      fontWeight="700"
+                      fontFamily="ui-sans-serif, system-ui, sans-serif"
+                    >
+                      {sized.label}
+                    </text>
+                  </g>
+                </g>
+              )
+            })
+          })()}
+          {cables.map((cable) => (
+            <polyline
+              key={cable.id}
+              points={(cable.points || []).map((point) => `${point.x},${point.z}`).join(' ')}
+              fill="none"
+              stroke={selected.has(cable.id) ? TEAL : '#7c3aed'}
+              strokeWidth={1.2 / view.scale}
+              strokeDasharray={`${0.12} ${0.08}`}
+            />
+          ))}
           {rectDraft && (
             <g>
               <rect

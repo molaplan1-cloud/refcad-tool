@@ -1,10 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { PRODUCTS, ROOM_TYPES, getProduct } from '@/lib/catalog'
+import { PRODUCTS, ROOM_TYPES, getProduct, isRefrigerated } from '@/lib/catalog'
 import { applyType, internalDims } from '@/lib/geometry'
 import { isCustomOutline, polygonMetrics } from '@/lib/cadDraw'
 import { formatKw, formatPower, fromLength, fromTemp, lengthUnit, tempUnit, toLength, toTemp } from '@/lib/units'
+import { capacityCheck, suggestPackage } from '@/lib/selection'
+import { routeLength, sizePipe, REFRIGERANT_IDS as PIPE_REFS } from '@/lib/pipeSizing'
+import { defaultElevation, mountLabel } from '@/lib/placement'
 
 const labelStyle = {
   fontSize: 10, color: '#78716c', fontWeight: 700,
@@ -105,7 +108,9 @@ export default function HeatLoadPanel({
   onFocusEdit,
   onBlurEdit,
   selectedEquipment,
+  selectedPipe,
   onPatchEquipment,
+  onPatchPipe,
   onDeleteEquipment,
 }) {
   const field = { onFocus: onFocusEdit, onBlur: onBlurEdit }
@@ -142,6 +147,14 @@ export default function HeatLoadPanel({
         <div style={{ fontSize: 11, color: '#78716c', marginTop: 2 }}>
           {Math.round(result.total).toLocaleString('fi-FI')} W · {formatPower(result.total, 'IP')}
         </div>
+        {room && !roomResult && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#57534e', lineHeight: 1.4 }}>
+            {room.label} ei ole kylmähuone. Sen lämpötila vaikuttaa viereisen kylmähuoneen seinäkuormaan.
+          </div>
+        )}
+        {room && roomResult && (
+          <CapacityBlock room={room} roomResult={roomResult} />
+        )}
         {room && roomResult && (
           <div style={{
             marginTop: 8, padding: '8px 10px', borderRadius: 8,
@@ -161,7 +174,21 @@ export default function HeatLoadPanel({
       </div>
 
       <div style={{ padding: '10px 14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {!room && (
+      {room && !isRefrigerated(room.type) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 12, color: '#44403c', lineHeight: 1.45 }}>
+            Tila piirretään samaan pohjaan, mutta sitä ei lasketa kylmäkuormaan. Viereinen kylmähuone käyttää tämän tilan lämpötilaa yhteisellä seinällä.
+          </div>
+          <Num {...field} label="Lämpötila" unit={tempUnit(unitSystem)} value={temp(room.temp)} step={0.5} onChange={(v) => setTemp('temp', v)} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Num {...field} label="Pituus" unit={lengthUnit(unitSystem)} value={length(room.width)} onChange={(v) => setLength('width', v)} />
+            <Num {...field} label="Leveys" unit={lengthUnit(unitSystem)} value={length(room.depth)} onChange={(v) => setLength('depth', v)} />
+            <Num {...field} label="Korkeus" unit={lengthUnit(unitSystem)} value={length(room.height)} onChange={(v) => setLength('height', v)} />
+          </div>
+        </div>
+      )}
+
+      {!room && !selectedPipe && (
         <div style={{ fontSize: 12, color: '#78716c', lineHeight: 1.5 }}>
           Valitse huone pohjasta tai listasta. Kuorma, mitat ja väliseinät päivittyvät heti.
         </div>
@@ -303,6 +330,9 @@ export default function HeatLoadPanel({
           </div>
         </>
       )}
+      {selectedPipe && (
+        <PipeCard pipe={selectedPipe} rooms={rooms} result={result} onPatch={onPatchPipe} onDelete={onDeleteEquipment} />
+      )}
       {selectedEquipment && (
         <div style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{selectedEquipment.name}</div>
@@ -310,6 +340,35 @@ export default function HeatLoadPanel({
             {selectedEquipment.width} × {selectedEquipment.depth} × {selectedEquipment.height} m
             {selectedEquipment.capacityKw ? ` · ${selectedEquipment.capacityKw} kW` : ''}
             {selectedEquipment.fanW ? ` · puhallin ${selectedEquipment.fanW} W` : ''}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+            <Num label="Leveys" unit="m" value={selectedEquipment.width} step={0.05} onChange={(v) => onPatchEquipment?.({ width: v })} />
+            <Num label="Syvyys" unit="m" value={selectedEquipment.depth} step={0.05} onChange={(v) => onPatchEquipment?.({ depth: v })} />
+            <Num label="Korkeus" unit="m" value={selectedEquipment.height} step={0.05} onChange={(v) => onPatchEquipment?.({ height: v })} />
+            <Num label="Korkeusasema" unit="m" value={Number.isFinite(selectedEquipment.elevation) ? selectedEquipment.elevation : defaultElevation(room, selectedEquipment)} step={0.05} onChange={(v) => onPatchEquipment?.({ elevation: v })} />
+            <Num label="Kierto" unit="°" value={selectedEquipment.rotation || 0} step={5} onChange={(v) => onPatchEquipment?.({ rotation: v })} />
+          </div>
+          <label style={{ display: 'block', marginBottom: 8 }}>
+            <span style={labelStyle}>Kiinnitys</span>
+            <select
+              value={selectedEquipment.mount || (selectedEquipment.category === 'evaporator' ? 'ceiling' : 'floor')}
+              onChange={(e) => {
+                const mount = e.target.value
+                const next = { ...selectedEquipment, mount }
+                onPatchEquipment?.({ mount, elevation: defaultElevation(room, next) })
+              }}
+              style={inputStyle}
+            >
+              <option value="floor">Lattia</option>
+              <option value="wall">Seinä</option>
+              <option value="ceiling">Katto</option>
+              <option value="roof">Vesikatto</option>
+            </select>
+          </label>
+          <div style={{ fontSize: 11, color: '#0f766e', marginBottom: 8 }}>
+            {mountLabel(selectedEquipment.mount || (selectedEquipment.category === 'evaporator' ? 'ceiling' : 'floor'))}
+            {' · '}
+            {(Number.isFinite(selectedEquipment.elevation) ? selectedEquipment.elevation : defaultElevation(room, selectedEquipment)).toFixed(2)} m lattiasta
           </div>
           <button
             type="button"
@@ -324,6 +383,87 @@ export default function HeatLoadPanel({
         </div>
       )}
       </div>
+    </div>
+  )
+}
+
+function CapacityBlock({ room, roomResult }) {
+  const selectedKw = (room.equipment || [])
+    .filter((eq) => eq.category === 'evaporator')
+    .reduce((sum, eq) => sum + (eq.capacityKw || 0), 0)
+  const check = capacityCheck(roomResult.total / 1000, selectedKw)
+  const pack = suggestPackage(roomResult.total, {
+    teC: room.temp < 0 ? room.temp - 8 : -8,
+    tcC: 40,
+    refrigerant: 'R449A',
+    lengthM: 15,
+    riseM: 3,
+  })
+  const tone = check.status === 'under' ? '#991b1b' : check.status === 'over' ? '#9a3412' : '#115e59'
+  const text = check.status === 'none'
+    ? 'Valitse höyrystin, niin kattavuus näkyy tässä.'
+    : check.status === 'under'
+      ? `Alimitoitettu: valittu ${check.selectedKw.toFixed(1)} kW kattaa ${check.percent} % tarpeesta ${check.requiredKw.toFixed(2)} kW.`
+      : check.status === 'over'
+        ? `Reilusti ylimitoitettu: kattavuus ${check.percent} % (${check.selectedKw.toFixed(1)} / ${check.requiredKw.toFixed(2)} kW).`
+        : `Kattavuus ${check.percent} % (${check.selectedKw.toFixed(1)} / ${check.requiredKw.toFixed(2)} kW).`
+  return (
+    <div data-testid="capacity-check" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: '#fff', border: '1px solid #e7e5e4' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: tone, lineHeight: 1.4 }}>{text}</div>
+      <div style={{ fontSize: 10, color: '#57534e', marginTop: 4, lineHeight: 1.45 }}>
+        Ehdotus: {pack.evap?.name || '—'}
+        {pack.slant ? `, viisto ${pack.slant.name}` : ''}
+        {pack.combo ? `, ${pack.combo.name}` : ''}
+        {`. ${pack.suction.label}. ${pack.liquid.label}.`}
+      </div>
+    </div>
+  )
+}
+
+function PipeCard({ pipe, rooms, result, onPatch, onDelete }) {
+  const point = pipe.points?.[0]
+  const host = point ? rooms.find((room) => Math.abs(point.x - room.x) <= room.width / 2 && Math.abs(point.z - room.z) <= room.depth / 2) : null
+  const duty = host && isRefrigerated(host.type)
+    ? (result.rooms.find((item) => item.id === host.id)?.total || 0) / 1000
+    : (pipe.capacityKw || 0)
+  const sized = sizePipe(pipe, {
+    capacityKw: duty || pipe.capacityKw || 0,
+    roomTempC: pipe.roomTempC ?? host?.temp ?? 2,
+    lengthM: routeLength(pipe.points),
+  })
+  return (
+    <div data-testid="pipe-audit" style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
+      <div style={{ fontSize: 13, fontWeight: 750, marginBottom: 4 }}>{sized.label}</div>
+      <div style={{ fontSize: 11, color: '#57534e', marginBottom: 8 }}>
+        Pituus {routeLength(pipe.points).toFixed(1)} m
+        {sized.velocity ? ` · nopeus ${sized.velocity.toFixed(1)} m/s` : ''}
+        {sized.equivalentTempK ? ` · ${sized.equivalentTempK.toFixed(2)} K` : ''}
+      </div>
+      {sized.warnings.map((warning) => (
+        <div key={warning} style={{ fontSize: 11, color: '#9a3412', marginBottom: 6 }}>{warning}</div>
+      ))}
+      {pipe.kind !== 'drain' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <label style={{ display: 'block' }}>
+            <span style={labelStyle}>Kylmäaine</span>
+            <select value={pipe.refrigerant || 'R449A'} onChange={(e) => onPatch?.({ refrigerant: e.target.value })} style={inputStyle}>
+              {PIPE_REFS.map((id) => <option key={id} value={id}>{id}</option>)}
+            </select>
+          </label>
+          <Num label="Nousu" unit="m" value={pipe.riseM || 0} step={0.5} onChange={(v) => onPatch?.({ riseM: v })} />
+          <Num label="Te" unit="°C" value={pipe.teC ?? -8} step={1} onChange={(v) => onPatch?.({ teC: v })} />
+          <Num label="Tc" unit="°C" value={pipe.tcC ?? 40} step={1} onChange={(v) => onPatch?.({ tcC: v })} />
+        </div>
+      )}
+      {sized.steps.map((step) => (
+        <div key={step.label} style={{ padding: '4px 0' }}>
+          <div style={{ fontSize: 11, fontWeight: 700 }}>{step.label} · {step.value}</div>
+          <div style={{ fontSize: 10, color: '#a8a29e', fontFamily: 'ui-monospace, monospace' }}>{step.formula}</div>
+        </div>
+      ))}
+      <button type="button" onClick={onDelete} style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(220,38,38,0.45)', background: '#fef2f2', color: '#991b1b', fontSize: 12, cursor: 'pointer', transform: 'none' }}>
+        Poista putki
+      </button>
     </div>
   )
 }
