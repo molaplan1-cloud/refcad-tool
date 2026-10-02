@@ -902,7 +902,7 @@ function tubeStyle(pipe) {
   if (pipe?.kind === 'suction') return { radius: copper + 0.016, color: '#1c1917', metalness: 0.06, roughness: 0.88 }
   if (pipe?.kind === 'liquid') return { radius: Math.max(0.012, copper), color: '#d4894a', metalness: 0.78, roughness: 0.28 }
   if (pipe?.kind === 'hotgas') return { radius: copper + 0.012, color: '#7f1d1d', metalness: 0.18, roughness: 0.62 }
-  if (pipe?.kind === 'drain') return { radius: 0.014, color: pipe.roomTempC < 0 ? '#9a3412' : '#e7e5e4', metalness: 0.08, roughness: 0.55 }
+  if (pipe?.kind === 'drain') return { radius: 0.014, color: pipe.roomTempC < 0 ? '#9a3412' : '#a8a29e', metalness: 0.08, roughness: 0.55 }
   return { radius: Math.max(0.01, copper), color: '#1d4ed8', metalness: 0.2, roughness: 0.4 }
 }
 
