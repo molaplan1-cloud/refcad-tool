@@ -5,7 +5,7 @@ import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
 import { isRefrigerated } from '@/lib/catalog'
 import { nearestPort, pointInEquipment } from '@/lib/placement'
-import { routeLength, sizePipe } from '@/lib/pipeSizing'
+import { sizePlacedPipe } from '@/lib/pipeDuty'
 import { calculateProject } from '@/lib/heatLoad'
 import {
   applyBox,
@@ -1119,15 +1119,7 @@ export default function PlanView({
             return pipes.map((pipe) => {
               const points = pipe.points || []
               if (points.length < 2) return null
-              const room = hitRoom(rooms, points[0].x, points[0].z)
-              const duty = room && isRefrigerated(room.type)
-                ? (projectNow.rooms.find((item) => item.id === room.id)?.total || 0) / 1000
-                : (pipe.capacityKw || 0)
-              const sized = sizePipe(pipe, {
-                capacityKw: duty || pipe.capacityKw || 0,
-                roomTempC: pipe.roomTempC ?? room?.temp ?? 2,
-                lengthM: routeLength(points),
-              })
+              const { sized } = sizePlacedPipe(pipe, rooms, projectNow.rooms)
               const traced = pipe.kind === 'drain' && sized.heatTraced
               const color = pipe.kind === 'suction' ? '#1d4ed8' : pipe.kind === 'liquid' ? '#15803d' : '#c2410c'
               const mid = longestMid(points)
