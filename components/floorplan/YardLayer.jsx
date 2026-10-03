@@ -29,6 +29,30 @@ function mid(a, b) {
   return { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }
 }
 
+function separateSheetLabels(labels) {
+  const placed = labels.map((item) => ({ ...item, place: { ...item.place } }))
+  for (let pass = 0; pass < 6; pass += 1) {
+    for (let i = 0; i < placed.length; i += 1) {
+      for (let j = i + 1; j < placed.length; j += 1) {
+        const a = placed[i].place
+        const b = placed[j].place
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const dist = Math.hypot(dx, dy) || 0.01
+        if (dist >= 42) continue
+        const push = (42 - dist) / 2
+        const ux = dx / dist
+        const uy = dy / dist
+        a.x -= ux * push
+        a.y -= uy * push
+        b.x += ux * push
+        b.y += uy * push
+      }
+    }
+  }
+  return placed
+}
+
 function labelOffset(at, center, dist, X, Y) {
   const sx = X(at.x)
   const sy = Y(at.z)
@@ -373,22 +397,20 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
       {yard.plot && (
         <g data-testid="yard-plot">
           <polygon points={pts(yard.plot.points, X, Y)} fill="none" stroke="#1c1917" strokeWidth={1.6} />
-          {metrics.edges.map((edge) => {
-            const at = mid(edge.a, edge.b)
-            const place = labelOffset(at, centroid(yard.plot.points), -14, X, Y)
-            return (
-              <g key={`edge-${edge.index}`}>
-                <text x={place.x} y={place.y} textAnchor="middle" fontSize={10} fontWeight={650} fill="#1c1917" stroke="#fbfaf7" strokeWidth={2.4} paintOrder="stroke">{formatMetres(edge.length)}</text>
-              </g>
-            )
-          })}
-          {setbacks.map((edge) => {
-            const at = mid(edge.a, edge.b)
-            const place = labelOffset(at, centroid(yard.plot.points), 14, X, Y)
-            return (
-              <text key={`set-${edge.index}`} data-testid="yard-setback" x={place.x} y={place.y} textAnchor="middle" fontSize={8} fill="#57534e" stroke="#fbfaf7" strokeWidth={2} paintOrder="stroke">{edge.label}</text>
-            )
-          })}
+          {separateSheetLabels(metrics.edges.map((edge) => ({
+            key: `edge-${edge.index}`,
+            text: formatMetres(edge.length),
+            place: labelOffset(mid(edge.a, edge.b), centroid(yard.plot.points), -16, X, Y),
+          }))).map((label) => (
+            <text key={label.key} x={label.place.x} y={label.place.y} textAnchor="middle" fontSize={10} fontWeight={650} fill="#1c1917" stroke="#fbfaf7" strokeWidth={2.4} paintOrder="stroke">{label.text}</text>
+          ))}
+          {separateSheetLabels(setbacks.map((edge) => ({
+            key: `set-${edge.index}`,
+            text: edge.label,
+            place: labelOffset(mid(edge.a, edge.b), centroid(yard.plot.points), 16, X, Y),
+          }))).map((label) => (
+            <text key={label.key} data-testid="yard-setback" x={label.place.x} y={label.place.y} textAnchor="middle" fontSize={8} fill="#57534e" stroke="#fbfaf7" strokeWidth={2} paintOrder="stroke">{label.text}</text>
+          ))}
         </g>
       )}
       {yard.fences.map((fence) => {
@@ -536,24 +558,31 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
       {layerVisible(plan, 'ground') && yard.ground.water.map((item) => (
         <polygon key={item.id} data-testid="water-body" points={pts(item.points, X, Y)} fill="rgba(37,99,235,0.18)" stroke="#1d4ed8" strokeWidth={sw} />
       ))}
-      {layerVisible(plan, 'ground') && yard.waste.areas.map((item) => (
-        <g key={item.id} data-testid={item.kind === 'sandfilter' ? 'yard-waste-sandfilter' : 'yard-waste-field'}>
-          <polygon points={pts(item.points, X, Y)} fill="rgba(146,64,14,0.16)" stroke="#9a3412" strokeWidth={sw} strokeDasharray="4 3" />
-        </g>
-      ))}
+      {layerVisible(plan, 'ground') && yard.waste.areas.map((item) => {
+        const center = centroid(item.points || [])
+        const caption = item.kind === 'sandfilter' ? 'Maasuodatin' : item.kind === 'loop' ? 'Vaakaputkisto' : 'Imeytys'
+        return (
+          <g key={item.id} data-testid={item.kind === 'sandfilter' ? 'yard-waste-sandfilter' : 'yard-waste-field'}>
+            <polygon points={pts(item.points, X, Y)} fill="rgba(146,64,14,0.16)" stroke="#9a3412" strokeWidth={sw} strokeDasharray="4 3" />
+            <text x={X(center.x)} y={Y(center.z)} textAnchor="middle" fontSize={9} fill="#7c2d12" stroke="#fbfaf7" strokeWidth={2.4} paintOrder="stroke">{caption}</text>
+          </g>
+        )
+      })}
       {layerVisible(plan, 'ground') && yard.waste.units.map((item) => {
-        const mark = Math.max(item.w || 1, item.d || 1)
+        const caption = item.kind === 'holding' ? `${item.volume} m³` : item.kind === 'septic' ? 'Saostus' : item.kind === 'plant' ? 'Puhdistamo' : ''
         return (
           <g key={item.id} data-testid={`yard-waste-${item.kind}`} transform={`translate(${X(item.x)} ${Y(item.z)}) rotate(${item.rotation || 0})`}>
             <rect x={-px(item.w) / 2} y={-px(item.d) / 2} width={px(item.w)} height={px(item.d)} fill="#f5f5f4" stroke="#44403c" strokeWidth={1.3} />
             {item.kind === 'septic' && Array.from({ length: Math.max(2, Math.min(3, item.chambers || 3)) - 1 }, (_, index) => (
               <line key={index} x1={-px(item.w) / 2 + (px(item.w) * (index + 1)) / (item.chambers || 3)} y1={-px(item.d) / 2} x2={-px(item.w) / 2 + (px(item.w) * (index + 1)) / (item.chambers || 3)} y2={px(item.d) / 2} stroke="#44403c" strokeWidth={0.8} />
             ))}
-            <text x={px(mark) / 2 + 4} y={3} fontSize={8} fill="#44403c">{item.kind === 'holding' ? `${item.volume} m³` : item.kind === 'septic' ? `${item.chambers}` : ''}</text>
+            {caption && (
+              <text x={px(item.w || 1) / 2 + 4} y={3} fontSize={8} fill="#44403c" stroke="#fbfaf7" strokeWidth={2} paintOrder="stroke">{caption}</text>
+            )}
           </g>
         )
       })}
-      {layerVisible(plan, 'ground') && groundWarnings(plan).length > 0 && (
+      {layerVisible(plan, 'ground') && (showClearances || ['wells', 'waste-units', 'waste-areas', 'waste-lines'].includes(selectedHit?.collection)) && groundWarnings(plan).length > 0 && (
         <g data-testid="ground-warnings">
           {groundWarnings(plan).slice(0, 4).map((warning, index) => (
             <text key={`${warning.code}-${index}`} x={sheet.x + 16} y={sheet.y + sheet.h - 28 - index * 12} fontSize={9} fill={warning.level === 'fail' ? '#b91c1c' : '#b45309'}>{warning.text}</text>

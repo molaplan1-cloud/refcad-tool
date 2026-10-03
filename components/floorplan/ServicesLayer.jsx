@@ -420,7 +420,7 @@ function cableMark(run) {
   return ''
 }
 
-function CableMark({ points, text, X, Y, show = true }) {
+function CableMark({ points, text, X, Y, show = true, side = 1 }) {
   if (!show || !text || !points || points.length < 2) return null
   let best = null
   for (let i = 1; i < points.length; i += 1) {
@@ -431,13 +431,14 @@ function CableMark({ points, text, X, Y, show = true }) {
   const dx = best.b.x - best.a.x
   const dz = best.b.z - best.a.z
   const len = Math.hypot(dx, dz) || 1
-  const ox = (-dz / len) * 0.28
-  const oz = (dx / len) * 0.28
+  const along = 0.5
+  const ox = (-dz / len) * 0.55 * side
+  const oz = (dx / len) * 0.55 * side
   return (
     <text
       data-testid="cable-mark"
-      x={X((best.a.x + best.b.x) / 2 + ox)}
-      y={Y((best.a.z + best.b.z) / 2 + oz)}
+      x={X(best.a.x + dx * along + ox)}
+      y={Y(best.a.z + dz * along + oz)}
       textAnchor="middle"
       fontSize="10"
       fontWeight="650"
@@ -602,15 +603,16 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               </g>
             ))}
             <SlopeMark run={{ ...run, points }} X={X} Y={Y} show={showText} />
-            <CableMark points={points} text={cableMark(run)} X={X} Y={Y} show={showText} />
+            <CableMark points={points} text={cableMark(run)} X={X} Y={Y} show={showText} side={run.role === 'return' ? -1 : 1} />
           </g>
         )
       })}
-      {!quietLabels && leaders.map((item) => {
+      {!quietLabels && leaders.map((item, index) => {
         const ax = X(item.mid.x)
         const ay = Y(item.mid.z)
-        const bx = ax + item.normal.x * 22
-        const by = ay + item.normal.z * 22
+        const dir = index % 2 === 0 ? 1 : -1
+        const bx = ax + item.normal.x * 28 * dir
+        const by = ay + item.normal.z * 28 * dir
         return (
           <g key={item.text} style={{ pointerEvents: 'none' }}>
             <line x1={ax} y1={ay} x2={bx} y2={by} stroke={item.color} strokeWidth={0.7} />

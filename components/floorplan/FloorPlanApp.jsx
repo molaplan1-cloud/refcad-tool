@@ -2395,9 +2395,10 @@ export default function FloorPlanApp() {
                       t('sheet.area', { area: formatArea(totalArea) }),
                     ]
                     const header = Math.min(22, th * 0.28)
-                    const top = ty + header + 12
-                    const bottom = ty + th - 22
-                    const step = lines.length > 1 ? (bottom - top) / (lines.length - 1) : 0
+                    const scaleTop = ty + th - 18
+                    const top = ty + header + 13
+                    const last = scaleTop - 16
+                    const step = lines.length > 1 ? Math.min(14, (last - top) / (lines.length - 1)) : 0
                     return (
                       <g data-testid="title-block">
                         <rect x={tx} y={ty} width={tw} height={th} fill="#fff" stroke="#1c1917" strokeWidth={1} />

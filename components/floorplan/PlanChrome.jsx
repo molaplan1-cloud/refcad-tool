@@ -285,27 +285,28 @@ export function PlanChrome({
         <button type="button" title={t('edit.redo')} onClick={onRedo} style={rib(false)}>↷</button>
       </div>
       {mode !== 'facade' && (
-        <div data-testid="tool-ribbon" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '4px 8px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4', overflowX: 'auto' }}>
-          {onPlan && <Group>{drawTools(rib)}</Group>}
-          {onSite && <Group>{yardTools(rib)}</Group>}
-          {mode === '3d' && (
-            <Group>
-              <span style={{ fontSize: 11, color: '#78716c' }}>{t('view3d.walls')}</span>
-              <button type="button" data-testid="wall-solid" style={rib(wallMode === 'solid')} onClick={() => onWallMode('solid')}>{t('view3d.visible')}</button>
-              <button type="button" data-testid="wall-ghost" aria-pressed={wallMode === 'ghost'} style={rib(wallMode === 'ghost')} onClick={() => onWallMode('ghost')}>{t('view3d.ghost')}</button>
-              <button type="button" data-testid="wall-hidden" style={rib(wallMode === 'hidden')} onClick={() => onWallMode('hidden')}>{t('view3d.hidden')}</button>
-              <span style={{ width: 1, height: 18, background: '#d6d3d1' }} />
-              <span style={{ fontSize: 11, color: '#78716c' }}>{t('view3d.roof')}</span>
-              <button type="button" data-testid="roof-solid" style={rib(roofMode === 'solid')} onClick={() => onRoofMode('solid')}>{t('view3d.visible')}</button>
-              <button type="button" data-testid="roof-ghost" style={rib(roofMode === 'ghost')} onClick={() => onRoofMode('ghost')}>{t('view3d.ghost')}</button>
-              <button type="button" data-testid="roof-hidden" aria-pressed={roofMode === 'hidden'} style={rib(roofMode === 'hidden')} onClick={() => onRoofMode('hidden')}>{t('view3d.hidden')}</button>
-              <button type="button" data-testid="scene-realistic" style={rib(plan.sceneStyle !== 'technical')} onClick={() => onSceneStyle('realistic')}>{t('finish.realistic')}</button>
-              <button type="button" data-testid="scene-technical" style={rib(plan.sceneStyle === 'technical')} onClick={() => onSceneStyle('technical')}>{t('finish.technical')}</button>
-            </Group>
-          )}
+        <div data-testid="tool-ribbon" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '4px 8px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto' }}>
+            {onPlan && <Group>{drawTools(rib)}</Group>}
+            {onSite && <Group>{yardTools(rib)}</Group>}
+            {mode === '3d' && (
+              <Group>
+                <span style={{ fontSize: 11, color: '#78716c' }}>{t('view3d.walls')}</span>
+                <button type="button" data-testid="wall-solid" style={rib(wallMode === 'solid')} onClick={() => onWallMode('solid')}>{t('view3d.visible')}</button>
+                <button type="button" data-testid="wall-ghost" aria-pressed={wallMode === 'ghost'} style={rib(wallMode === 'ghost')} onClick={() => onWallMode('ghost')}>{t('view3d.ghost')}</button>
+                <button type="button" data-testid="wall-hidden" style={rib(wallMode === 'hidden')} onClick={() => onWallMode('hidden')}>{t('view3d.hidden')}</button>
+                <span style={{ width: 1, height: 18, background: '#d6d3d1' }} />
+                <span style={{ fontSize: 11, color: '#78716c' }}>{t('view3d.roof')}</span>
+                <button type="button" data-testid="roof-solid" style={rib(roofMode === 'solid')} onClick={() => onRoofMode('solid')}>{t('view3d.visible')}</button>
+                <button type="button" data-testid="roof-ghost" style={rib(roofMode === 'ghost')} onClick={() => onRoofMode('ghost')}>{t('view3d.ghost')}</button>
+                <button type="button" data-testid="roof-hidden" aria-pressed={roofMode === 'hidden'} style={rib(roofMode === 'hidden')} onClick={() => onRoofMode('hidden')}>{t('view3d.hidden')}</button>
+                <button type="button" data-testid="scene-realistic" style={rib(plan.sceneStyle !== 'technical')} onClick={() => onSceneStyle('realistic')}>{t('finish.realistic')}</button>
+                <button type="button" data-testid="scene-technical" style={rib(plan.sceneStyle === 'technical')} onClick={() => onSceneStyle('technical')}>{t('finish.technical')}</button>
+              </Group>
+            )}
+          </div>
           {onSheet && <span style={{ width: 1, alignSelf: 'stretch', background: '#e7e5e4' }} />}
           {onSheet && <Group>{snapTools}</Group>}
-          <span style={{ flex: 1 }} />
           {onSheet && <Group>{zoomTools}</Group>}
         </div>
       )}
