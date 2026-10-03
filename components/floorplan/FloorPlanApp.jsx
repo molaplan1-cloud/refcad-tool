@@ -6,16 +6,24 @@ import Link from 'next/link'
 import {
   FIXTURES,
   MATERIALS,
+  ROOF_TYPES,
   addFixture,
   addOpening,
   addWall,
-  duplicateFixture,
+  deleteOpening,
+  deleteRoom,
+  deleteWall,
+  detectRoomAt,
   detectRooms,
   dimensionChains,
+  dimensionRotation,
+  drawRoom,
   emptyPlan,
   exampleHouse,
+  familyHouse,
   formatArea,
   formatMm,
+  hitTest,
   materialOf,
   materialsList,
   moveFixture,
@@ -24,17 +32,17 @@ import {
   openingSymbol,
   pointInPolygon,
   removeFixture,
-  renameRoom,
   roomLabelPoint,
   rotateFixture,
   segmentLength,
-  setRoofType,
-  setSurface,
-  viewLayout,
   snapDrawPoint,
+  snapRoomPoint,
+  viewLayout,
+  visibleRooms,
   wallQuads,
   buildFloorPlanPdf,
 } from '@/lib/floorplan'
+import { FloorMenu, HouseSettings, SelectionPanel } from './FloorMenus'
 
 const HouseScene = dynamic(() => import('./HouseScene'), { ssr: false })
 
@@ -132,7 +140,7 @@ function DimLine({ dim, offset, X, Y }) {
         dominantBaseline="middle"
         fontSize={11}
         stroke="none"
-        transform={vertical ? `rotate(-90 ${labelX} ${labelY})` : undefined}
+        transform={vertical ? `rotate(${dimensionRotation(true)} ${labelX} ${labelY})` : undefined}
       >
         {dim.label}
       </text>
@@ -140,8 +148,8 @@ function DimLine({ dim, offset, X, Y }) {
   )
 }
 
-function FixtureMark({ type, w, d }) {
-  const stroke = '#1c1917'
+function FixtureMark({ type, w, d, color }) {
+  const stroke = color || '#1c1917'
   const sw = 1.05
   const box = { fill: '#fff', stroke, strokeWidth: sw }
   if (type === 'toilet') {
@@ -241,33 +249,6 @@ function FixtureMark({ type, w, d }) {
   return <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
 }
 
-function Swatches({ group, value, onPick }) {
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {MATERIALS[group].map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          title={item.name}
-          aria-label={item.name}
-          aria-pressed={value === item.id}
-          onClick={() => onPick(item.id)}
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 6,
-            background: item.color,
-            border: value === item.id ? '2px solid #0f766e' : '1px solid #a8a29e',
-            cursor: 'pointer',
-            transform: 'none',
-            padding: 0,
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
 export default function FloorPlanApp() {
   const [plan, setPlan] = useState(() => emptyPlan())
   const [hydrated, setHydrated] = useState(false)
@@ -277,7 +258,12 @@ export default function FloorPlanApp() {
   const [cursor, setCursor] = useState(null)
   const [selectedRoom, setSelectedRoom] = useState(null)
   const [selectedFixture, setSelectedFixture] = useState(null)
+  const [pick, setPick] = useState(null)
+  const [panel, setPanel] = useState('materials')
   const [menu, setMenu] = useState(null)
+  const [roomShape, setRoomShape] = useState('rect')
+  const [poly, setPoly] = useState([])
+  const [partitions, setPartitions] = useState(true)
   const [view, setView] = useState('2d')
   const [wallMode, setWallMode] = useState('solid')
   const [roofMode, setRoofMode] = useState('solid')
@@ -287,6 +273,7 @@ export default function FloorPlanApp() {
   const dragBefore = useRef(null)
   const dragId = useRef(null)
   const dragLabel = useRef(null)
+  const clip = useRef(null)
   const hostRef = useRef(null)
   const svgRef = useRef(null)
 
@@ -358,7 +345,25 @@ export default function FloorPlanApp() {
     }
   }, [sheet, layout])
 
-  const snappedCursor = cursor ? snapDrawPoint(cursor, draft, plan.walls) : null
+  const snappedCursor = cursor && (tool === 'exterior' || tool === 'interior') ? snapDrawPoint(cursor, draft, plan.walls) : null
+  const roomCursor = cursor && tool === 'room' ? snapRoomPoint(cursor, plan.walls) : null
+
+  const choose = (hit) => {
+    if (!hit || hit.kind === 'canvas') {
+      setPick(null)
+      setSelectedRoom(null)
+      setSelectedFixture(null)
+      return
+    }
+    setPick({ kind: hit.kind, id: hit.id })
+    setSelectedRoom(hit.kind === 'room' ? hit.id : null)
+    setSelectedFixture(hit.kind === 'fixture' ? hit.id : null)
+    if (hit.kind === 'fixture') {
+      const fixture = (plan.fixtures || []).find((item) => item.id === hit.id)
+      if (fixture) clip.current = { ...fixture }
+    }
+    setPanel('object')
+  }
 
   const onPointerMove = (event) => {
     if (view !== '2d' || !svgRef.current) return
@@ -375,10 +380,55 @@ export default function FloorPlanApp() {
     dragBefore.current = null
   }
 
+  const closeRoom = (points) => {
+    if (!points || points.length < 3) return
+    const next = drawRoom(plan, points, { partitions, name: 'Huone', type: 'huone' })
+    commit(next)
+    const mid = points.reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 })
+    mid.x /= points.length
+    mid.z /= points.length
+    const created = (next.rooms || []).find((item) => pointInPolygon(mid.x, mid.z, item.polygon || []))
+    if (created) choose({ kind: 'room', id: created.id })
+    setDraft(null)
+    setPoly([])
+  }
+
+  const onContextMenu = (event) => {
+    event.preventDefault()
+    const world = toWorld(event)
+    const hit = hitTest(plan, world)
+    setMenu({ x: event.clientX, y: event.clientY, kind: hit.kind, id: hit.id, at: world })
+    if (hit.kind !== 'canvas') choose(hit)
+  }
+
   const onPointerDown = (event) => {
     if (view !== '2d' || event.button !== 0) return
     setMenu(null)
     const world = toWorld(event)
+    if (tool === 'room') {
+      const point = snapRoomPoint(world, plan.walls)
+      if (roomShape === 'poly') {
+        if (poly.length >= 3 && segmentLength(point, poly[0]) < 0.35) closeRoom(poly)
+        else setPoly((points) => [...points, point])
+      } else if (!draft) setDraft(point)
+      else {
+        closeRoom([
+          draft,
+          { x: point.x, z: draft.z },
+          point,
+          { x: draft.x, z: point.z },
+        ])
+      }
+      return
+    }
+    if (tool === 'detect') {
+      const room = (plan.rooms || []).find((item) => pointInPolygon(world.x, world.z, item.polygon || []))
+      if (room) {
+        commit(detectRoomAt(plan, world))
+        choose({ kind: 'room', id: room.id })
+      }
+      return
+    }
     if (tool === 'exterior' || tool === 'interior') {
       const point = snapDrawPoint(world, draft, plan.walls)
       if (!draft) setDraft(point)
@@ -400,9 +450,8 @@ export default function FloorPlanApp() {
       setPlacing(null)
       return
     }
-    const room = (plan.rooms || []).find((item) => pointInPolygon(world.x, world.z, item.polygon))
-    setSelectedRoom(room?.id || null)
-    setSelectedFixture(null)
+    const hit = hitTest(plan, world)
+    choose(hit.kind === 'canvas' ? null : hit)
   }
 
   useEffect(() => {
@@ -411,8 +460,20 @@ export default function FloorPlanApp() {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       if (event.key === 'Escape') {
         setDraft(null)
+        setPoly([])
         setPlacing(null)
         setMenu(null)
+      } else if (event.key === 'Enter' && tool === 'room' && poly.length >= 3) {
+        closeRoom(poly)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'wall') {
+        commit(deleteWall(plan, pick.id))
+        choose(null)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'opening') {
+        commit(deleteOpening(plan, pick.id))
+        choose(null)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'room') {
+        commit(deleteRoom(plan, pick.id))
+        choose(null)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedFixture) {
         commit(removeFixture(plan, selectedFixture))
         setSelectedFixture(null)
@@ -424,16 +485,59 @@ export default function FloorPlanApp() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [commit, plan, selectedFixture, undo])
+  }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions])
 
-  const loadExample = () => {
-    const house = exampleHouse()
+  const loadHouse = (house, roomName) => {
     commit(house)
     setDraft(null)
-    setSelectedRoom(house.rooms.find((room) => room.name === 'Olohuone')?.id || house.rooms[0]?.id || null)
+    setPoly([])
+    const room = house.rooms.find((item) => item.name === roomName) || house.rooms[0]
+    setSelectedRoom(room?.id || null)
+    setPick(room ? { kind: 'room', id: room.id } : null)
     setSelectedFixture(null)
     setView('2d')
+    setPanel(room ? 'object' : 'materials')
     setFitToken((token) => token + 1)
+  }
+
+  const loadExample = () => loadHouse(exampleHouse(), 'Olohuone')
+
+  const loadFamily = () => loadHouse(familyHouse(), 'Eteinen')
+
+  const onMenuNavigate = (action) => {
+    if (action === 'close') {
+      setMenu(null)
+      return
+    }
+    if (action === 'house' || action === 'focus') {
+      setPanel(action === 'house' ? 'house' : 'object')
+      setMenu(null)
+      return
+    }
+    if (action === 'wall') {
+      setTool('exterior')
+      setPlacing(null)
+      setMenu(null)
+      return
+    }
+    if (action === 'room') {
+      setTool('room')
+      setRoomShape('rect')
+      setPlacing(null)
+      setMenu(null)
+      return
+    }
+    if (action === 'paste' && clip.current && menu?.at) {
+      const next = addFixture(plan, clip.current.type, menu.at.x, menu.at.z)
+      const fixture = next.fixtures[next.fixtures.length - 1]
+      if (fixture && clip.current.w) {
+        commit({
+          ...next,
+          fixtures: next.fixtures.map((item) => (item.id === fixture.id ? { ...item, ...clip.current, id: item.id, x: item.x, z: item.z } : item)),
+        })
+      } else commit(next)
+      setMenu(null)
+    }
   }
 
   const exportPdf = () => {
@@ -467,6 +571,7 @@ export default function FloorPlanApp() {
   }
 
   const room = (plan.rooms || []).find((item) => item.id === selectedRoom) || null
+  const shownRooms = visibleRooms(plan).filter((item) => item.showLabel !== false)
   const rows = materialsList(plan)
   const groups = []
   FIXTURES.forEach((item) => {
@@ -477,7 +582,7 @@ export default function FloorPlanApp() {
     }
     group.items.push(item)
   })
-  const totalArea = (plan.rooms || []).reduce((sum, item) => sum + item.area, 0)
+  const totalArea = visibleRooms(plan).reduce((sum, item) => sum + item.area, 0)
   const dims = dimensionChains(plan)
   const liveEnd = draft && snappedCursor ? snappedCursor : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
@@ -485,7 +590,13 @@ export default function FloorPlanApp() {
     ? `Pituus ${formatMm(liveLength)} mm`
     : placing
       ? 'Napsauta pohjaan kalusteen paikka'
-      : tool === 'exterior'
+      : tool === 'room' && roomShape === 'poly'
+        ? 'Huone: napsauta kulmat. Sulje ensimmäiseen pisteeseen tai paina Enter.'
+        : tool === 'room'
+          ? 'Huone: vedä suorakulmio kahdella napsautuksella. Nurkat tarttuvat seiniin.'
+          : tool === 'detect'
+            ? 'Tunnista: napsauta seinien rajaamaa aluetta.'
+            : tool === 'exterior'
         ? 'Ulkoseinä: napsauta alkupiste ja loppupiste'
         : tool === 'interior'
           ? 'Väliseinä: napsauta alkupiste ja loppupiste'
@@ -500,8 +611,8 @@ export default function FloorPlanApp() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
       <header style={{
-        display: 'flex', alignItems: 'center', gap: 8, height: 48, padding: '0 10px',
-        background: '#14181f', color: '#f5f5f4', flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 8, minHeight: 48, padding: '6px 10px',
+        background: '#14181f', color: '#f5f5f4', flexShrink: 0, flexWrap: 'wrap',
       }}>
         <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14 }}>RefCAD</Link>
         <Link href="/" style={{ color: '#a8a29e', textDecoration: 'none', fontSize: 12, fontWeight: 650 }}>Kylmätilat</Link>
@@ -517,6 +628,9 @@ export default function FloorPlanApp() {
           <button type="button" data-testid="tool-interior" style={textBtn(tool === 'interior')} onClick={() => { setTool('interior'); setPlacing(null) }}>Väliseinä</button>
           <button type="button" data-testid="tool-door" style={textBtn(tool === 'door')} onClick={() => { setTool('door'); setPlacing(null); setDraft(null) }}>Ovi</button>
           <button type="button" data-testid="tool-window" style={textBtn(tool === 'window')} onClick={() => { setTool('window'); setPlacing(null); setDraft(null) }}>Ikkuna</button>
+          <button type="button" data-testid="tool-room" style={textBtn(tool === 'room' && roomShape === 'rect')} onClick={() => { setTool('room'); setRoomShape('rect'); setPlacing(null); setPoly([]) }}>Huone</button>
+          <button type="button" data-testid="tool-room-poly" style={textBtn(tool === 'room' && roomShape === 'poly')} onClick={() => { setTool('room'); setRoomShape('poly'); setPlacing(null); setDraft(null) }}>Monikulmio</button>
+          <button type="button" data-testid="tool-detect" style={textBtn(tool === 'detect')} onClick={() => { setTool('detect'); setPlacing(null); setDraft(null); setPoly([]) }}>Tunnista</button>
         </div>
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
           <button type="button" data-testid="view-floor-2d" style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
@@ -528,10 +642,21 @@ export default function FloorPlanApp() {
         </div>
         <button type="button" title="Kumoa" onClick={undo} style={textBtn(false)}>Kumoa</button>
         <span style={{ flex: 1 }} />
+        <button type="button" data-testid="house-settings" onClick={() => { setPanel('house'); setMenu(null) }} style={textBtn(panel === 'house')}>Talon asetukset</button>
         <button type="button" data-testid="example-house" onClick={loadExample} style={textBtn(false)}>Esimerkkitalo</button>
+        <button type="button" data-testid="family-house" onClick={loadFamily} style={textBtn(false)}>Huoneisto</button>
         <button type="button" data-testid="export-floor-pdf" onClick={exportPdf} style={textBtn(false)}>PDF</button>
         <button type="button" data-testid="export-floor-png" onClick={exportPng} style={textBtn(false)}>PNG</button>
       </header>
+      <div style={{ height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', background: '#1c212b', color: '#e7e5e4', flexShrink: 0 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+          <input data-testid="room-partitions" type="checkbox" checked={partitions} onChange={(event) => setPartitions(event.target.checked)} />
+          Luo väliseinät (120 mm)
+        </label>
+        {tool === 'room' && roomShape === 'poly' && poly.length >= 3 && (
+          <button type="button" data-testid="close-room" style={textBtn(false)} onClick={() => closeRoom(poly)}>Sulje huone</button>
+        )}
+      </div>
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <aside style={{ width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}>
@@ -568,7 +693,7 @@ export default function FloorPlanApp() {
                 onPointerMove={onPointerMove}
                 onPointerDown={onPointerDown}
                 onPointerUp={onPointerUp}
-                onContextMenu={(event) => event.preventDefault()}
+                onContextMenu={onContextMenu}
                 style={{ display: 'block', cursor: tool === 'select' && !placing ? 'default' : 'crosshair', touchAction: 'none' }}
               >
                 <defs>
@@ -579,20 +704,25 @@ export default function FloorPlanApp() {
                 </defs>
                 <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.4} />
                 <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
-                {(plan.rooms || []).map((item) => (
+                {visibleRooms(plan).map((item) => (
                   <polygon
                     key={item.id}
                     points={item.polygon.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
                     fill={materialOf('floor', item.floorId).color}
                     fillOpacity={item.id === selectedRoom ? 0.78 : 0.5}
-                    stroke="none"
+                    stroke={item.id === selectedRoom ? '#0f766e' : 'none'}
+                    strokeWidth={1.2}
                   />
                 ))}
-                {(plan.walls || []).map((wall) => wallQuads(wall, plan.openings).map((quad, index) => (
+                {(plan.walls || []).map((wall) => wallQuads(wall, plan.openings, plan.walls, plan).map((quad, index) => (
                   <polygon
                     key={`${wall.id}-${index}`}
                     points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
-                    fill={wall.kind === 'exterior' ? 'url(#poche)' : '#6b6560'}
+                    fill={wall.materialId
+                      ? materialOf(wall.kind === 'interior' ? 'interior' : 'exterior', wall.materialId).color
+                      : (wall.kind === 'exterior' || wall.kind === 'bearing' ? 'url(#poche)' : '#6b6560')}
+                    stroke={pick?.kind === 'wall' && pick.id === wall.id ? '#0f766e' : 'none'}
+                    strokeWidth={1.6}
                   />
                 )))}
                 {(plan.openings || []).map((opening) => {
@@ -601,7 +731,7 @@ export default function FloorPlanApp() {
                   const fig = openingSymbol(wall, opening)
                   if (fig.kind === 'window') {
                     return (
-                      <g key={opening.id} stroke="#1c1917" strokeWidth={1.15} fill="none">
+                      <g key={opening.id} stroke={pick?.kind === 'opening' && pick.id === opening.id ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
                         {fig.glass.map((line, index) => (
                           <line key={index} x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} />
                         ))}
@@ -611,7 +741,7 @@ export default function FloorPlanApp() {
                     )
                   }
                   return (
-                    <g key={opening.id} stroke="#1c1917" strokeWidth={1.15} fill="none">
+                    <g key={opening.id} stroke={pick?.kind === 'opening' && pick.id === opening.id ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
                       <polyline points={fig.arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} />
                       <line x1={X(fig.hinge.x)} y1={Y(fig.hinge.z)} x2={X(fig.leaf.x)} y2={Y(fig.leaf.z)} />
                     </g>
@@ -619,12 +749,12 @@ export default function FloorPlanApp() {
                 })}
                 {(plan.fixtures || []).map((fixture) => {
                   const tpl = FIXTURES.find((item) => item.id === fixture.type) || FIXTURES[0]
-                  const w = px(tpl.w)
-                  const d = px(tpl.d)
+                  const w = px(fixture.w || tpl.w)
+                  const d = px(fixture.d || tpl.d)
                   return (
                     <g
                       key={fixture.id}
-                      transform={`translate(${X(fixture.x)} ${Y(fixture.z)}) rotate(${fixture.rotation || 0})`}
+                      transform={`translate(${X(fixture.x)} ${Y(fixture.z)}) rotate(${fixture.rotation || 0})${fixture.mirror ? ' scale(-1 1)' : ''}`}
                       style={{ pointerEvents: tool === 'select' && !placing ? 'auto' : 'none' }}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return
@@ -638,24 +768,32 @@ export default function FloorPlanApp() {
                       onContextMenu={(event) => {
                         event.preventDefault()
                         event.stopPropagation()
-                        setSelectedFixture(fixture.id)
-                        setMenu({ x: event.clientX, y: event.clientY, id: fixture.id })
+                        clip.current = { ...fixture }
+                        choose({ kind: 'fixture', id: fixture.id })
+                        setMenu({ x: event.clientX, y: event.clientY, kind: 'fixture', id: fixture.id, at: { x: fixture.x, z: fixture.z } })
                       }}
                     >
-                      <FixtureMark type={fixture.type} w={w} d={d} />
+                      <FixtureMark type={fixture.type} w={w} d={d} color={fixture.color} />
                       {fixture.id === selectedFixture && (
                         <rect x={-w / 2 - 3} y={-d / 2 - 3} width={w + 6} height={d + 6} fill="none" stroke="#0f766e" strokeWidth={1.4} />
                       )}
                     </g>
                   )
                 })}
-                {(plan.rooms || []).map((item) => {
+                {shownRooms.map((item) => {
                   const label = roomLabelPoint(item, plan.fixtures, plan.openings, plan.walls)
                   return (
                     <g
                       key={`label-${item.id}`}
                       data-testid="room-label"
                       data-name={item.name}
+                      onContextMenu={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        const world = toWorld(event)
+                        choose({ kind: 'room', id: item.id })
+                        setMenu({ x: event.clientX, y: event.clientY, kind: 'room', id: item.id, at: world })
+                      }}
                       style={{ pointerEvents: tool === 'select' && !placing ? 'auto' : 'none', cursor: 'move' }}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return
@@ -679,11 +817,34 @@ export default function FloorPlanApp() {
                     {dims.overall.map((dim, index) => <DimLine key={`overall-${index}`} dim={dim} offset={1.4} X={X} Y={Y} />)}
                   </g>
                 )}
-                {liveEnd && (
+                {liveEnd && tool !== 'room' && (
                   <g style={{ pointerEvents: 'none' }}>
                     <line x1={X(draft.x)} y1={Y(draft.z)} x2={X(liveEnd.x)} y2={Y(liveEnd.z)} stroke="#0f766e" strokeWidth={1.4} strokeDasharray="5 4" />
                     <text x={(X(draft.x) + X(liveEnd.x)) / 2} y={(Y(draft.z) + Y(liveEnd.z)) / 2 - 8} textAnchor="middle" fontSize={12} fontWeight={700} fill="#0f766e">{formatMm(liveLength)}</text>
                   </g>
+                )}
+                {tool === 'room' && roomShape === 'rect' && draft && roomCursor && (
+                  <polygon
+                    points={[
+                      [draft.x, draft.z],
+                      [roomCursor.x, draft.z],
+                      [roomCursor.x, roomCursor.z],
+                      [draft.x, roomCursor.z],
+                    ].map(([x, z]) => `${X(x)},${Y(z)}`).join(' ')}
+                    fill="#0f766e22"
+                    stroke="#0f766e"
+                    strokeWidth={1.2}
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
+                {tool === 'room' && roomShape === 'poly' && poly.length > 0 && (
+                  <polyline
+                    points={[...poly, ...(roomCursor ? [roomCursor] : [])].map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
+                    fill="none"
+                    stroke="#0f766e"
+                    strokeWidth={1.2}
+                    style={{ pointerEvents: 'none' }}
+                  />
                 )}
                 <g style={{ pointerEvents: 'none' }} data-testid="north-arrow">
                   {(() => {
@@ -715,21 +876,26 @@ export default function FloorPlanApp() {
                     const ty = sheet.y + (layout.title.y * k)
                     const tw = layout.title.w * k
                     const th = layout.title.h * k
+                    const roofName = (ROOF_TYPES.find((item) => item.id === plan.roofType) || ROOF_TYPES[0]).name
                     const lines = [
                       plan.name || 'Omakotitalo',
-                      `Mittakaava 1:${Math.round(1000 / layout.scale)}`,
+                      `Mittakaava 1:${layout.ratio}`,
                       plan.paper === 'a4' ? 'A4 vaaka' : 'A3 vaaka',
-                      plan.roofType === 'flat' ? 'Tasakatto' : 'Harjakatto',
-                      `Huoneita ${(plan.rooms || []).length}`,
+                      roofName,
+                      `Huoneita ${visibleRooms(plan).length}`,
                       `Pinta-ala ${formatArea(totalArea)}`,
                     ]
+                    const header = Math.min(22, th * 0.28)
+                    const top = ty + header + 12
+                    const bottom = ty + th - 8
+                    const step = lines.length > 1 ? (bottom - top) / (lines.length - 1) : 0
                     return (
-                      <g>
+                      <g data-testid="title-block">
                         <rect x={tx} y={ty} width={tw} height={th} fill="#fff" stroke="#1c1917" strokeWidth={1} />
-                        <line x1={tx} y1={ty + th * 0.22} x2={tx + tw} y2={ty + th * 0.22} stroke="#1c1917" strokeWidth={0.7} />
-                        <text x={tx + 8} y={ty + th * 0.15} fontSize={13} fontWeight={750} fill="#1c1917">Pohjakuva</text>
+                        <line x1={tx} y1={ty + header} x2={tx + tw} y2={ty + header} stroke="#1c1917" strokeWidth={0.7} />
+                        <text x={tx + 8} y={ty + header * 0.68} fontSize={13} fontWeight={750} fill="#1c1917">Pohjakuva</text>
                         {lines.map((line, index) => (
-                          <text key={line} x={tx + 8} y={ty + th * 0.36 + index * 11} fontSize={10} fill="#292524">{line}</text>
+                          <text key={`${index}-${line}`} x={tx + 8} y={top + step * index} fontSize={10} fill="#292524">{line}</text>
                         ))}
                       </g>
                     )
@@ -762,37 +928,14 @@ export default function FloorPlanApp() {
         </div>
 
         <aside data-testid="materials-panel" style={{ width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', marginBottom: 8 }}>PINNAT</div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Kattomuoto</div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-            <button type="button" style={{ ...sideBtn(plan.roofType !== 'flat'), width: 'auto', padding: '6px 10px' }} onClick={() => setPlan(setRoofType(plan, 'gable'))}>Harjakatto</button>
-            <button type="button" style={{ ...sideBtn(plan.roofType === 'flat'), width: 'auto', padding: '6px 10px' }} onClick={() => setPlan(setRoofType(plan, 'flat'))}>Tasakatto</button>
-          </div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Ulkoseinä</div>
-          <Swatches group="exterior" value={plan.exteriorId} onPick={(id) => commit(setSurface(plan, null, 'exterior', id))} />
-          <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{materialOf('exterior', plan.exteriorId).name}</div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Katto</div>
-          <Swatches group="roof" value={plan.roofId} onPick={(id) => commit(setSurface(plan, null, 'roof', id))} />
-          <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{materialOf('roof', plan.roofId).name}</div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Huone</div>
-          {room ? (
-            <div>
-              <input
-                aria-label="Huoneen nimi"
-                value={room.name}
-                onChange={(event) => setPlan(renameRoom(plan, room.id, event.target.value))}
-                style={{ width: '100%', marginBottom: 8, padding: '6px 8px', borderRadius: 8, border: '1px solid #d6d3d1', fontSize: 13 }}
-              />
-              <div style={{ fontSize: 12, color: '#57534e', marginBottom: 8 }}>{formatArea(room.area)}</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Lattia</div>
-              <Swatches group="floor" value={room.floorId} onPick={(id) => commit(setSurface(plan, room.id, 'floor', id))} />
-              <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 10px' }}>{materialOf('floor', room.floorId).name}</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Sisäseinä</div>
-              <Swatches group="interior" value={room.interiorId} onPick={(id) => commit(setSurface(plan, room.id, 'interior', id))} />
-              <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{materialOf('interior', room.interiorId).name}</div>
-            </div>
+          <button type="button" data-testid="open-house-panel" style={{ ...sideBtn(panel === 'house'), marginBottom: 10 }} onClick={() => setPanel(panel === 'house' ? 'object' : 'house')}>Talon asetukset</button>
+          {panel === 'house' ? (
+            <HouseSettings plan={plan} onApply={setPlan} />
           ) : (
-            <div style={{ fontSize: 12, color: '#78716c', marginBottom: 12 }}>Valitse huone pohjasta.</div>
+            <SelectionPanel plan={plan} selection={pick} onApply={setPlan} onCommit={commit} />
+          )}
+          {pick?.kind === 'room' && room && (
+            <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>
           )}
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>MATERIAALILUETTELO</div>
           {rows.length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>Ei pintoja vielä.</div>}
@@ -822,27 +965,7 @@ export default function FloorPlanApp() {
           ))}
         </aside>
       </div>
-      {menu && (
-        <div
-          style={{ position: 'fixed', left: menu.x, top: menu.y, zIndex: 50, background: '#1c212b', color: '#f5f5f4', borderRadius: 8, padding: 4, minWidth: 140, boxShadow: '0 12px 32px rgba(0,0,0,0.28)' }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          {[
-            ['Kierrä', () => commit(rotateFixture(plan, menu.id))],
-            ['Monista', () => commit(duplicateFixture(plan, menu.id))],
-            ['Poista', () => { commit(removeFixture(plan, menu.id)); setSelectedFixture(null) }],
-          ].map(([label, run]) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => { run(); setMenu(null) }}
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', background: 'transparent', color: '#f5f5f4', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none' }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
+      <FloorMenu menu={menu} plan={plan} onApply={setPlan} onCommit={commit} onNavigate={onMenuNavigate} />
     </div>
   )
 }

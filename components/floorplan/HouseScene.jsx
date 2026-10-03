@@ -2,11 +2,11 @@
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { Edges, OrbitControls } from '@react-three/drei'
+import { Edges, Html, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import {
-  WALL_HEIGHT,
   fixtureTemplate,
+  formatArea,
   materialOf,
   planBounds,
   pointInPolygon,
@@ -14,8 +14,9 @@ import {
   roofModel,
   roofOutline,
   segmentLength,
+  thicknessOf,
+  visibleRooms,
   wallPieces,
-  wallThickness,
 } from '@/lib/floorplan'
 
 const textureCache = new Map()
@@ -143,8 +144,8 @@ function WallMesh({ plan, mode }) {
         const dx = (wall.b.x - wall.a.x) / len
         const dz = (wall.b.z - wall.a.z) / len
         const yaw = Math.atan2(-dz, dx)
-        const thick = wallThickness(wall.kind)
-        return wallPieces(wall, plan.openings).map((piece) => {
+        const thick = thicknessOf(wall, plan)
+        return wallPieces(wall, plan.openings, plan.floorHeight, plan.walls).map((piece) => {
           const span = piece.to - piece.from
           const mid = pointAt(wall, (piece.from + piece.to) / 2)
           const y = (piece.y0 + piece.y1) / 2
@@ -290,7 +291,7 @@ function RoofMesh({ plan, mode }) {
         </mesh>
       ))}
       {!ghost && (
-        <mesh geometry={ceiling} position={[0, WALL_HEIGHT - 0.02, 0]}>
+        <mesh geometry={ceiling} position={[0, model.wallHeight - 0.02, 0]}>
           <meshLambertMaterial color="#f8fafc" side={THREE.DoubleSide} />
         </mesh>
       )}
@@ -437,10 +438,21 @@ function FixtureBody({ type, w, d }) {
 function FixtureMesh({ fixture }) {
   const tpl = fixtureTemplate(fixture.type)
   return (
-    <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]}>
-      <FixtureBody type={fixture.type} w={tpl.w} d={tpl.d} />
+    <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]}>
+      <FixtureBody type={fixture.type} w={fixture.w || tpl.w} d={fixture.d || tpl.d} />
     </group>
   )
+}
+
+function RoomLabels({ plan }) {
+  return visibleRooms(plan).filter((room) => room.showLabel !== false).map((room) => (
+    <Html key={room.id} position={[room.cx, 0.12, room.cz]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+      <div style={{ textAlign: 'center', color: '#1c1917', fontFamily: 'sans-serif', textShadow: '0 1px 2px #fff', whiteSpace: 'nowrap' }}>
+        <div style={{ fontWeight: 700, fontSize: 13 }}>{room.name}</div>
+        <div style={{ fontSize: 11 }}>{formatArea(room.area)}</div>
+      </div>
+    </Html>
+  ))
 }
 
 function FrameCamera({ plan, fitToken, controlsRef }) {
@@ -485,7 +497,8 @@ export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0 }) {
       <ambientLight intensity={0.94} />
       <directionalLight position={[8, 22, 10]} intensity={0.5} />
       <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2)), '#cfcabe', '#e4e0d8']} position={[cx, 0, cz]} />
-      {(plan.rooms || []).map((room) => <FloorMesh key={room.id} room={room} />)}
+      {visibleRooms(plan).map((room) => <FloorMesh key={room.id} room={room} />)}
+      <RoomLabels plan={plan} />
       <WallMesh plan={plan} mode={wallMode} />
       <RoofMesh plan={plan} mode={roofMode} />
       {(plan.fixtures || []).map((fixture) => <FixtureMesh key={fixture.id} fixture={fixture} />)}
