@@ -3,7 +3,7 @@
 import * as THREE from 'three'
 import { ensureServices, layerVisible, pipeRadius, runColor } from '@/lib/services'
 
-function Segment({ a, b, radius, color }) {
+function Segment({ a, b, radius, color, pick, mark }) {
   const start = new THREE.Vector3(a.x, a.y || 0, a.z)
   const end = new THREE.Vector3(b.x, b.y || 0, b.z)
   const length = start.distanceTo(end)
@@ -12,33 +12,39 @@ function Segment({ a, b, radius, color }) {
   const direction = end.clone().sub(start).normalize()
   const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction)
   return (
-    <mesh position={mid.toArray()} quaternion={quaternion}>
-      <cylinderGeometry args={[radius, radius, length, 8]} />
-      <meshLambertMaterial color={color} />
+    <mesh position={mid.toArray()} quaternion={quaternion} userData={pick ? { pick } : undefined}>
+      <cylinderGeometry args={[Math.max(radius, mark ? 0.06 : radius), Math.max(radius, mark ? 0.06 : radius), length, 8]} />
+      <meshLambertMaterial color={mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : color} />
     </mesh>
   )
 }
 
-function RunMesh({ run }) {
+function sameService(item, run, target) {
+  return item?.kind === 'service' && item.service?.target === target && item.service?.id === (target === 'run' ? run.id : run.id)
+}
+
+function RunMesh({ run, selected, hovered }) {
   const radius = pipeRadius(run)
   const color = runColor(run)
   const points = run.points || []
+  const pick = { kind: 'service', service: { target: 'run', id: run.id, system: run.system } }
+  const mark = sameService(selected, run, 'run') ? 'selected' : sameService(hovered, run, 'run') ? 'hover' : null
   return (
     <group>
       {points.slice(1).map((point, index) => (
-        <Segment key={`${run.id}-${index}`} a={points[index]} b={point} radius={radius} color={color} />
+        <Segment key={`${run.id}-${index}`} a={points[index]} b={point} radius={radius} color={color} pick={pick} mark={mark} />
       ))}
     </group>
   )
 }
 
-function NodeMesh({ node }) {
-  const y = node.y || 0
+function NodeBody({ node, y, tint }) {
+  const color = (fallback) => tint || fallback
   if (node.kind === 'ahu') {
     return (
       <mesh position={[node.x, y - 0.15, node.z]}>
         <boxGeometry args={[0.9, 0.5, 0.5]} />
-        <meshLambertMaterial color="#e2e8f0" />
+        <meshLambertMaterial color={color('#e2e8f0')} />
       </mesh>
     )
   }
@@ -46,7 +52,7 @@ function NodeMesh({ node }) {
     return (
       <mesh position={[node.x, y - 0.2, node.z]}>
         <boxGeometry args={[0.7, 0.16, 0.45]} />
-        <meshLambertMaterial color="#ca8a04" />
+        <meshLambertMaterial color={color('#ca8a04')} />
       </mesh>
     )
   }
@@ -54,15 +60,15 @@ function NodeMesh({ node }) {
     return (
       <mesh position={[node.x, y, node.z]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[0.08, 0.08, 0.46, 10]} />
-        <meshLambertMaterial color="#94a3b8" />
+        <meshLambertMaterial color={color('#94a3b8')} />
       </mesh>
     )
   }
   if (node.kind === 'valve' || node.kind === 'floor-drain') {
     return (
       <mesh position={[node.x, node.kind === 'floor-drain' ? 0.02 : y, node.z]}>
-        <coneGeometry args={[0.08, 0.08, 10]} />
-        <meshLambertMaterial color={node.role === 'poisto' ? '#ca8a04' : node.kind === 'floor-drain' ? '#57534e' : '#dc2626'} />
+        <coneGeometry args={[0.12, 0.12, 10]} />
+        <meshLambertMaterial color={color(node.role === 'poisto' ? '#ca8a04' : node.kind === 'floor-drain' ? '#57534e' : '#dc2626')} />
       </mesh>
     )
   }
@@ -70,15 +76,15 @@ function NodeMesh({ node }) {
     return (
       <mesh position={[node.x, y, node.z]}>
         <boxGeometry args={[0.42, 0.62, 0.12]} />
-        <meshLambertMaterial color="#f8fafc" />
+        <meshLambertMaterial color={color('#f8fafc')} />
       </mesh>
     )
   }
   if (node.kind === 'light') {
     return (
       <mesh position={[node.x, y, node.z]}>
-        <sphereGeometry args={[0.08, 12, 10]} />
-        <meshLambertMaterial color="#fef3c7" />
+        <sphereGeometry args={[0.1, 12, 10]} />
+        <meshLambertMaterial color={color('#fef3c7')} />
       </mesh>
     )
   }
@@ -86,34 +92,46 @@ function NodeMesh({ node }) {
     return (
       <mesh position={[node.x, y, node.z]}>
         <boxGeometry args={[0.28, 0.12, 0.1]} />
-        <meshLambertMaterial color="#1d4ed8" />
+        <meshLambertMaterial color={color('#1d4ed8')} />
       </mesh>
     )
   }
   if (node.system === 'electric') {
     return (
       <mesh position={[node.x, y, node.z]}>
-        <boxGeometry args={[0.08, 0.08, 0.04]} />
-        <meshLambertMaterial color="#1c1917" />
+        <boxGeometry args={[0.12, 0.12, 0.06]} />
+        <meshLambertMaterial color={color('#1c1917')} />
       </mesh>
     )
   }
   return (
     <mesh position={[node.x, y, node.z]}>
-      <sphereGeometry args={[0.05, 8, 8]} />
-      <meshLambertMaterial color={node.system === 'drain' ? '#57534e' : '#1d4ed8'} />
+      <sphereGeometry args={[0.08, 8, 8]} />
+      <meshLambertMaterial color={color(node.system === 'drain' ? '#57534e' : '#1d4ed8')} />
     </mesh>
   )
 }
 
-export default function Services3D({ plan }) {
+function NodeMesh({ node, selected, hovered }) {
+  const y = node.y || 0
+  const pick = { kind: 'service', service: { target: 'node', id: node.id, system: node.system } }
+  const mark = sameService(selected, node, 'node') ? 'selected' : sameService(hovered, node, 'node') ? 'hover' : null
+  const tint = mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : null
+  return (
+    <group userData={{ pick }}>
+      <NodeBody node={node} y={y} tint={tint} />
+    </group>
+  )
+}
+
+export default function Services3D({ plan, selected = null, hovered = null }) {
   const services = ensureServices(plan)
   const runs = services.runs.filter((run) => layerVisible(plan, run.system))
   const nodes = services.nodes.filter((node) => layerVisible(plan, node.system))
   return (
     <group>
-      {runs.map((run) => <RunMesh key={run.id} run={run} />)}
-      {nodes.map((node) => <NodeMesh key={node.id} node={node} />)}
+      {runs.map((run) => <RunMesh key={run.id} run={run} selected={selected} hovered={hovered} />)}
+      {nodes.map((node) => <NodeMesh key={node.id} node={node} selected={selected} hovered={hovered} />)}
     </group>
   )
 }

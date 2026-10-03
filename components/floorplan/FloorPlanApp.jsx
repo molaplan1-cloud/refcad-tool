@@ -46,6 +46,7 @@ import {
   buildFloorPlanPdf,
 } from '@/lib/floorplan'
 import { FloorMenu, HouseSettings, SelectionPanel } from './FloorMenus'
+import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
 import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import {
@@ -60,10 +61,20 @@ import {
   layerVisible,
   snapServicePoint,
 } from '@/lib/services'
+import {
+  CURRENT_KEY,
+  LIBRARY_KEY,
+  deleteProject,
+  exportPlanJson,
+  importPlanJson,
+  loadLibrary,
+  projectById,
+  renameProject,
+  saveProject,
+  shellPlan,
+} from '@/lib/projects'
 
 const HouseScene = dynamic(() => import('./HouseScene'), { ssr: false })
-
-const STORAGE_KEY = 'refcad-floorplan-v1'
 
 const textBtn = (active) => ({
   height: 32,
@@ -309,6 +320,12 @@ function FixtureMark({ type, w, d, color }) {
 export default function FloorPlanApp() {
   const [plan, setPlan] = useState(() => emptyPlan())
   const [hydrated, setHydrated] = useState(false)
+  const [ready, setReady] = useState(false)
+  const [startOpen, setStartOpen] = useState(false)
+  const [newOpen, setNewOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [library, setLibrary] = useState(() => ({ projects: [] }))
+  const [hover, setHover] = useState(null)
   const [tool, setTool] = useState('select')
   const [placing, setPlacing] = useState(null)
   const [draft, setDraft] = useState(null)
@@ -341,8 +358,10 @@ export default function FloorPlanApp() {
   const svgRef = useRef(null)
 
   useEffect(() => {
+    const storedLibrary = loadLibrary(window.localStorage.getItem(LIBRARY_KEY))
+    setLibrary(storedLibrary)
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY)
+      const raw = window.localStorage.getItem(CURRENT_KEY)
       if (raw) {
         const parsed = JSON.parse(raw)
         if (parsed && Array.isArray(parsed.walls)) {
@@ -353,19 +372,28 @@ export default function FloorPlanApp() {
             rooms: detectRooms(parsed.walls, parsed.rooms || []),
           })
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
+          setReady(true)
+          setHydrated(true)
+          setFitToken((token) => token + 1)
+          return
         }
       }
     } catch (err) {
       console.error(err)
     }
+    setStartOpen(true)
     setHydrated(true)
-    setFitToken((token) => token + 1)
   }, [])
 
   useEffect(() => {
-    if (!hydrated) return
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(plan))
-  }, [plan, hydrated])
+    if (!ready) return
+    window.localStorage.setItem(CURRENT_KEY, JSON.stringify(plan))
+  }, [plan, ready])
+
+  useEffect(() => {
+    if (!ready) return
+    window.localStorage.setItem(LIBRARY_KEY, JSON.stringify(library))
+  }, [library, ready])
 
   useEffect(() => {
     const node = hostRef.current
@@ -419,14 +447,40 @@ export default function FloorPlanApp() {
       setSelectedFixture(null)
       return
     }
-    setPick({ kind: hit.kind, id: hit.id })
+    if (hit.kind === 'house') {
+      setPick({ kind: 'house', id: 'house' })
+      setSelectedRoom(null)
+      setSelectedFixture(null)
+      setPanel('house')
+      return
+    }
+    const next = hit.kind === 'service'
+      ? { kind: 'service', id: hit.service?.id, service: hit.service }
+      : { kind: hit.kind, id: hit.id || hit.kind }
+    setPick(next)
     setSelectedRoom(hit.kind === 'room' ? hit.id : null)
     setSelectedFixture(hit.kind === 'fixture' ? hit.id : null)
     if (hit.kind === 'fixture') {
       const fixture = (plan.fixtures || []).find((item) => item.id === hit.id)
       if (fixture) clip.current = { ...fixture }
     }
-    setPanel('object')
+    setPanel(hit.kind === 'house' ? 'house' : 'object')
+  }
+
+  const openHitMenu = (hit, event) => {
+    const point = hit || { kind: 'house', id: 'house' }
+    if (point.kind === 'service') {
+      setMenu({ x: event.clientX, y: event.clientY, kind: 'service', service: point.service })
+    } else {
+      setMenu({
+        x: event.clientX,
+        y: event.clientY,
+        kind: point.kind,
+        id: point.id || point.kind,
+        at: point.at,
+      })
+    }
+    if (point.kind !== 'canvas') choose(point)
   }
 
   const onPointerMove = (event) => {
@@ -602,17 +656,70 @@ export default function FloorPlanApp() {
     return () => window.removeEventListener('keydown', onKey)
   }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions, svcTool, svcPoints, svcKind])
 
-  const loadHouse = (house, roomName) => {
-    commit(house)
+  const loadHouse = (house, roomName, panel) => {
+    const next = { ...house, services: ensureServices(house) }
+    commit(next)
     setDraft(null)
     setPoly([])
-    const room = house.rooms.find((item) => item.name === roomName) || house.rooms[0]
+    const room = (next.rooms || []).find((item) => item.name === roomName) || next.rooms?.[0]
     setSelectedRoom(room?.id || null)
     setPick(room ? { kind: 'room', id: room.id } : null)
     setSelectedFixture(null)
+    setMenu(null)
     setView('2d')
-    setPanel(room ? 'object' : 'materials')
+    setPanel(panel || (room ? 'object' : 'house'))
+    setReady(true)
+    setStartOpen(false)
+    setNewOpen(false)
+    setLibraryOpen(false)
     setFitToken((token) => token + 1)
+  }
+
+  const createShell = (options) => loadHouse(shellPlan(options), null, 'house')
+
+  const storeCurrent = () => setLibrary((current) => saveProject(current, plan))
+
+  const openStored = (id) => {
+    const entry = projectById(library, id)
+    if (entry) loadHouse(entry.plan, entry.plan.rooms?.[0]?.name)
+  }
+
+  const renameStored = (id, name) => {
+    setLibrary((current) => renameProject(current, id, name))
+    if (plan.projectId === id) setPlan((current) => ({ ...current, name }))
+  }
+
+  const exportJson = () => {
+    const blob = new Blob([exportPlanJson(plan)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${(plan.name || 'pohja').replace(/\s+/g, '-')}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const importJson = (file) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        loadHouse(importPlanJson(String(reader.result || '')), null, 'house')
+      } catch (err) {
+        window.alert(err?.message || 'Tuonti epäonnistui')
+      }
+    }
+    reader.readAsText(file)
+  }
+
+  const onHover3d = (hit) => {
+    setHover((current) => {
+      if (!hit) return null
+      const next = hit.kind === 'service'
+        ? { kind: 'service', id: hit.service?.id, service: hit.service }
+        : { kind: hit.kind, id: hit.id }
+      if (current?.kind === next.kind && current?.id === next.id && current?.service?.id === next.service?.id && current?.service?.target === next.service?.target) return current
+      return next
+    })
   }
 
   const loadExample = () => loadHouse(exampleHouse(), 'Olohuone')
@@ -771,6 +878,8 @@ export default function FloorPlanApp() {
         </div>
         <button type="button" title="Kumoa" onClick={undo} style={textBtn(false)}>Kumoa</button>
         <span style={{ flex: 1 }} />
+        <button type="button" data-testid="plan-new" onClick={() => { setMenu(null); setNewOpen(true) }} style={textBtn(false)}>Uusi</button>
+        <button type="button" data-testid="plan-open" onClick={() => { setMenu(null); setLibraryOpen(true) }} style={textBtn(false)}>Avaa/Tallenna</button>
         <button type="button" data-testid="house-settings" onClick={() => { setPanel('house'); setMenu(null) }} style={textBtn(panel === 'house')}>Talon asetukset</button>
         <button type="button" data-testid="example-house" onClick={loadExample} style={textBtn(false)}>Esimerkkitalo</button>
         <button type="button" data-testid="family-house" onClick={loadFamily} style={textBtn(false)}>Huoneisto</button>
@@ -928,6 +1037,7 @@ export default function FloorPlanApp() {
                   return (
                     <g
                       key={fixture.id}
+                      data-testid={`placed-${fixture.type}`}
                       transform={`translate(${X(fixture.x)} ${Y(fixture.z)}) rotate(${fixture.rotation || 0})${fixture.mirror ? ' scale(-1 1)' : ''}`}
                       style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none' }}
                       onPointerDown={(event) => {
@@ -1095,19 +1205,29 @@ export default function FloorPlanApp() {
             </div>
           ) : (
             <div ref={hostRef} data-testid="floor-3d" style={{ flex: 1, minHeight: 0, position: 'relative', background: '#e7e5e4' }}>
-              <HouseScene plan={plan} wallMode={wallMode} roofMode={roofMode} fitToken={fitToken} />
+              <HouseScene
+                plan={plan}
+                wallMode={wallMode}
+                roofMode={roofMode}
+                fitToken={fitToken}
+                selected={pick}
+                hovered={hover}
+                onSelect={(hit) => { setMenu(null); choose(hit) }}
+                onHover={onHover3d}
+                onContext={openHitMenu}
+              />
               <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', gap: 4, background: '#14181f', padding: 4, borderRadius: 10 }}>
                   <span style={{ color: '#a8a29e', fontSize: 11, alignSelf: 'center', padding: '0 6px' }}>Seinät</span>
                   <button type="button" data-testid="wall-solid" style={textBtn(wallMode === 'solid')} onClick={() => setWallMode('solid')}>Näkyvissä</button>
-                  <button type="button" data-testid="wall-ghost" style={textBtn(wallMode === 'ghost')} onClick={() => setWallMode('ghost')}>Läpinäkyvä</button>
+                  <button type="button" data-testid="wall-ghost" aria-pressed={wallMode === 'ghost'} style={textBtn(wallMode === 'ghost')} onClick={() => setWallMode('ghost')}>Läpinäkyvä</button>
                   <button type="button" data-testid="wall-hidden" style={textBtn(wallMode === 'hidden')} onClick={() => setWallMode('hidden')}>Piilossa</button>
                 </div>
                 <div style={{ display: 'flex', gap: 4, background: '#14181f', padding: 4, borderRadius: 10 }}>
                   <span style={{ color: '#a8a29e', fontSize: 11, alignSelf: 'center', padding: '0 6px' }}>Katto</span>
                   <button type="button" data-testid="roof-solid" style={textBtn(roofMode === 'solid')} onClick={() => setRoofMode('solid')}>Näkyvissä</button>
                   <button type="button" data-testid="roof-ghost" style={textBtn(roofMode === 'ghost')} onClick={() => setRoofMode('ghost')}>Läpinäkyvä</button>
-                  <button type="button" data-testid="roof-hidden" style={textBtn(roofMode === 'hidden')} onClick={() => setRoofMode('hidden')}>Piilossa</button>
+                  <button type="button" data-testid="roof-hidden" aria-pressed={roofMode === 'hidden'} style={textBtn(roofMode === 'hidden')} onClick={() => setRoofMode('hidden')}>Piilossa</button>
                 </div>
               </div>
             </div>
@@ -1119,7 +1239,7 @@ export default function FloorPlanApp() {
           {panel === 'house' ? (
             <HouseSettings plan={plan} onApply={setPlan} />
           ) : (
-            <SelectionPanel plan={plan} selection={pick} onApply={setPlan} onCommit={commit} />
+            <SelectionPanel plan={plan} selection={pick} onApply={setPlan} onCommit={commit} onClear={() => { setPick(null); setMenu(null) }} />
           )}
           {pick?.kind === 'room' && room && (
             <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>
@@ -1164,6 +1284,34 @@ export default function FloorPlanApp() {
           )}
         </aside>
       </div>
+      {startOpen && !newOpen && (
+        <StartDialog
+          library={library}
+          onEmpty={() => { setStartOpen(false); setNewOpen(true) }}
+          onExample={loadExample}
+          onOpen={openStored}
+        />
+      )}
+      {newOpen && (
+        <ShellDialog
+          title="Uusi pohja"
+          onCancel={() => { setNewOpen(false); if (!ready) setStartOpen(true) }}
+          onCreate={createShell}
+          onExample={loadExample}
+        />
+      )}
+      {libraryOpen && (
+        <LibraryDialog
+          library={library}
+          onClose={() => setLibraryOpen(false)}
+          onSave={storeCurrent}
+          onOpen={openStored}
+          onRename={renameStored}
+          onDelete={(id) => setLibrary((current) => deleteProject(current, id))}
+          onExport={exportJson}
+          onImport={importJson}
+        />
+      )}
       <FloorMenu menu={menu} plan={plan} onApply={setPlan} onCommit={commit} onNavigate={onMenuNavigate} />
       <ServiceMenu menu={menu} plan={plan} onApply={setPlan} onClose={() => setMenu(null)} />
     </div>
