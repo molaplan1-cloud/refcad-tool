@@ -28,6 +28,7 @@ export default function LandingClient({ user }) {
             </div>
           </Link>
           <nav style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Link href="/pohjakuva" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Pohjakuva</Link>
             <a href="#features" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Ominaisuudet</a>
             <a href="#docs" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Dokumentaatio</a>
             <a href="#pricing" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Hinnoittelu</a>
