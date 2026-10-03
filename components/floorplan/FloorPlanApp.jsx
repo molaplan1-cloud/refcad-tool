@@ -96,6 +96,8 @@ import {
   autoRouteAll,
   applyHeating,
   assignDeviceCircuit,
+  commitRunGeometry,
+  dragServiceRun,
   refreshHeat,
   buildElectricPdf,
   buildHydronicPdf,
@@ -107,6 +109,7 @@ import {
   hitService,
   layerVisible,
   snapServicePoint,
+  updateServiceNode,
 } from '@/lib/services'
 import {
   CURRENT_KEY,
@@ -601,6 +604,9 @@ export default function FloorPlanApp() {
   const [cursorPpm, setCursorPpm] = useState(40)
   const history = useRef([])
   const dragBefore = useRef(null)
+  const routeDrag = useRef(null)
+  const dragNode = useRef(null)
+  const [redrawId, setRedrawId] = useState(null)
   const dragId = useRef(null)
   const dragOpen = useRef(null)
   const dragYard = useRef(null)
@@ -816,17 +822,31 @@ export default function FloorPlanApp() {
     if (dragYard.current) setPlan((current) => moveYardItem(current, dragYard.current.collection, dragYard.current.id, world.x, world.z))
     if (dragOpen.current) setPlan((current) => moveOpening(current, dragOpen.current, world))
     if (dragLabel.current) setPlan((current) => moveRoomLabel(current, dragLabel.current, world.x, world.z))
+    if (routeDrag.current && Math.hypot(world.x - routeDrag.current.origin.x, world.z - routeDrag.current.origin.z) > 0.02) {
+      routeDrag.current.moved = true
+      const drag = routeDrag.current.mode === 'run' || event.shiftKey ? { ...routeDrag.current, mode: 'run' } : routeDrag.current
+      setPlan((current) => dragServiceRun(current, drag, world, { ortho: angleStep === 90 && !event.shiftKey, grid: gridStep, free: altRef.current }))
+    }
+    if (dragNode.current && Math.hypot(world.x - dragNode.current.origin.x, world.z - dragNode.current.origin.z) > 0.02) {
+      dragNode.current.moved = true
+      const snapped = altRef.current ? world : snapServicePoint(world, plan, { grid: gridStep, mode: 'free' })
+      setPlan((current) => updateServiceNode(current, dragNode.current.id, { x: snapped.x, z: snapped.z }))
+    }
   }
 
   const onPointerUp = () => {
     if (panRef.current?.button === 2 && panRef.current.moved) suppressMenu.current = true
     panRef.current = null
     const movedYard = dragYard.current
-    if ((dragId.current || dragLabel.current || dragOpen.current || movedYard) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+    const movedRoute = routeDrag.current?.moved
+    const movedNode = dragNode.current?.moved
+    if ((dragId.current || dragLabel.current || dragOpen.current || movedYard || movedRoute || movedNode) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
     dragId.current = null
     dragOpen.current = null
     dragLabel.current = null
     dragYard.current = null
+    routeDrag.current = null
+    dragNode.current = null
     dragBefore.current = null
     if (movedYard?.collection === 'objects') setPlan((current) => syncYardServices(current))
   }
@@ -851,6 +871,13 @@ export default function FloorPlanApp() {
 
   const finishServiceRun = () => {
     if (svcPoints.length < 2) return
+    if (redrawId) {
+      commit(commitRunGeometry(plan, redrawId, svcPoints))
+      setRedrawId(null)
+      setSvcPoints([])
+      setSvcTool(null)
+      return
+    }
     const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES.find((item) => item.mode === 'run')
     commit(addServiceRun(plan, {
       system: spec.system,
@@ -861,6 +888,32 @@ export default function FloorPlanApp() {
       points: svcPoints,
     }))
     setSvcPoints([])
+  }
+
+  const beginRouteDrag = (id, mode, index, world) => {
+    const run = ensureServices(plan).runs.find((item) => item.id === id)
+    if (!run) return
+    choose({ kind: 'service', service: { target: 'run', id, system: run.system, segmentIndex: index } })
+    routeDrag.current = {
+      id,
+      mode,
+      index,
+      origin: { x: world.x, z: world.z },
+      basePoints: (run.points || []).map((point) => ({ ...point })),
+      moved: false,
+    }
+    dragBefore.current = plan
+  }
+
+  const beginRedraw = (run) => {
+    if (!run) return
+    setRedrawId(run.id)
+    setSvcTool('run')
+    setSvcSystem(run.system)
+    setSvcKind(run.kind)
+    setSvcPoints([])
+    setMenu(null)
+    choose({ kind: 'service', service: { target: 'run', id: run.id, system: run.system } })
   }
 
   const onContextMenu = (event) => {
@@ -1033,8 +1086,16 @@ export default function FloorPlanApp() {
       return
     }
     const serviceHit = hitService(plan, world)
-    if (serviceHit) {
+    if (serviceHit?.target === 'node') {
       choose({ kind: 'service', service: serviceHit })
+      dragNode.current = { id: serviceHit.id, origin: { x: world.x, z: world.z }, moved: false }
+      dragBefore.current = plan
+      return
+    }
+    if (serviceHit?.target === 'run') {
+      const mode = event.shiftKey ? 'run' : serviceHit.vertexIndex != null ? 'vertex' : 'segment'
+      const index = serviceHit.vertexIndex != null ? serviceHit.vertexIndex : (serviceHit.segmentIndex || 0)
+      beginRouteDrag(serviceHit.id, mode, index, world)
       return
     }
     const yardHit = sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
@@ -1096,6 +1157,7 @@ export default function FloorPlanApp() {
         setMenu(null)
         setSvcPoints([])
         setSvcTool(null)
+        setRedrawId(null)
         setYardPoints([])
         setYardTool(null)
         setElectricView(null)
@@ -1257,6 +1319,57 @@ export default function FloorPlanApp() {
     }
   }
 
+  const onServiceDrag3d = (service, spot, phase) => {
+    if (!service) return
+    if (service.target === 'node') {
+      if (phase === 'start') {
+        if (!dragBefore.current) dragBefore.current = plan
+        return
+      }
+      const snapped = snapServicePoint(spot, plan, { grid: gridStep, mode: 'free' })
+      setPlan((current) => updateServiceNode(current, service.id, { x: snapped.x, z: snapped.z }))
+      choose({ kind: 'service', service: { target: 'node', id: service.id, system: service.system } })
+      if (phase === 'end') {
+        if (dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+        dragBefore.current = null
+      }
+      return
+    }
+    if (phase === 'start') {
+      const run = ensureServices(plan).runs.find((item) => item.id === service.id)
+      if (!run) return
+      if (!dragBefore.current) dragBefore.current = plan
+      routeDrag.current = {
+        id: service.id,
+        mode: service.target === 'vertex' ? 'vertex' : service.target === 'segment' ? 'segment' : 'run',
+        index: service.index || 0,
+        origin: { x: spot.x, z: spot.z },
+        basePoints: (run.points || []).map((point) => ({ ...point })),
+      }
+      return
+    }
+    if (!routeDrag.current || routeDrag.current.id !== service.id) {
+      const run = ensureServices(plan).runs.find((item) => item.id === service.id)
+      if (!run) return
+      if (!dragBefore.current) dragBefore.current = plan
+      routeDrag.current = {
+        id: service.id,
+        mode: service.target === 'vertex' ? 'vertex' : service.target === 'segment' ? 'segment' : 'run',
+        index: service.index || 0,
+        origin: { x: spot.x, z: spot.z },
+        basePoints: (run.points || []).map((point) => ({ ...point })),
+      }
+    }
+    const drag = routeDrag.current
+    setPlan((current) => dragServiceRun(current, drag, spot, { ortho: angleStep === 90, grid: gridStep }))
+    choose({ kind: 'service', service: { target: 'run', id: service.id, system: service.system, segmentIndex: service.index || 0 } })
+    if (phase === 'end') {
+      if (dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+      dragBefore.current = null
+      routeDrag.current = null
+    }
+  }
+
   const onYardDrag3d = (hit, spot, phase) => {
     if (!dragBefore.current) dragBefore.current = plan
     setPlan((current) => moveYardItem(current, hit.collection, hit.id, spot.x, spot.z))
@@ -1396,7 +1509,9 @@ export default function FloorPlanApp() {
   const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
-  const status = svcTool === 'run'
+  const status = redrawId
+    ? 'Piirrä reitti uudelleen. Enter päättää, Escape peruuttaa.'
+    : svcTool === 'run'
     ? 'Linja: napsauta pisteet. Enter tai Valmis päättää. Escape peruuttaa.'
     : svcTool === 'node'
       ? `${spec?.name || 'Piste'}: napsauta paikka. Piste tarttuu verkkoon ja lähellä olevaan osaan.`
@@ -1884,6 +1999,8 @@ export default function FloorPlanApp() {
                     w: layout.title.w * k,
                   }}
                   interactive={!svcTool}
+                  selected={pick}
+                  onRouteDown={(event, hit) => beginRouteDrag(hit.id, hit.mode, hit.index, toWorld(event))}
                   preview={svcTool === 'run' ? { points: svcPoints, cursor: cursor ? snapServicePoint(cursor, plan, { mode: 'free', system: svcSystem }) : null } : null}
                   onContext={openServiceMenu}
                 />
@@ -1950,6 +2067,7 @@ export default function FloorPlanApp() {
                 onFixtureDrag={onFixtureDrag3d}
                 onOpeningDrag={onOpeningDrag3d}
                 onYardDrag={onYardDrag3d}
+                onServiceDrag={onServiceDrag3d}
                 onDropFixture={onDropFixture3d}
               />
               <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2001,7 +2119,7 @@ export default function FloorPlanApp() {
           {panel === 'house' ? (
             <HouseSettings plan={plan} onApply={setPlan} />
           ) : (
-            <SelectionPanel plan={plan} selection={pick} onApply={setPlan} onCommit={commit} onClear={() => { setPick(null); setMenu(null) }} />
+            <SelectionPanel plan={plan} selection={pick} onApply={setPlan} onCommit={commit} onClear={() => { setPick(null); setMenu(null) }} onRedrawRoute={beginRedraw} />
           )}
           {pick?.kind === 'room' && room && (
             <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>
@@ -2076,7 +2194,7 @@ export default function FloorPlanApp() {
         />
       )}
       <FloorMenu menu={menu} plan={plan} onApply={setPlan} onCommit={commit} onNavigate={onMenuNavigate} />
-      <ServiceMenu menu={menu} plan={plan} onApply={setPlan} onClose={() => setMenu(null)} onProperties={() => onMenuNavigate('properties')} />
+      <ServiceMenu menu={menu} plan={plan} onApply={commit} onCommit={commit} onClose={() => setMenu(null)} onProperties={() => onMenuNavigate('properties')} onRedraw={beginRedraw} />
     </div>
   )
 }

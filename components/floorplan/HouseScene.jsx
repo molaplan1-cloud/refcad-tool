@@ -738,10 +738,10 @@ function FloorCursor({ point, ppm, kind }) {
   )
 }
 
-function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onYardDrag, onDropFixture }) {
+function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onYardDrag, onServiceDrag, onDropFixture }) {
   const { camera, gl, scene } = useThree()
   const handlers = useRef({})
-  handlers.current = { drawMode, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onYardDrag, onDropFixture }
+  handlers.current = { drawMode, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onYardDrag, onServiceDrag, onDropFixture }
   useLayoutEffect(() => {
     const raycaster = new THREE.Raycaster()
     const pointer = new THREE.Vector2()
@@ -777,9 +777,14 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
       down = { x: event.clientX, y: event.clientY }
       if (handlers.current.drawMode) return
       const pick = read()
-      if (pick?.kind === 'fixture' || pick?.kind === 'opening' || (pick?.kind === 'yard' && pick.movable)) {
-        drag = { kind: pick.kind, id: pick.id, collection: pick.collection, moved: false }
+      const serviceDrag = pick?.kind === 'service' && ['vertex', 'segment', 'run', 'node'].includes(pick.service?.target)
+      if (pick?.kind === 'fixture' || pick?.kind === 'opening' || (pick?.kind === 'yard' && pick.movable) || serviceDrag) {
+        drag = { kind: serviceDrag ? 'service' : pick.kind, id: pick.id, collection: pick.collection, service: pick.service, moved: false }
         if (controlsRef.current) controlsRef.current.enabled = false
+        if (serviceDrag) {
+          const spot = floor()
+          if (spot) handlers.current.onServiceDrag?.(pick.service, spot, 'start')
+        }
       }
     }
     const onPointerUp = (event) => {
@@ -795,9 +800,17 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
         if (ended.moved && spot) {
           if (ended.kind === 'fixture') handlers.current.onFixtureDrag?.(ended.id, spot, 'end')
           else if (ended.kind === 'yard') handlers.current.onYardDrag?.({ kind: 'yard', id: ended.id, collection: ended.collection }, spot, 'end')
+          else if (ended.kind === 'service') handlers.current.onServiceDrag?.(ended.service, spot, 'end')
           else handlers.current.onOpeningDrag?.(ended.id, spot, 'end')
         } else if (ended.kind === 'fixture') handlers.current.onSelect?.({ kind: 'fixture', id: ended.id })
         else if (ended.kind === 'yard') handlers.current.onSelect?.({ kind: 'yard', id: ended.id, collection: ended.collection })
+        else if (ended.kind === 'service') {
+          const target = ended.service?.target
+          const service = target === 'vertex' || target === 'segment'
+            ? { ...ended.service, target: 'run', segmentIndex: ended.service.index || 0 }
+            : ended.service
+          handlers.current.onSelect?.({ kind: 'service', service })
+        }
         else handlers.current.onSelect?.({ kind: 'opening', id: ended.id })
         return
       }
@@ -819,6 +832,7 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
         if (drag.moved) {
           if (drag.kind === 'fixture') handlers.current.onFixtureDrag?.(drag.id, spot, 'move')
           else if (drag.kind === 'yard') handlers.current.onYardDrag?.({ kind: 'yard', id: drag.id, collection: drag.collection }, spot, 'move')
+          else if (drag.kind === 'service') handlers.current.onServiceDrag?.(drag.service, spot, 'move')
           else handlers.current.onOpeningDrag?.(drag.id, spot, 'move')
           return
         }
@@ -889,6 +903,7 @@ export default function HouseScene({
   onFixtureDrag,
   onOpeningDrag,
   onYardDrag,
+  onServiceDrag,
   onDropFixture,
 }) {
   const controlsRef = useRef(null)
@@ -990,6 +1005,7 @@ export default function HouseScene({
         onFixtureDrag={onFixtureDrag}
         onOpeningDrag={onOpeningDrag}
         onYardDrag={onYardDrag}
+        onServiceDrag={onServiceDrag}
         onDropFixture={onDropFixture}
       />
       <FrameCamera plan={plan} fitToken={fitToken} controlsRef={controlsRef} />

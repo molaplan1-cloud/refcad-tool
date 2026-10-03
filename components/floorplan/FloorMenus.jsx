@@ -329,7 +329,7 @@ export function selectionLabel(plan, selection) {
   return 'Kohde'
 }
 
-export function SelectionPanel({ plan, selection, onApply, onCommit, onClear }) {
+export function SelectionPanel({ plan, selection, onApply, onCommit, onClear, onRedrawRoute }) {
   let body = null
   if (!selection?.id && selection?.kind !== 'roof' && selection?.kind !== 'house') {
     body = <div style={{ fontSize: 12, color: '#78716c' }}>Valitse kohde pohjasta tai avaa talon asetukset.</div>
@@ -348,7 +348,9 @@ export function SelectionPanel({ plan, selection, onApply, onCommit, onClear }) 
         menu={{ kind: 'service', service: selection.service, x: 0, y: 0 }}
         plan={plan}
         onApply={onApply}
+        onCommit={onCommit}
         onClose={onClear}
+        onRedraw={onRedrawRoute}
       />
     )
   }

@@ -31,12 +31,30 @@ function RunMesh({ run, selected, hovered }) {
   const radius = pipeRadius(run)
   const color = runColor(run)
   const points = run.points || []
-  const pick = { kind: 'service', service: { target: 'run', id: run.id, system: run.system } }
-  const mark = sameService(selected, run, 'run') ? 'selected' : sameService(hovered, run, 'run') ? 'hover' : null
+  const activeId = selected?.service?.id === run.id || hovered?.service?.id === run.id
+  const mark = selected?.service?.id === run.id ? 'selected' : hovered?.service?.id === run.id ? 'hover' : null
   return (
     <group>
       {points.slice(1).map((point, index) => (
-        <Segment key={`${run.id}-${index}`} a={points[index]} b={point} radius={radius} color={color} pick={pick} mark={mark} />
+        <Segment
+          key={`${run.id}-${index}`}
+          a={points[index]}
+          b={point}
+          radius={radius}
+          color={color}
+          pick={{ kind: 'service', service: { target: 'segment', id: run.id, system: run.system, index } }}
+          mark={mark}
+        />
+      ))}
+      {activeId && mark === 'selected' && points.map((point, index) => (
+        <mesh
+          key={`grip-${run.id}-${index}`}
+          position={[point.x, point.y || 0, point.z]}
+          userData={{ pick: { kind: 'service', service: { target: 'vertex', id: run.id, system: run.system, index } } }}
+        >
+          <sphereGeometry args={[0.07, 10, 8]} />
+          <meshBasicMaterial color="#0f766e" depthTest={false} />
+        </mesh>
       ))}
     </group>
   )

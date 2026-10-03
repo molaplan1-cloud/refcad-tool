@@ -19,6 +19,7 @@ import { decorateExample } from '@/lib/exampleScene'
 import { templatesForGroup } from '@/lib/selection'
 import { REFRIGERANT_IDS } from '@/lib/pipeSizing'
 import { INTERNAL_LIQUID_TRAIN, PIPE_STYLES, autoCircuit, validateRoute } from '@/lib/pipeTopology'
+import { heightMetres, insertRisers, moveVertexPoints, riseMetres, setRunMount, splitPoints } from '@/lib/routeEdit'
 import {
   defaultElevation,
   doorOnWall,
@@ -516,10 +517,13 @@ export default function DesignerApp({
 
   function commitPipes(result) {
     pushUndo()
-    const kept = pipesRef.current.filter((pipe) => pipe.kind === 'cable')
-    setPipes([...kept, ...result.pipes])
-    setSelectedIds(result.pipes[0] ? [result.pipes[0].id] : [])
-    setNotice(result.notice)
+    const locked = pipesRef.current.filter((pipe) => pipe.locked)
+    const lockedKey = new Set(locked.map((pipe) => `${pipe.kind}:${pipe.segment || ''}`))
+    const fresh = (result.pipes || []).filter((pipe) => !lockedKey.has(`${pipe.kind}:${pipe.segment || ''}`))
+    const loose = pipesRef.current.filter((pipe) => pipe.kind === 'cable' && !pipe.locked)
+    setPipes([...locked, ...loose, ...fresh])
+    setSelectedIds(fresh[0] ? [fresh[0].id] : (locked[0] ? [locked[0].id] : []))
+    setNotice(locked.length ? `${result.notice || 'Putket reititetty.'} Manuaaliset reitit säilyivät.` : result.notice)
     setPipeOffer(null)
   }
 
@@ -630,6 +634,22 @@ export default function DesignerApp({
     setView('2d')
     setFitToken((token) => token + 1)
     setNotice('Esimerkki: kylmähuoneet, varasto, konehuone ja putket. Kuorma on oikealla.')
+  }
+
+  const routeBase = useRef(null)
+  function onRouteDrag(kind, id, index, at, phase) {
+    if (phase === 'start') {
+      pushUndo()
+      const list = kind === 'cable' ? cablesRef.current : pipesRef.current
+      const item = list.find((entry) => entry.id === id)
+      routeBase.current = item ? item.points.map((point) => ({ ...point })) : null
+      return
+    }
+    if (phase !== 'move' || !at || !routeBase.current) return
+    const points = moveVertexPoints(routeBase.current, index, at, { ortho: true })
+    const apply = (items) => items.map((item) => (item.id === id ? { ...item, points, riseM: riseMetres(points), locked: true, manual: true } : item))
+    if (kind === 'cable') setCables(apply(cablesRef.current))
+    else setPipes(apply(pipesRef.current))
   }
 
   function patchEquipment(id, patch) {
@@ -854,6 +874,8 @@ export default function DesignerApp({
     onCreatePolygon,
     onCreateRoute,
     onPlace,
+    onPreviewPipes: setPipes,
+    onPreviewCables: setCables,
     onContextMenu: (hit) => {
       setSelectedIds([hit.id])
       setMenu(hit)
@@ -1111,11 +1133,11 @@ export default function DesignerApp({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%' }}>
               <PlanView {...planProps} />
               <div style={{ borderLeft: '1px solid #d6d3d1' }}>
-                <Scene3D rooms={rooms} pipes={pipes} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} unitSystem={unitSystem} />
+                <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
               </div>
             </div>
           ) : view === '3d' ? (
-            <Scene3D rooms={rooms} pipes={pipes} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} unitSystem={unitSystem} />
+            <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
           ) : (
             <PlanView {...planProps} />
           )}
@@ -1182,6 +1204,7 @@ export default function DesignerApp({
             }}
             selectedEquipment={selectedEquipment}
             selectedPipe={pipes.find((pipe) => pipe.id === selectedId) || null}
+            selectedCable={cables.find((cable) => cable.id === selectedId) || null}
             pipes={pipes}
             onPatchEquipment={(patch) => {
               if (!selectedEquipment) return
@@ -1189,7 +1212,39 @@ export default function DesignerApp({
             }}
             onPatchPipe={(patch) => {
               if (!selectedId) return
-              setPipes((current) => current.map((pipe) => (pipe.id === selectedId ? { ...pipe, ...patch } : pipe)))
+              const pipe = pipesRef.current.find((item) => item.id === selectedId)
+              const cable = cablesRef.current.find((item) => item.id === selectedId)
+              const apply = (item) => {
+                if (!item) return item
+                const next = { ...item, ...patch }
+                if (patch.points) next.points = insertRisers(patch.points)
+                if (next.points) next.riseM = riseMetres(next.points)
+                if (patch.heightMode) {
+                  const host = roomsRef.current[0]
+                  next.points = setRunMount(item.points, heightMetres({ floorHeight: host?.height || 3 }, patch.heightMode, 'iv'), patch.heightMode)
+                  next.locked = true
+                }
+                if (patch.locked === false) next.locked = false
+                else if (patch.points || patch.material || patch.insulation || patch.label || patch.heightMode) next.locked = true
+                return next
+              }
+              if (cable) setCables((current) => current.map((item) => (item.id === selectedId ? apply(item) : item)))
+              else if (pipe) setPipes((current) => current.map((item) => (item.id === selectedId ? apply(item) : item)))
+            }}
+            onReroutePipe={(id) => {
+              const target = id || selectedId
+              pipesRef.current = pipesRef.current.map((pipe) => (pipe.id === target ? { ...pipe, locked: false } : pipe))
+              setPipes(pipesRef.current)
+              runAutoPipe()
+            }}
+            onSplitPipe={(id) => {
+              const pipe = pipesRef.current.find((item) => item.id === id)
+              if (!pipe) return
+              const parts = splitPoints(pipe.points, 0, 0.5)
+              if (!parts) return
+              pushUndo()
+              const copy = { ...pipe, id: genId(), points: parts.right, locked: true, showMark: false }
+              setPipes(pipesRef.current.map((item) => (item.id === id ? { ...item, points: parts.left, locked: true } : item)).concat(copy))
             }}
             onDeleteEquipment={deleteSelected}
           />
@@ -1200,7 +1255,32 @@ export default function DesignerApp({
           menu={menu}
           rooms={rooms}
           pipes={pipes}
+          cables={cables}
           onClose={() => setMenu(null)}
+          onReroute={() => {
+            if (menu.kind === 'cable') {
+              setCables((current) => current.map((cable) => (cable.id === menu.id ? { ...cable, locked: false } : cable)))
+              setMenu(null)
+              return
+            }
+            pipesRef.current = pipesRef.current.map((pipe) => (pipe.id === menu.id ? { ...pipe, locked: false } : pipe))
+            setPipes(pipesRef.current)
+            setMenu(null)
+            runAutoPipe()
+          }}
+          onHeight={(heightMode) => {
+            const patch = { heightMode }
+            const pipe = pipesRef.current.find((item) => item.id === menu.id)
+            const cable = cablesRef.current.find((item) => item.id === menu.id)
+            const host = roomsRef.current[0]
+            const points = setRunMount((pipe || cable)?.points || [], heightMetres({ floorHeight: host?.height || 3 }, heightMode, 'iv'), heightMode)
+            if (cable) setCables((current) => current.map((item) => (item.id === menu.id ? { ...item, ...patch, points, locked: true } : item)))
+            if (pipe) setPipes((current) => current.map((item) => (item.id === menu.id ? { ...item, ...patch, points, locked: true } : item)))
+          }}
+          onLock={(locked) => {
+            if (menu.kind === 'cable') setCables((current) => current.map((item) => (item.id === menu.id ? { ...item, locked } : item)))
+            else setPipes((current) => current.map((item) => (item.id === menu.id ? { ...item, locked } : item)))
+          }}
           onRotate={(delta) => { rotateSelected(delta); }}
           onAngle={(angle) => {
             const target = selectedTarget()
@@ -1244,10 +1324,10 @@ export default function DesignerApp({
   )
 }
 
-function ContextMenu({ menu, rooms, pipes, onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily }) {
+function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily, onReroute, onHeight, onLock }) {
   const host = rooms.find((room) => room.id === menu.id) || rooms.find((room) => (room.equipment || []).some((eq) => eq.id === menu.id))
   const eq = host?.equipment?.find((item) => item.id === menu.id) || null
-  const pipe = pipes.find((item) => item.id === menu.id) || null
+  const pipe = pipes.find((item) => item.id === menu.id) || cables.find((item) => item.id === menu.id) || null
   const [angle, setAngle] = useState(eq?.rotation || 0)
   const [width, setWidth] = useState(eq?.width || host?.width || 1)
   const [depth, setDepth] = useState(eq?.depth || host?.depth || 1)
@@ -1316,6 +1396,25 @@ function ContextMenu({ menu, rooms, pipes, onClose, onRotate, onAngle, onResize,
               <MenuBtn testid="ctx-apply-elevation" onClick={() => onElevation(elevation, mount)}>Aseta korkeus  Alt+↑↓</MenuBtn>
             </>
           )}
+        </>
+      )}
+      {(menu.kind === 'pipe' || menu.kind === 'cable') && (
+        <>
+          <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>
+            Korkeus
+            <select data-testid="ctx-cold-height" value={pipe?.heightMode || ''} onChange={(event) => onHeight?.(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
+              <option value="">Oma</option>
+              <option value="ceiling">Katossa</option>
+              <option value="false-ceiling">Alakatossa</option>
+              <option value="wall">Seinäkorkeus</option>
+              <option value="floor">Lattiassa</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, padding: '4px 6px' }}>
+            <input data-testid="ctx-cold-lock" type="checkbox" checked={Boolean(pipe?.locked)} onChange={(event) => onLock?.(event.target.checked)} />
+            Manuaalinen
+          </label>
+          <MenuBtn testid="ctx-cold-reroute" onClick={onReroute}>Reititä uudelleen</MenuBtn>
         </>
       )}
       <MenuBtn testid="ctx-duplicate" onClick={onDuplicate}>Kopioi  Ctrl+D</MenuBtn>
