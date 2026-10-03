@@ -11,6 +11,7 @@ import {
   addWall,
   duplicateFixture,
   detectRooms,
+  dimensionChains,
   emptyPlan,
   exampleHouse,
   formatArea,
@@ -18,10 +19,13 @@ import {
   materialOf,
   materialsList,
   moveFixture,
+  moveRoomLabel,
   nearestWall,
+  openingSymbol,
   pointInPolygon,
   removeFixture,
   renameRoom,
+  roomLabelPoint,
   rotateFixture,
   segmentLength,
   setRoofType,
@@ -29,7 +33,6 @@ import {
   viewLayout,
   snapDrawPoint,
   wallQuads,
-  wallThickness,
   buildFloorPlanPdf,
 } from '@/lib/floorplan'
 
@@ -90,48 +93,56 @@ function sheetPixels(size, plan) {
   }
 }
 
-function along(wall, distance) {
-  const len = segmentLength(wall.a, wall.b) || 1
-  const t = distance / len
-  return {
-    x: wall.a.x + (wall.b.x - wall.a.x) * t,
-    z: wall.a.z + (wall.b.z - wall.a.z) * t,
-  }
-}
-
-function openingFigures(wall, opening) {
-  const len = segmentLength(wall.a, wall.b) || 1
-  const dx = (wall.b.x - wall.a.x) / len
-  const dz = (wall.b.z - wall.a.z) / len
-  const nx = -dz
-  const nz = dx
-  const from = opening.offset - opening.width / 2
-  const to = opening.offset + opening.width / 2
-  const hingeDist = opening.swing >= 0 ? from : to
-  const hinge = along(wall, hingeDist)
-  const sign = opening.swing >= 0 ? 1 : -1
-  const arc = []
-  for (let i = 0; i <= 8; i += 1) {
-    const t = (i / 8) * (Math.PI / 2)
-    arc.push({
-      x: hinge.x + dx * Math.cos(t) * opening.width * sign + nx * Math.sin(t) * opening.width,
-      z: hinge.z + dz * Math.cos(t) * opening.width * sign + nz * Math.sin(t) * opening.width,
-    })
-  }
-  const half = wallThickness(wall.kind) / 2
-  const jamb = (distance) => {
-    const p = along(wall, distance)
-    return [
-      { x: p.x + nx * half, z: p.z + nz * half },
-      { x: p.x - nx * half, z: p.z - nz * half },
-    ]
-  }
-  return { arc, leaf: arc[arc.length - 1], hinge, jambA: jamb(from), jambB: jamb(to), nx, nz, half, from, to }
+function DimLine({ dim, offset, X, Y }) {
+  const off = Number.isFinite(dim.offset) ? dim.offset : offset
+  const x1 = X(dim.x1 + (dim.nx || 0) * off)
+  const y1 = Y(dim.z1 + (dim.nz || 0) * off)
+  const x2 = X(dim.x2 + (dim.nx || 0) * off)
+  const y2 = Y(dim.z2 + (dim.nz || 0) * off)
+  const ang = Math.atan2(y2 - y1, x2 - x1)
+  const len = Math.hypot(x2 - x1, y2 - y1) || 1
+  const ux = (x2 - x1) / len
+  const uy = (y2 - y1) / len
+  const tick = 6
+  const tx = Math.cos(ang + Math.PI / 4) * tick
+  const ty = Math.sin(ang + Math.PI / 4) * tick
+  const vertical = Math.abs(x2 - x1) < Math.abs(y2 - y1)
+  const textW = Math.max(22, String(dim.label).length * 6.6)
+  const gap = len > textW + 16 ? textW : 0
+  const mx = (x1 + x2) / 2
+  const my = (y1 + y2) / 2
+  const labelX = mx + (gap ? 0 : -uy * 11)
+  const labelY = my + (gap ? 0 : ux * 11)
+  const ax1 = X(dim.ax ?? dim.x1)
+  const ay1 = Y(dim.az ?? dim.z1)
+  const ax2 = X(dim.bx ?? dim.x2)
+  const ay2 = Y(dim.bz ?? dim.z2)
+  return (
+    <g stroke="#292524" fill="#1c1917" strokeWidth={0.9}>
+      {Math.hypot(ax1 - x1, ay1 - y1) > 1.5 && <line x1={ax1} y1={ay1} x2={x1} y2={y1} stroke="#a8a29e" strokeWidth={0.55} />}
+      {Math.hypot(ax2 - x2, ay2 - y2) > 1.5 && <line x1={ax2} y1={ay2} x2={x2} y2={y2} stroke="#a8a29e" strokeWidth={0.55} />}
+      <line x1={x1} y1={y1} x2={mx - ux * gap / 2} y2={my - uy * gap / 2} />
+      <line x1={mx + ux * gap / 2} y1={my + uy * gap / 2} x2={x2} y2={y2} />
+      <line x1={x1 - tx} y1={y1 - ty} x2={x1 + tx} y2={y1 + ty} />
+      <line x1={x2 - tx} y1={y2 - ty} x2={x2 + tx} y2={y2 + ty} />
+      <text
+        x={labelX}
+        y={labelY}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fontSize={11}
+        stroke="none"
+        transform={vertical ? `rotate(-90 ${labelX} ${labelY})` : undefined}
+      >
+        {dim.label}
+      </text>
+    </g>
+  )
 }
 
 function FixtureMark({ type, w, d }) {
   const stroke = '#1c1917'
-  const sw = 1.2
+  const sw = 1.05
   const box = { fill: '#fff', stroke, strokeWidth: sw }
   if (type === 'toilet') {
     return (
@@ -275,6 +286,7 @@ export default function FloorPlanApp() {
   const history = useRef([])
   const dragBefore = useRef(null)
   const dragId = useRef(null)
+  const dragLabel = useRef(null)
   const hostRef = useRef(null)
   const svgRef = useRef(null)
 
@@ -353,11 +365,13 @@ export default function FloorPlanApp() {
     const world = toWorld(event)
     setCursor(world)
     if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z))
+    if (dragLabel.current) setPlan((current) => moveRoomLabel(current, dragLabel.current, world.x, world.z))
   }
 
   const onPointerUp = () => {
-    if (dragId.current && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+    if ((dragId.current || dragLabel.current) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
     dragId.current = null
+    dragLabel.current = null
     dragBefore.current = null
   }
 
@@ -464,6 +478,7 @@ export default function FloorPlanApp() {
     group.items.push(item)
   })
   const totalArea = (plan.rooms || []).reduce((sum, item) => sum + item.area, 0)
+  const dims = dimensionChains(plan)
   const liveEnd = draft && snappedCursor ? snappedCursor : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const status = liveEnd
@@ -478,7 +493,7 @@ export default function FloorPlanApp() {
             ? 'Ovi: napsauta seinää'
             : tool === 'window'
               ? 'Ikkuna: napsauta seinää'
-              : 'Valitse huone tai kaluste. Hiiren oikea painike avaa valikon.'
+              : 'Valitse huone tai kaluste. Vedä huoneen nimeä. Hiiren oikea painike avaa valikon.'
 
   const px = (metres) => metres * layout.scale * k
 
@@ -556,6 +571,12 @@ export default function FloorPlanApp() {
                 onContextMenu={(event) => event.preventDefault()}
                 style={{ display: 'block', cursor: tool === 'select' && !placing ? 'default' : 'crosshair', touchAction: 'none' }}
               >
+                <defs>
+                  <pattern id="poche" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <rect width="5" height="5" fill="#241f1c" />
+                    <line x1="0" y1="0" x2="0" y2="5" stroke="#0c0a09" strokeWidth="1.35" />
+                  </pattern>
+                </defs>
                 <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.4} />
                 <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
                 {(plan.rooms || []).map((item) => (
@@ -571,43 +592,28 @@ export default function FloorPlanApp() {
                   <polygon
                     key={`${wall.id}-${index}`}
                     points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
-                    fill={wall.kind === 'exterior' ? '#1c1917' : '#57534e'}
+                    fill={wall.kind === 'exterior' ? 'url(#poche)' : '#6b6560'}
                   />
                 )))}
                 {(plan.openings || []).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
                   if (!wall) return null
-                  const fig = openingFigures(wall, opening)
-                  if (opening.kind === 'window') {
-                    const glass = [0.45, -0.45].map((factor) => {
-                      const a = along(wall, fig.from)
-                      const b = along(wall, fig.to)
-                      return {
-                        x1: a.x + fig.nx * fig.half * factor,
-                        z1: a.z + fig.nz * fig.half * factor,
-                        x2: b.x + fig.nx * fig.half * factor,
-                        z2: b.z + fig.nz * fig.half * factor,
-                      }
-                    })
+                  const fig = openingSymbol(wall, opening)
+                  if (fig.kind === 'window') {
                     return (
-                      <g key={opening.id}>
-                        <line x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} stroke="#1c1917" strokeWidth={1} />
-                        <line x1={X(fig.jambB[0].x)} y1={Y(fig.jambB[0].z)} x2={X(fig.jambB[1].x)} y2={Y(fig.jambB[1].z)} stroke="#1c1917" strokeWidth={1} />
-                        {glass.map((line, index) => (
-                          <line key={index} x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} stroke="#0369a1" strokeWidth={1.2} />
+                      <g key={opening.id} stroke="#1c1917" strokeWidth={1.15} fill="none">
+                        {fig.glass.map((line, index) => (
+                          <line key={index} x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} />
                         ))}
+                        <line x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} />
+                        <line x1={X(fig.jambB[0].x)} y1={Y(fig.jambB[0].z)} x2={X(fig.jambB[1].x)} y2={Y(fig.jambB[1].z)} />
                       </g>
                     )
                   }
                   return (
-                    <g key={opening.id}>
-                      <polyline
-                        points={fig.arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
-                        fill="none"
-                        stroke="#1c1917"
-                        strokeWidth={0.9}
-                      />
-                      <line x1={X(fig.hinge.x)} y1={Y(fig.hinge.z)} x2={X(fig.leaf.x)} y2={Y(fig.leaf.z)} stroke="#1c1917" strokeWidth={1.15} />
+                    <g key={opening.id} stroke="#1c1917" strokeWidth={1.15} fill="none">
+                      <polyline points={fig.arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} />
+                      <line x1={X(fig.hinge.x)} y1={Y(fig.hinge.z)} x2={X(fig.leaf.x)} y2={Y(fig.leaf.z)} />
                     </g>
                   )
                 })}
@@ -643,22 +649,34 @@ export default function FloorPlanApp() {
                     </g>
                   )
                 })}
-                {(plan.rooms || []).map((item) => (
-                  <g key={`label-${item.id}`} style={{ pointerEvents: 'none' }}>
-                    <text data-testid="room-label" data-name={item.name} x={X(item.cx)} y={Y(item.cz) - 2} textAnchor="middle" fontSize={13} fontWeight={700} fill="#1c1917">{item.name}</text>
-                    <text x={X(item.cx)} y={Y(item.cz) + 14} textAnchor="middle" fontSize={11} fill="#44403c">{formatArea(item.area)}</text>
-                  </g>
-                ))}
+                {(plan.rooms || []).map((item) => {
+                  const label = roomLabelPoint(item, plan.fixtures, plan.openings, plan.walls)
+                  return (
+                    <g
+                      key={`label-${item.id}`}
+                      data-testid="room-label"
+                      data-name={item.name}
+                      style={{ pointerEvents: tool === 'select' && !placing ? 'auto' : 'none', cursor: 'move' }}
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) return
+                        event.stopPropagation()
+                        setSelectedRoom(item.id)
+                        setSelectedFixture(null)
+                        dragLabel.current = item.id
+                        dragBefore.current = plan
+                      }}
+                    >
+                      <rect x={X(label.x) - 46} y={Y(label.z) - 16} width={92} height={34} fill="transparent" />
+                      <text x={X(label.x)} y={Y(label.z) - 2} textAnchor="middle" fontSize={13} fontWeight={700} fill="#1c1917">{item.name}</text>
+                      <text x={X(label.x)} y={Y(label.z) + 13} textAnchor="middle" fontSize={11} fill="#44403c">{formatArea(item.area)}</text>
+                    </g>
+                  )
+                })}
                 {plan.walls.length > 0 && (
-                  <g style={{ pointerEvents: 'none' }}>
-                    <line x1={X(layout.building.minX)} y1={Y(layout.building.maxZ) + 22} x2={X(layout.building.maxX)} y2={Y(layout.building.maxZ) + 22} stroke="#44403c" strokeWidth={0.8} />
-                    <line x1={X(layout.building.minX)} y1={Y(layout.building.maxZ) + 16} x2={X(layout.building.minX)} y2={Y(layout.building.maxZ) + 28} stroke="#44403c" strokeWidth={0.8} />
-                    <line x1={X(layout.building.maxX)} y1={Y(layout.building.maxZ) + 16} x2={X(layout.building.maxX)} y2={Y(layout.building.maxZ) + 28} stroke="#44403c" strokeWidth={0.8} />
-                    <text x={(X(layout.building.minX) + X(layout.building.maxX)) / 2} y={Y(layout.building.maxZ) + 36} textAnchor="middle" fontSize={11} fill="#1c1917">{formatMm(layout.worldW)}</text>
-                    <line x1={X(layout.building.maxX) + 22} y1={Y(layout.building.minZ)} x2={X(layout.building.maxX) + 22} y2={Y(layout.building.maxZ)} stroke="#44403c" strokeWidth={0.8} />
-                    <line x1={X(layout.building.maxX) + 16} y1={Y(layout.building.minZ)} x2={X(layout.building.maxX) + 28} y2={Y(layout.building.minZ)} stroke="#44403c" strokeWidth={0.8} />
-                    <line x1={X(layout.building.maxX) + 16} y1={Y(layout.building.maxZ)} x2={X(layout.building.maxX) + 28} y2={Y(layout.building.maxZ)} stroke="#44403c" strokeWidth={0.8} />
-                    <text x={X(layout.building.maxX) + 34} y={(Y(layout.building.minZ) + Y(layout.building.maxZ)) / 2} textAnchor="middle" fontSize={11} fill="#1c1917" transform={`rotate(90 ${X(layout.building.maxX) + 34} ${(Y(layout.building.minZ) + Y(layout.building.maxZ)) / 2})`}>{formatMm(layout.worldH)}</text>
+                  <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
+                    {dims.rooms.map((dim, index) => <DimLine key={`room-${index}-${dim.label}`} dim={dim} offset={0.4} X={X} Y={Y} />)}
+                    {dims.chains.map((dim, index) => <DimLine key={`chain-${index}-${dim.label}`} dim={dim} offset={0.72} X={X} Y={Y} />)}
+                    {dims.overall.map((dim, index) => <DimLine key={`overall-${index}`} dim={dim} offset={1.4} X={X} Y={Y} />)}
                   </g>
                 )}
                 {liveEnd && (
@@ -667,6 +685,30 @@ export default function FloorPlanApp() {
                     <text x={(X(draft.x) + X(liveEnd.x)) / 2} y={(Y(draft.z) + Y(liveEnd.z)) / 2 - 8} textAnchor="middle" fontSize={12} fontWeight={700} fill="#0f766e">{formatMm(liveLength)}</text>
                   </g>
                 )}
+                <g style={{ pointerEvents: 'none' }} data-testid="north-arrow">
+                  {(() => {
+                    const ax = sheet.x + sheet.w - 52
+                    const ay = sheet.y + 48
+                    const metres = layout.worldW >= 8 && layout.scale * 5 <= layout.title.w - 8 ? 5 : 2
+                    const bar = metres * layout.scale * k
+                    const bx = sheet.x + layout.title.x * k
+                    const by = sheet.y + layout.title.y * k - 36
+                    return (
+                      <g>
+                        <circle cx={ax} cy={ay} r={15} fill="#fff" stroke="#1c1917" strokeWidth={0.8} />
+                        <polygon points={`${ax},${ay - 10} ${ax + 4},${ay + 5} ${ax},${ay + 2} ${ax - 4},${ay + 5}`} fill="#1c1917" />
+                        <text x={ax} y={ay - 20} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1c1917">N</text>
+                        <g data-testid="scale-bar">
+                          <text x={bx} y={by - 5} fontSize={11} fill="#1c1917">0</text>
+                          <text x={bx + bar} y={by - 5} textAnchor="end" fontSize={11} fill="#1c1917">{metres} m</text>
+                          {Array.from({ length: metres }, (_, index) => (
+                            <rect key={index} x={bx + (bar / metres) * index} y={by} width={bar / metres} height={7} fill={index % 2 ? '#fbfaf7' : '#1c1917'} stroke="#1c1917" strokeWidth={0.6} />
+                          ))}
+                        </g>
+                      </g>
+                    )
+                  })()}
+                </g>
                 <g style={{ pointerEvents: 'none' }}>
                   {(() => {
                     const tx = sheet.x + (layout.title.x * k)

@@ -10,7 +10,9 @@ import {
   materialOf,
   planBounds,
   pointInPolygon,
+  roofFaces,
   roofModel,
+  roofOutline,
   segmentLength,
   wallPieces,
   wallThickness,
@@ -188,64 +190,74 @@ function FloorMesh({ room }) {
 }
 
 function roofGeometry(model) {
-  const oh = model.overhang
-  const x0 = model.minX - oh
-  const x1 = model.maxX + oh
-  const z0 = model.minZ - oh
-  const z1 = model.maxZ + oh
-  const y0 = model.wallHeight
-  const y1 = model.wallHeight + model.rise
   const positions = []
-  const tri = (a, b, c) => {
-    ;[a, b, c].forEach((point) => positions.push(point[0], point[1], point[2]))
-  }
-  if (model.type === 'flat') {
-    const t = model.rise
-    const yb = y0
-    const yt = y0 + t
-    const corners = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]]
-    const face = (y, flip) => {
-      const pts = corners.map(([x, z]) => [x, y, z])
-    if (flip) {
-      tri(pts[0], pts[2], pts[1])
-      tri(pts[0], pts[3], pts[2])
-    } else {
-      tri(pts[0], pts[1], pts[2])
-      tri(pts[0], pts[2], pts[3])
-    }
-    }
-    face(yt, false)
-    face(yb, true)
-    tri([x0, yb, z0], [x0, yt, z0], [x1, yt, z0]); tri([x0, yb, z0], [x1, yt, z0], [x1, yb, z0])
-    tri([x1, yb, z1], [x1, yt, z1], [x0, yt, z1]); tri([x1, yb, z1], [x0, yt, z1], [x0, yb, z1])
-    tri([x0, yb, z1], [x0, yt, z1], [x0, yt, z0]); tri([x0, yb, z1], [x0, yt, z0], [x0, yb, z0])
-    tri([x1, yb, z0], [x1, yt, z0], [x1, yt, z1]); tri([x1, yb, z0], [x1, yt, z1], [x1, yb, z1])
-  } else if (model.alongX) {
-    const zm = (model.minZ + model.maxZ) / 2
-    tri([x0, y0, z0], [x1, y0, z0], [x1, y1, zm]); tri([x0, y0, z0], [x1, y1, zm], [x0, y1, zm])
-    tri([x0, y0, z1], [x0, y1, zm], [x1, y1, zm]); tri([x0, y0, z1], [x1, y1, zm], [x1, y0, z1])
-    tri([x0, y0, z0], [x0, y1, zm], [x0, y0, z1])
-    tri([x1, y0, z1], [x1, y1, zm], [x1, y0, z0])
-  } else {
-    const xm = (model.minX + model.maxX) / 2
-    tri([x0, y0, z0], [x0, y0, z1], [xm, y1, z1]); tri([x0, y0, z0], [xm, y1, z1], [xm, y1, z0])
-    tri([x1, y0, z0], [xm, y1, z0], [xm, y1, z1]); tri([x1, y0, z0], [xm, y1, z1], [x1, y0, z1])
-    tri([x0, y0, z0], [xm, y1, z0], [x1, y0, z0])
-    tri([x0, y0, z1], [x1, y0, z1], [xm, y1, z1])
-  }
+  roofFaces(model).forEach((face) => {
+    face.forEach((point) => positions.push(point[0], point[1], point[2]))
+  })
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
   geometry.computeVertexNormals()
   return geometry
 }
 
+function roofEdgeSpecs(model) {
+  return roofOutline(model).map((edge) => {
+    const a = new THREE.Vector3(...edge.a)
+    const b = new THREE.Vector3(...edge.b)
+    const length = Math.max(0.02, a.distanceTo(b))
+    const mid = a.clone().add(b).multiplyScalar(0.5)
+    const direction = b.clone().sub(a).normalize()
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction)
+    return { position: mid.toArray(), quaternion: quaternion.toArray(), length }
+  })
+}
+
+function framedCamera(plan, aspect) {
+  const model = roofModel(plan)
+  const box = planBounds(plan)
+  const target = new THREE.Vector3((box.minX + box.maxX) / 2, 1.25, (box.minZ + box.maxZ) / 2)
+  const points = []
+  roofOutline(model).forEach((edge) => {
+    points.push(new THREE.Vector3(...edge.a), new THREE.Vector3(...edge.b))
+  })
+  ;[
+    [box.minX, 0, box.minZ],
+    [box.maxX, 0, box.minZ],
+    [box.maxX, 0, box.maxZ],
+    [box.minX, 0, box.maxZ],
+  ].forEach((point) => points.push(new THREE.Vector3(...point)))
+  const dir = new THREE.Vector3(model.alongX ? 1.05 : 0.78, 0.56, model.alongX ? 0.74 : 1.05).normalize()
+  const cam = new THREE.PerspectiveCamera(30, Math.max(0.7, aspect || 1.2), 0.08, 400)
+  let lo = 8
+  let hi = 96
+  for (let i = 0; i < 22; i += 1) {
+    const dist = (lo + hi) / 2
+    cam.position.copy(target).addScaledVector(dir, dist)
+    cam.up.set(0, 1, 0)
+    cam.lookAt(target)
+    cam.updateProjectionMatrix()
+    cam.updateMatrixWorld()
+    const fits = points.every((point) => {
+      const projected = point.clone().project(cam)
+      return projected.z < 1 && projected.x > -0.82 && projected.x < 0.82 && projected.y > -0.78 && projected.y < 0.78
+    })
+    if (fits) hi = dist
+    else lo = dist
+  }
+  return {
+    position: target.clone().addScaledVector(dir, hi * 1.06).toArray(),
+    target: target.toArray(),
+  }
+}
+
 function RoofMesh({ plan, mode }) {
-  if (mode === 'hidden') return null
   const model = roofModel(plan)
   const finish = materialOf('roof', plan.roofId)
-  const map = mode === 'solid' ? finishTexture('roof', finish.id) : null
-  const opacity = mode === 'ghost' ? 0.2 : 1
-  const geom = useMemo(() => roofGeometry(model), [model])
+  const ghost = mode === 'ghost'
+  const map = ghost ? null : finishTexture('roof', finish.id)
+  const key = [model.type, model.minX, model.maxX, model.minZ, model.maxZ, model.rise, model.overhang, model.alongX, model.wallHeight].join(':')
+  const geom = useMemo(() => roofGeometry(roofModel(plan)), [key])
+  const edgeSpecs = useMemo(() => roofEdgeSpecs(roofModel(plan)), [key])
   const box = planBounds(plan)
   const ceiling = useMemo(() => {
     const shape = new THREE.Shape()
@@ -258,27 +270,30 @@ function RoofMesh({ plan, mode }) {
     geometry.rotateX(-Math.PI / 2)
     return geometry
   }, [box.minX, box.maxX, box.minZ, box.maxZ])
+  if (mode === 'hidden') return null
   return (
     <group>
       <mesh geometry={geom}>
         <meshLambertMaterial
-          color={finish.color}
+          color={ghost ? '#94a3b8' : finish.color}
           map={map}
           side={THREE.DoubleSide}
-          transparent={opacity < 1}
-          opacity={opacity}
-          depthWrite={opacity > 0.9}
+          transparent={ghost}
+          opacity={ghost ? 0.15 : 1}
+          depthWrite={!ghost}
         />
       </mesh>
-      <mesh geometry={ceiling} position={[0, WALL_HEIGHT - 0.02, 0]}>
-        <meshLambertMaterial
-          color="#f8fafc"
-          side={THREE.DoubleSide}
-          transparent={opacity < 1}
-          opacity={opacity < 1 ? 0.04 : 0.96}
-          depthWrite={opacity > 0.9}
-        />
-      </mesh>
+      {edgeSpecs.map((edge, index) => (
+        <mesh key={index} position={edge.position} quaternion={edge.quaternion}>
+          <boxGeometry args={[0.045, edge.length, 0.045]} />
+          <meshBasicMaterial color="#1e293b" />
+        </mesh>
+      ))}
+      {!ghost && (
+        <mesh geometry={ceiling} position={[0, WALL_HEIGHT - 0.02, 0]}>
+          <meshLambertMaterial color="#f8fafc" side={THREE.DoubleSide} />
+        </mesh>
+      )}
     </group>
   )
 }
@@ -343,10 +358,11 @@ function FixtureBody({ type, w, d }) {
   if (type === 'basin' || type === 'sink') {
     return (
       <group>
-        {box([w, 0.16, d], [0, 0.82, 0], '#f8fafc')}
-        {box([w * 0.55, 0.08, d * 0.48], [0, 0.86, 0.02], '#cbd5e1')}
-        {box([0.08, 0.78, 0.08], [-w * 0.32, 0.4, d * 0.2], '#e7e5e4')}
-        {box([0.08, 0.78, 0.08], [w * 0.32, 0.4, d * 0.2], '#e7e5e4')}
+        {box([w, 0.08, d], [0, 0.86, 0], '#f8fafc')}
+        {box([w, 0.04, 0.028], [0, 0.835, d * 0.48], '#94a3b8')}
+        {box([w * 0.55, 0.07, d * 0.42], [0, 0.8, 0.01], '#cbd5e1')}
+        {box([0.08, 0.82, d * 0.72], [-w * 0.42, 0.42, 0], '#e7e5e4')}
+        {box([0.08, 0.82, d * 0.72], [w * 0.42, 0.42, 0], '#e7e5e4')}
       </group>
     )
   }
@@ -366,10 +382,44 @@ function FixtureBody({ type, w, d }) {
   if (type === 'fridge') return box([w, 1.8, d], [0, 0.9, 0], '#f8fafc')
   if (type === 'wardrobe') return box([w, 2.1, d], [0, 1.05, 0], '#e7e5e4')
   if (type === 'dishwasher') return box([w, 0.86, d], [0, 0.43, 0], '#e2e8f0')
-  if (type === 'cabinet' || type === 'island') return box([w, 0.9, d], [0, 0.45, 0], '#f5f5f4')
+  if (type === 'cabinet' || type === 'island') {
+    return (
+      <group>
+        {box([w * 0.96, 0.78, d * 0.92], [0, 0.39, 0.02], '#f5f5f4')}
+        {box([w, 0.045, d], [0, 0.84, 0], '#e7e5e4')}
+        {box([w, 0.028, 0.035], [0, 0.8, d * 0.48], '#a8a29e')}
+      </group>
+    )
+  }
   if (type === 'bath') return box([w, 0.5, d], [0, 0.28, 0], '#f8fafc')
-  if (type === 'bench') return box([w, 0.12, d], [0, 0.72, 0], '#d6c4a8')
-  if (type === 'heater') return box([w, 0.7, d], [0, 0.4, 0], '#44403c')
+  if (type === 'bench') {
+    return (
+      <group>
+        {[0, 1, 2, 3].map((index) => (
+          <group key={index}>
+            {box([w, 0.045, d * 0.14], [0, 0.72, -d * 0.36 + index * d * 0.24], '#d6c4a8')}
+          </group>
+        ))}
+        {box([0.06, 0.7, 0.06], [-w * 0.42, 0.35, -d * 0.32], '#a89070')}
+        {box([0.06, 0.7, 0.06], [w * 0.42, 0.35, -d * 0.32], '#a89070')}
+        {box([0.06, 0.7, 0.06], [-w * 0.42, 0.35, d * 0.32], '#a89070')}
+        {box([0.06, 0.7, 0.06], [w * 0.42, 0.35, d * 0.32], '#a89070')}
+      </group>
+    )
+  }
+  if (type === 'heater') {
+    return (
+      <group>
+        {box([w, 0.55, d], [0, 0.28, 0], '#44403c')}
+        {[[-0.1, -0.08], [0.08, -0.06], [0, 0.08], [0.1, 0.05], [-0.08, 0.07]].map(([x, z], index) => (
+          <mesh key={index} position={[x, 0.64, z]}>
+            <sphereGeometry args={[0.07, 12, 10]} />
+            <meshLambertMaterial color={index % 2 ? '#78716c' : '#57534e'} />
+          </mesh>
+        ))}
+      </group>
+    )
+  }
   if (type === 'shower') {
     return (
       <group>
@@ -398,19 +448,16 @@ function FrameCamera({ plan, fitToken, controlsRef }) {
   const planRef = useRef(plan)
   planRef.current = plan
   useLayoutEffect(() => {
-    const box = planBounds(planRef.current)
-    const cx = (box.minX + box.maxX) / 2
-    const cz = (box.minZ + box.maxZ) / 2
-    const span = Math.max(box.maxX - box.minX, box.maxZ - box.minZ, 8)
-    camera.position.set(cx + span * 0.78, span * 1.42, cz + span * 0.82)
-    camera.fov = 36
+    const view = framedCamera(planRef.current, camera.aspect || 1.2)
+    camera.position.set(...view.position)
+    camera.fov = 30
     camera.near = 0.08
-    camera.far = 240
+    camera.far = 400
     camera.updateProjectionMatrix()
-    camera.lookAt(cx, 1.05, cz)
+    camera.lookAt(...view.target)
     const controls = controlsRef.current
     if (controls) {
-      controls.target.set(cx, 1.05, cz)
+      controls.target.set(...view.target)
       controls.update()
     }
   }, [fitToken, camera, controlsRef])
@@ -445,7 +492,7 @@ export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0 }) {
       <OrbitControls
         ref={controlsRef}
         makeDefault
-        target={[cx, 1.05, cz]}
+        target={[cx, 1.25, cz]}
         maxPolarAngle={Math.PI / 2.08}
         enableDamping={false}
       />
