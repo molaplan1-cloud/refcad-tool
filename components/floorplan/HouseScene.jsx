@@ -7,7 +7,6 @@ import * as THREE from 'three'
 import {
   claddingOf,
   fixtureTemplate,
-  formatArea,
   materialOf,
   planBounds,
   pointInPolygon,
@@ -27,6 +26,7 @@ import Services3D from './Services3D'
 import YardScene from './YardScene'
 import { hasYard, sceneBounds } from '@/lib/yard'
 import { layerVisible } from '@/lib/services'
+import { layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { chimneyKind, chimneyTop, drawingOf } from '@/lib/chimney'
 
 const textureCache = new Map()
@@ -925,11 +925,17 @@ function FixtureMesh({ fixture, plan, selected, hovered }) {
 }
 
 function RoomLabels({ plan }) {
-  return visibleRooms(plan).filter((room) => room.showLabel !== false).map((room) => (
-    <Html key={room.id} position={[room.cx, 0.12, room.cz]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
-      <div style={{ textAlign: 'center', color: '#1c1917', fontFamily: 'sans-serif', textShadow: '0 1px 2px #fff', whiteSpace: 'nowrap' }}>
-        <div style={{ fontWeight: 700, fontSize: 13 }}>{room.name}</div>
-        <div style={{ fontSize: 11 }}>{formatArea(room.area)}</div>
+  const display = normalizeDisplay(plan.display)
+  const labels = layoutRoomLabels(visibleRooms(plan), {
+    ratio: 100,
+    showNames: display.roomNames,
+    showAreas: display.areas,
+  })
+  return labels.map((label) => (
+    <Html key={label.id} position={[label.x, 0.12, label.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+      <div style={{ textAlign: 'center', color: '#1c1917', fontFamily: 'sans-serif', whiteSpace: 'nowrap' }}>
+        {label.text && <div style={{ fontWeight: 700, fontSize: 12 }}>{label.text}</div>}
+        {label.area && <div style={{ fontSize: 10, color: '#44403c' }}>{label.area}</div>}
       </div>
     </Html>
   ))
@@ -1218,7 +1224,7 @@ export default function HouseScene({
         <OpeningMesh key={opening.id} plan={plan} opening={opening} selected={selected} hovered={hovered} />
       ))}
       <RoofMesh plan={plan} mode={roofMode} selected={selected} hovered={hovered} />
-      {(plan.fixtures || []).map((fixture) => (
+      {normalizeDisplay(plan.display).fixtures && (plan.fixtures || []).map((fixture) => (
         <FixtureMesh key={fixture.id} plan={plan} fixture={fixture} selected={selected} hovered={hovered} />
       ))}
       <Services3D plan={plan} selected={selected} hovered={hovered} />
