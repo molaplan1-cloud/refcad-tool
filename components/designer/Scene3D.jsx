@@ -176,7 +176,7 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
                   <meshStandardMaterial color="#1c1917" metalness={0.6} roughness={0.3} />
                 </mesh>
               ))}
-              <group rotation={[0, -0.42, 0]}>
+              <group rotation={[0, 0.16, 0]}>
                 <DoorLeaf w={w} h={h} glass={style === 'glass'} />
                 <DoorPart part="handle" args={[0.025, 0.22, 0.035]} position={[w * 0.78, h * 0.48, 0.055]} />
                 <DoorPart part="handle" args={[0.1, 0.022, 0.03]} position={[w * 0.78, h * 0.58, 0.05]} />
@@ -184,9 +184,9 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
             </>
           )}
           {style === 'sliding' && (
-            <group position={[w * 0.62, 0, 0.03]}>
-              <DoorPart part="leaf" args={[w - 0.04, h - 0.08, 0.04]} position={[w / 2, h / 2, 0.02]} />
-              <DoorPart part="handle" args={[0.1, 0.22, 0.03]} position={[w * 0.5, h * 0.48, 0.05]} />
+            <group position={[w * 0.14, 0, 0.02]}>
+              <DoorPart part="leaf" args={[w - 0.08, h - 0.1, 0.04]} position={[w / 2, h / 2, 0]} />
+              <DoorPart part="handle" args={[0.1, 0.22, 0.03]} position={[w * 0.22, h * 0.48, 0.04]} />
             </group>
           )}
           {(style === 'double' || style === 'impact') && (
@@ -201,9 +201,9 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
           )}
           {style === 'sectional' && (
             <group>
-              <DoorPart part="leaf" args={[w - 0.06, h - 0.08, 0.045]} position={[w / 2, h / 2, 0.02]} />
+              <DoorPart part="leaf" args={[w - 0.08, h - 0.1, 0.04]} position={[w / 2, h / 2, 0.01]} />
               {Array.from({ length: 5 }, (_, index) => (
-                <DoorPart key={`panel-${index}`} part="seam" args={[w - 0.1, 0.015, 0.02]} position={[w / 2, ((index + 1) / 6) * h, 0.05]} />
+                <DoorPart key={`panel-${index}`} part="seam" args={[w - 0.12, 0.035, 0.012]} position={[w / 2, ((index + 1) / 6) * h, 0.036]} />
               ))}
             </group>
           )}
