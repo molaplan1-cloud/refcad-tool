@@ -28,6 +28,7 @@ import {
   familyHouse,
   formatArea,
   formatMm,
+  formatQuantity,
   hitTest,
   materialOf,
   materialsList,
@@ -54,6 +55,7 @@ import {
   claddingOf,
 } from '@/lib/floorplan'
 import { wallFigures } from '@/lib/wall-outline'
+import { layerFaces, resolveWallStructure, structureCatalog } from '@/lib/structures'
 import { FixtureSymbol } from './FixtureSymbol'
 import { FURNITURE_GROUPS, layoutFor, resolveFixture, scheduleRows, suggestionsFor } from '@/lib/furniture'
 import { fixtureServiceKey, syncFixtureServices } from '@/lib/fixtureServices'
@@ -423,6 +425,51 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
   )
 }
 
+function HatchDefs() {
+  const pattern = (id, w, h, node) => (
+    <pattern id={id} width={w} height={h} patternUnits="userSpaceOnUse">{node}</pattern>
+  )
+  return (
+    <>
+      {pattern('hatch-insulation', 10, 8, <>
+        <rect width="10" height="8" fill="#fde68a" />
+        <polyline points="0,6 2.5,2 5,6 7.5,2 10,6" fill="none" stroke="#d97706" strokeWidth="0.8" />
+      </>)}
+      {pattern('hatch-brick', 12, 8, <>
+        <rect width="12" height="8" fill="#c2410c" />
+        <path d="M0 0 H12 M0 4 H12 M0 8 H12 M0 0 V4 M6 4 V8" fill="none" stroke="#7c2d12" strokeWidth="0.45" />
+      </>)}
+      {pattern('hatch-concrete', 8, 8, <>
+        <rect width="8" height="8" fill="#d6d3d1" />
+        <circle cx="2" cy="2" r="0.6" fill="#78716c" />
+        <circle cx="6" cy="5" r="0.6" fill="#57534e" />
+      </>)}
+      {pattern('hatch-wood', 8, 8, <>
+        <rect width="8" height="8" fill="#e7d3b0" />
+        <path d="M0 2 Q4 1 8 2 M0 6 Q4 5 8 6" fill="none" stroke="#a16207" strokeWidth="0.55" />
+      </>)}
+      {pattern('hatch-gypsum', 8, 8, <rect width="8" height="8" fill="#fafaf9" />)}
+      {pattern('hatch-membrane', 8, 8, <rect width="8" height="8" fill="#bfdbfe" />)}
+      {pattern('hatch-vent', 8, 8, <>
+        <rect width="8" height="8" fill="#ffffff" />
+        <path d="M0 4 H8" stroke="#a8a29e" strokeWidth="0.4" strokeDasharray="1.2 1" />
+      </>)}
+      {pattern('hatch-render', 8, 8, <rect width="8" height="8" fill="#e7e5e4" />)}
+      {pattern('hatch-board', 8, 8, <rect width="8" height="8" fill="#e5e7eb" />)}
+      {pattern('hatch-block', 10, 8, <>
+        <rect width="10" height="8" fill="#d4d4d8" />
+        <path d="M0 0 H10 M0 8 H10 M0 0 V8 M5 0 V8" fill="none" stroke="#71717a" strokeWidth="0.4" />
+      </>)}
+      {pattern('hatch-gravel', 8, 8, <>
+        <rect width="8" height="8" fill="#d6d3d1" />
+        <circle cx="2" cy="3" r="0.9" fill="#78716c" />
+        <circle cx="5" cy="6" r="0.7" fill="#57534e" />
+        <circle cx="7" cy="2" r="0.6" fill="#a8a29e" />
+      </>)}
+    </>
+  )
+}
+
 function WallOutlines({ plan, X, Y, selectedIds = [] }) {
   const walls = (plan.walls || []).filter((wall) => !wall.hidden)
   const openings = (plan.openings || []).filter((opening) => !opening.hidden && walls.some((wall) => wall.id === opening.wallId))
@@ -435,12 +482,42 @@ function WallOutlines({ plan, X, Y, selectedIds = [] }) {
   const paint = (loops, fill) => loops.map((loop, index) => (
     <path key={`${loop.role}-${index}`} d={worldPath(loop.points, X, Y)} fill={fill} stroke="none" />
   ))
+  const pointsOf = (pts) => pts.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')
   return (
     <g data-testid="wall-outlines">
       {paint(figures.exterior, 'url(#poche)')}
       {paint(figures.interior, '#e7e5e4')}
       {paint(figures.insulation, 'rgba(214,211,209,0.9)')}
       {paint(figures.cladding, claddingOf(plan.exteriorId).color)}
+      {walls.map((wall) => {
+        const spec = resolveWallStructure(plan, wall)
+        if (!spec) return null
+        const faces = layerFaces(wall, walls, spec.layers)
+        const quads = wallQuads(wall, openings, walls, plan)
+        if (!faces.length || !quads.length) return null
+        const clipId = `hatch-clip-${wall.id}`
+        return (
+          <g key={`hatch-${wall.id}`} style={{ pointerEvents: 'none' }}>
+            <clipPath id={clipId}>
+              {quads.map((quad, index) => <polygon key={index} points={pointsOf(quad)} />)}
+            </clipPath>
+            <g clipPath={`url(#${clipId})`}>
+              {faces.map((face, index) => (
+                <polygon
+                  key={index}
+                  data-testid="structure-hatch"
+                  data-hatch={face.hatch}
+                  data-wall={wall.id}
+                  points={pointsOf(face.points)}
+                  fill={`url(#hatch-${face.hatch || 'gypsum'})`}
+                  stroke="#a8a29e"
+                  strokeWidth={0.25}
+                />
+              ))}
+            </g>
+          </g>
+        )
+      })}
       {figures.core.map((loop, index) => (
         <path
           key={`edge-${index}`}
@@ -456,6 +533,23 @@ function WallOutlines({ plan, X, Y, selectedIds = [] }) {
       {walls.filter((wall) => selectedIds.includes(wall.id)).flatMap((wall) => wallQuads(wall, openings, walls, plan).map((quad, index) => (
         <polygon key={`sel-${wall.id}-${index}`} points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} fill="rgba(15,118,110,0.18)" stroke="#0f766e" strokeWidth={2.6} />
       )))}
+      {walls.map((wall) => (
+        <line
+          key={`axis-${wall.id}`}
+          data-testid="wall-axis"
+          data-wall={wall.id}
+          data-kind={wall.kind}
+          data-thickness={thicknessOf(wall, plan)}
+          data-structure={wall.structureId || ''}
+          x1={X(wall.a.x)}
+          y1={Y(wall.a.z)}
+          x2={X(wall.b.x)}
+          y2={Y(wall.b.z)}
+          stroke="transparent"
+          strokeWidth={10}
+          style={{ pointerEvents: 'none' }}
+        />
+      ))}
     </g>
   )
 }
@@ -2041,6 +2135,7 @@ export default function FloorPlanApp() {
                     <rect width="5" height="5" fill="#3f3834" />
                     <line x1="0" y1="0" x2="0" y2="5" stroke="#2a241f" strokeWidth="0.6" />
                   </pattern>
+                  <HatchDefs />
                 </defs>
                 <g data-testid="plan-camera" transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
                 <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.4} />
@@ -2070,7 +2165,7 @@ export default function FloorPlanApp() {
                 {(plan.openings || []).filter((opening) => !opening.hidden).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
                   if (!wall || wall.hidden) return null
-                  const fig = openingSymbol(wall, opening)
+                  const fig = openingSymbol(wall, opening, plan)
                   const selectedOpening = picks.some((item) => item.kind === 'opening' && item.id === opening.id)
                   if (fig.kind === 'window') {
                     return (
@@ -2215,6 +2310,31 @@ export default function FloorPlanApp() {
                     {mark.code}
                   </text>
                 ))}
+                {sheetMode !== 'site' && display.structures && structureCatalog(plan).length > 0 && (
+                  <g data-testid="structure-legend" style={{ pointerEvents: 'none' }}>
+                    {(() => {
+                      const rows = structureCatalog(plan)
+                      const font = Math.max(8, 2.4 * k)
+                      const rowH = font + 4
+                      const widest = Math.max(...rows.map((row) => `${row.code}  ${row.name}  U ${Number(row.u).toFixed(2)}`.length), 16)
+                      const boxW = Math.min(sheet.w * 0.46, Math.max(168, widest * font * 0.58 + 16))
+                      const boxH = rowH * (rows.length + 1) + 8
+                      const x = sheet.x + 8 * k
+                      const y = Math.max(sheet.y + 8, sheet.y + sheet.h - boxH - 8 * k)
+                      return (
+                        <>
+                          <rect x={x} y={y} width={boxW} height={boxH} fill="#fbfaf7" stroke="#1c1917" strokeWidth={0.6} />
+                          <text x={x + 6} y={y + rowH} fontSize={font} fontWeight={700} fill="#1c1917">Rakennetyypit</text>
+                          {rows.map((row, index) => (
+                            <text key={row.key} data-testid="legend-row" data-code={row.code} x={x + 6} y={y + rowH * (index + 2)} fontSize={font} fill="#1c1917">
+                              {row.code}  {row.name}  U {Number(row.u).toFixed(2).replace('.', ',')}
+                            </text>
+                          ))}
+                        </>
+                      )
+                    })()}
+                  </g>
+                )}
                 {liveEnd && tool !== 'room' && (
                   <g style={{ pointerEvents: 'none' }}>
                     <line x1={X(draft.x)} y1={Y(draft.z)} x2={X(liveEnd.x)} y2={Y(liveEnd.z)} stroke="#0f766e" strokeWidth={1.5 / camera.zoom} strokeDasharray={`${6 / camera.zoom} ${4 / camera.zoom}`} />
@@ -2487,10 +2607,10 @@ export default function FloorPlanApp() {
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>MATERIAALILUETTELO</div>
           {rows.length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>Ei pintoja vielä.</div>}
           {rows.map((row) => (
-            <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
+            <div key={row.key} data-testid={row.group === 'structure' ? 'structure-bom' : undefined} data-code={row.code || undefined} data-unit={row.unit || undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
               <span style={{ width: 14, height: 14, borderRadius: 3, background: row.color, border: '1px solid #a8a29e', flexShrink: 0 }} />
-              <span style={{ flex: 1 }}>{row.roomName ? `${row.roomName}: ` : ''}{row.groupLabel}: {row.name}</span>
-              <span style={{ color: '#78716c' }}>{formatArea(row.area || 0)}</span>
+              <span style={{ flex: 1 }}>{row.group === 'structure' ? `${row.code} ${row.structureName}: ${row.name}` : `${row.roomName ? `${row.roomName}: ` : ''}${row.groupLabel}: ${row.name}`}</span>
+              <span style={{ color: '#78716c' }}>{row.unit ? formatQuantity(row.area || 0, row.unit) : formatArea(row.area || 0)}</span>
             </div>
           ))}
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '14px 0 8px' }}>SELITE</div>
