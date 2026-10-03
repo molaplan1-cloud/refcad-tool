@@ -94,6 +94,7 @@ import FacadeView from './FacadeView'
 import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import { ElectricPanel } from './ElectricPanel'
 import { HeatingPanel } from './HeatingPanel'
+import { COVER_TYPES } from '@/lib/covers'
 import YardLayer, { YARD_DRAW_TOOLS, yardToolLabel } from './YardLayer'
 import {
   BUILDINGS,
@@ -105,6 +106,7 @@ import {
   addObject,
   addPath,
   addPlant,
+  addCover,
   addTerrace,
   applyExampleYard,
   buildSitePdf,
@@ -1127,6 +1129,7 @@ export default function FloorPlanApp() {
     else if (yardTool === 'lawn' || yardTool === 'flowerbed') next = addBed(plan, points, yardTool)
     else if (yardTool === 'path' || yardTool === 'drive' || yardTool === 'parking') next = addPath(plan, points, { kind: yardTool })
     else if (yardTool === 'fence') next = addFence(plan, points, {})
+    else if (yardTool.startsWith('cover:')) next = addCover(plan, points, { kind: yardTool.slice(6) })
     else return
     commit(next)
     setYardPoints([])
@@ -1148,7 +1151,7 @@ export default function FloorPlanApp() {
         commit(addBuilding(plan, yardTool.slice(9), point.x, point.z))
         return
       }
-      const closed = yardTool === 'plot' || yardTool === 'terrace' || yardTool === 'lawn' || yardTool === 'flowerbed'
+      const closed = yardTool === 'plot' || yardTool === 'terrace' || yardTool === 'lawn' || yardTool === 'flowerbed' || yardTool.startsWith('cover:')
       if (closed && yardPoints.length >= 3 && segmentLength(point, yardPoints[0]) < Math.max(0.45, 16 / Math.max(ppm, 0.001))) {
         finishYard(yardPoints)
         return
@@ -1885,6 +1888,10 @@ export default function FloorPlanApp() {
             <select data-testid="yard-building-tool" value={yardTool?.startsWith('building:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
               <option value="">{t('yard.building')}</option>
               {BUILDINGS.map((item) => <option key={item.id} value={`building:${item.id}`}>{item.name}</option>)}
+            </select>
+            <select data-testid="yard-cover-tool" value={yardTool?.startsWith('cover:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
+              <option value="">{t('yard.cover')}</option>
+              {COVER_TYPES.map((item) => <option key={item.id} value={`cover:${item.id}`}>{t(`cover.${item.id}`)}</option>)}
             </select>
             </>
         )}
@@ -2651,7 +2658,7 @@ export default function FloorPlanApp() {
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>{t('bom.title')}</div>
           {rows.length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>{t('bom.empty')}</div>}
           {rows.map((row) => (
-            <div key={row.key} data-testid={row.group === 'structure' ? 'structure-bom' : undefined} data-code={row.code || undefined} data-unit={row.unit || undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
+            <div key={row.key} data-testid={row.group === 'structure' ? 'structure-bom' : row.group === 'cover' ? 'cover-bom' : undefined} data-code={row.code || undefined} data-unit={row.unit || undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
               <span style={{ width: 14, height: 14, borderRadius: 3, background: row.color, border: '1px solid #a8a29e', flexShrink: 0 }} />
               <span data-testid={row.group === 'plinth' ? 'plinth-bom' : 'bom-line'} data-code={row.code || ''} style={{ flex: 1 }}>{row.group === 'structure' ? `${row.code} ${text(locale, `struct.${row.structureId}`, row.structureName)}: ${text(locale, `layer.${row.materialId}`, row.name)}` : `${row.roomName ? `${row.roomName}: ` : ''}${text(locale, `group.${row.group}`, row.groupLabel)}: ${text(locale, `mat.${row.group}.${row.id}`, row.name)}${row.code ? ` ${row.code}` : ''}`}</span>
               <span style={{ color: '#78716c' }}>{row.unit ? `${num(row.area || 0, row.unit === 'm³' ? 2 : 1)} ${row.unit}` : `${num(row.area || 0, 1)} m²`}</span>

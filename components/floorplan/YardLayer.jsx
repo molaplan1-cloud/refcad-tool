@@ -1,5 +1,6 @@
 'use client'
 
+import { COVER_TYPES, coverPosts } from '@/lib/covers'
 import {
   BEDS,
   FENCE_KINDS,
@@ -263,6 +264,7 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
     beds: keep(source.beds),
     objects: keep(source.objects),
     buildings: keep(source.buildings),
+    covers: keep(source.covers),
     plot: source.plot?.hidden ? null : source.plot,
   }
   const metrics = plotMetrics(plan)
@@ -460,6 +462,34 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
           )}
         </g>
       ))}
+      {yard.covers.map((item) => {
+        const wall = (plan.walls || []).find((entry) => entry.id === item.wallId) || null
+        const posts = coverPosts(item, wall)
+        const mark = Math.max(4, px(item.postSize || 0.12))
+        const active = selected(selectedHit, 'covers', item.id)
+        return (
+          <g key={item.id} data-testid={`yard-cover-${item.kind}`}>
+            <polygon
+              points={pts(item.points, X, Y)}
+              fill={active ? 'rgba(15,118,110,0.08)' : 'none'}
+              stroke={active ? '#0f766e' : '#1c1917'}
+              strokeWidth={active ? sw + 0.7 : sw}
+              strokeDasharray="8 4"
+            />
+            {posts.map((post, index) => (
+              <rect
+                key={index}
+                x={X(post.x) - mark / 2}
+                y={Y(post.z) - mark / 2}
+                width={mark}
+                height={mark}
+                fill="#1c1917"
+                stroke="none"
+              />
+            ))}
+          </g>
+        )
+      })}
       {preview?.points?.length > 0 && (
         <polyline
           points={pts([...preview.points, ...(preview.cursor ? [preview.cursor] : [])], X, Y)}
@@ -499,6 +529,10 @@ export function yardToolLabel(tool) {
   if (tool.startsWith('plant:')) return `${plantSpec(tool.slice(6)).name}: napsauta paikka.`
   if (tool.startsWith('object:')) return `${objectSpec(tool.slice(7)).name}: napsauta paikka.`
   if (tool.startsWith('building:')) return `${buildingSpec(tool.slice(9)).name}: napsauta paikka.`
+  if (tool.startsWith('cover:')) {
+    const name = COVER_TYPES.find((item) => item.id === tool.slice(6))?.name || 'Katos'
+    return `${name}: piirrä suorakulmio tai monikulmio. Se voi tarttua seinään.`
+  }
   return 'Piha'
 }
 

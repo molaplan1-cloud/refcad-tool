@@ -1,5 +1,8 @@
 'use client'
 
+import { useMemo } from 'react'
+import * as THREE from 'three'
+import { coverMembers, normalizeCover, roofLook } from '@/lib/covers'
 import { buildingSpec, ensureYard, footprint, hasYard, objectSpec, plantSpec, yardBounds } from '@/lib/yard'
 
 function noop() {}
@@ -208,6 +211,150 @@ function RoofMesh({ w, d, height, roof }) {
   )
 }
 
+function memberMesh(a, b, width, depth, color, key, metal) {
+  const dx = b.x - a.x
+  const dy = (b.y || 0) - (a.y || 0)
+  const dz = b.z - a.z
+  const len = Math.hypot(dx, dy, dz)
+  if (len < 0.05) return null
+  const yaw = Math.atan2(dx, dz)
+  const pitch = -Math.atan2(dy, Math.hypot(dx, dz) || 1)
+  return (
+    <mesh key={key} position={[(a.x + b.x) / 2, ((a.y || 0) + (b.y || 0)) / 2, (a.z + b.z) / 2]} rotation={new THREE.Euler(pitch, yaw, 0, 'YXZ')}>
+      <boxGeometry args={[width, depth, len]} />
+      <meshStandardMaterial color={color} roughness={metal ? 0.35 : 0.62} metalness={metal ? 0.55 : 0.04} />
+    </mesh>
+  )
+}
+
+function sheetGeometry(points, lift = 0.03) {
+  if (!points || points.length < 3) return null
+  const positions = []
+  const origin = points[0]
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const a = points[i]
+    const b = points[i + 1]
+    positions.push(origin.x, origin.y + lift, origin.z, a.x, a.y + lift, a.z, b.x, b.y + lift, b.z)
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geo.computeVertexNormals()
+  return geo
+}
+
+function sideGeometry(beams, mode) {
+  if (!beams?.length || !mode || mode === 'none') return null
+  const positions = []
+  beams.forEach((beam) => {
+    const y0 = mode === 'curtain' ? Math.min(beam.a.y, beam.b.y) * 0.42 : 0.06
+    positions.push(
+      beam.a.x, y0, beam.a.z,
+      beam.b.x, y0, beam.b.z,
+      beam.b.x, beam.b.y, beam.b.z,
+      beam.a.x, y0, beam.a.z,
+      beam.b.x, beam.b.y, beam.b.z,
+      beam.a.x, beam.a.y, beam.a.z,
+    )
+  })
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geo.computeVertexNormals()
+  return geo
+}
+
+function CoverMesh({ plan, item, selected }) {
+  const cover = normalizeCover(item)
+  const wall = (plan.walls || []).find((entry) => entry.id === cover.wallId) || null
+  const members = coverMembers(cover, wall)
+  const look = roofLook(cover)
+  const pointKey = cover.points.map((point) => `${point.x},${point.z}`).join('|')
+  const roofGeo = useMemo(() => (look.slats ? null : sheetGeometry(members.roof, 0.045)), [look.slats, look.id, cover.pitch, cover.height, pointKey])
+  const sideGeo = useMemo(() => sideGeometry(members.beams, cover.sides), [cover.sides, cover.pitch, cover.height, pointKey])
+  if (cover.points.length < 3) return null
+  const pick = { kind: 'yard', collection: 'covers', id: cover.id, movable: false }
+  const metal = cover.frame === 'aluminium' || cover.frame === 'steel'
+  const frame = selected ? '#0f766e' : cover.frameColor
+  const center = cover.points.reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 })
+  center.x /= cover.points.length
+  center.z /= cover.points.length
+  const glass = look.transparent && (cover.roofing === 'glass' || cover.roofing === 'polycarbonate')
+  const sideTransparent = cover.sides === 'glazing' || cover.sides === 'sliding' || cover.sides === 'curtain'
+  const sideOpacity = cover.sides === 'curtain' ? 0.55 : cover.sides === 'sliding' ? 0.28 : 0.2
+  const sideColor = cover.sides === 'wall' ? '#E7E5E4' : cover.sides === 'curtain' ? '#D6D3D1' : '#E0F2FE'
+  return (
+    <group userData={{ pick }}>
+      {members.posts.map((post, index) => (
+        <mesh key={`post-${index}`} position={[post.x, cover.height / 2, post.z]}>
+          <boxGeometry args={[cover.postSize, cover.height, cover.postSize]} />
+          <meshStandardMaterial color={frame} roughness={metal ? 0.35 : 0.62} metalness={metal ? 0.55 : 0.04} />
+        </mesh>
+      ))}
+      {members.beams.map((beam, index) => memberMesh(beam.a, beam.b, Math.max(0.08, cover.postSize * 0.85), 0.1, frame, `beam-${index}`, metal))}
+      {members.rafters.map((rafter, index) => memberMesh(
+        rafter.a,
+        rafter.b,
+        look.slats ? 0.12 : 0.05,
+        look.slats ? 0.035 : 0.07,
+        frame,
+        `rafter-${index}`,
+        metal,
+      ))}
+      {roofGeo && (
+        <mesh geometry={roofGeo}>
+          {glass ? (
+            <meshPhysicalMaterial
+              color={look.color || '#DBEAFE'}
+              transparent
+              opacity={Math.min(0.72, (look.opacity || 0.28) + 0.18)}
+              transmission={0.72}
+              thickness={0.04}
+              roughness={cover.roofing === 'glass' ? 0.04 : 0.16}
+              metalness={0}
+              ior={1.42}
+              side={THREE.DoubleSide}
+              depthWrite={false}
+            />
+          ) : (
+            <meshStandardMaterial
+              color={look.color || '#334155'}
+              transparent={Boolean(look.transparent)}
+              opacity={look.transparent ? (look.opacity || 0.9) : 1}
+              roughness={cover.roofing === 'metal' ? 0.42 : 0.8}
+              metalness={cover.roofing === 'metal' ? 0.35 : 0}
+              side={THREE.DoubleSide}
+              depthWrite={!look.transparent}
+            />
+          )}
+        </mesh>
+      )}
+      {sideGeo && (
+        <mesh geometry={sideGeo}>
+          <meshStandardMaterial
+            color={sideColor}
+            transparent={sideTransparent}
+            opacity={sideTransparent ? sideOpacity : 1}
+            roughness={sideTransparent ? 0.08 : 0.7}
+            side={THREE.DoubleSide}
+            depthWrite={!sideTransparent}
+          />
+        </mesh>
+      )}
+      {cover.lights && (
+        <mesh position={[center.x, Math.max(1.5, cover.height - 0.08), center.z]}>
+          <boxGeometry args={[0.42, 0.05, 0.16]} />
+          <meshStandardMaterial color="#fef3c7" emissive="#fbbf24" emissiveIntensity={0.85} />
+        </mesh>
+      )}
+      {cover.heaters && members.beams[0] && (
+        <mesh position={[(members.beams[0].a.x + members.beams[0].b.x) / 2, members.beams[0].a.y - 0.14, (members.beams[0].a.z + members.beams[0].b.z) / 2]}>
+          <boxGeometry args={[0.9, 0.08, 0.12]} />
+          <meshStandardMaterial color="#292524" />
+        </mesh>
+      )}
+    </group>
+  )
+}
+
 function BuildingMesh({ item, selected }) {
   const spec = { ...buildingSpec(item.kind), ...item }
   const pick = { kind: 'yard', collection: 'buildings', id: item.id, movable: true }
@@ -317,6 +464,7 @@ export default function YardScene({ plan, selected }) {
       {yard.plants.map((item) => <PlantMesh key={item.id} item={item} selected={active('plants', item.id)} />)}
       {yard.objects.map((item) => <ObjectMesh key={item.id} item={item} selected={active('objects', item.id)} />)}
       {yard.buildings.map((item) => <BuildingMesh key={item.id} item={item} selected={active('buildings', item.id)} />)}
+      {(yard.covers || []).map((item) => <CoverMesh key={item.id} plan={plan} item={item} selected={active('covers', item.id)} />)}
     </group>
   )
 }

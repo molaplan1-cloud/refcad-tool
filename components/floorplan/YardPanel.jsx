@@ -1,5 +1,7 @@
 'use client'
 
+import { usePlanLocale } from '@/components/i18n/Locale'
+import { COVER_FRAMES, COVER_GLASS, COVER_ROOFS, COVER_SIDES, COVER_TINTS, COVER_TYPES, normalizeCover } from '@/lib/covers'
 import {
   BEDS,
   BUILDINGS,
@@ -40,6 +42,7 @@ function remove(plan, selection) {
 }
 
 export function YardFields({ plan, selection, onCommit }) {
+  const { t } = usePlanLocale(plan)
   if (!selection || selection.kind !== 'yard') return null
   const item = yardItem(plan, selection.collection, selection.id)
   if (selection.collection !== 'plot' && !item) return null
@@ -156,6 +159,83 @@ export function YardFields({ plan, selection, onCommit }) {
           </Field>
         </>
       )}
+      {selection.collection === 'covers' && item && (() => {
+        const cover = normalizeCover(item)
+        const frame = COVER_FRAMES.find((entry) => entry.id === cover.frame) || COVER_FRAMES[0]
+        return (
+          <>
+            <div data-testid="cover-attachment">{cover.wallId ? t('cover.attached') : t('cover.freestanding')}</div>
+            <Field label={t('cover.kind')}>
+              <select data-testid="cover-kind" style={inputStyle} value={cover.kind} onChange={(event) => {
+                const spec = COVER_TYPES.find((entry) => entry.id === event.target.value) || COVER_TYPES[0]
+                const nextFrame = COVER_FRAMES.find((entry) => entry.id === spec.frame) || frame
+                commit({
+                  kind: spec.id,
+                  height: spec.height,
+                  pitch: spec.pitch,
+                  roofing: spec.roofing,
+                  frame: spec.frame,
+                  frameColor: nextFrame.color,
+                  postSpacing: spec.postSpacing,
+                  rafterSpacing: spec.rafterSpacing,
+                  sides: spec.sides,
+                })
+              }}>
+                {COVER_TYPES.map((entry) => <option key={entry.id} value={entry.id}>{t(`cover.${entry.id}`)}</option>)}
+              </select>
+            </Field>
+            <Field label={t('cover.frame')}>
+              <select data-testid="cover-frame" style={inputStyle} value={cover.frame} onChange={(event) => {
+                const next = COVER_FRAMES.find((entry) => entry.id === event.target.value) || COVER_FRAMES[0]
+                commit({ frame: next.id, frameColor: next.color })
+              }}>
+                {COVER_FRAMES.map((entry) => <option key={entry.id} value={entry.id}>{t(`cover.frame.${entry.id}`)}</option>)}
+              </select>
+            </Field>
+            <Field label={t('cover.roof')}>
+              <select data-testid="cover-roof" style={inputStyle} value={cover.roofing} onChange={(event) => commit({ roofing: event.target.value })}>
+                {COVER_ROOFS.map((entry) => <option key={entry.id} value={entry.id}>{t(`cover.roof.${entry.id}`)}</option>)}
+              </select>
+            </Field>
+            {cover.roofing === 'polycarbonate' && (
+              <Field label={t('cover.tint')}>
+                <select data-testid="cover-tint" style={inputStyle} value={cover.roofTint} onChange={(event) => commit({ roofTint: event.target.value })}>
+                  {COVER_TINTS.map((entry) => <option key={entry.id} value={entry.id}>{t(`cover.tint.${entry.id}`)}</option>)}
+                </select>
+              </Field>
+            )}
+            {cover.roofing === 'glass' && (
+              <Field label={t('cover.glass')}>
+                <select data-testid="cover-glass" style={inputStyle} value={cover.glassKind} onChange={(event) => commit({ glassKind: event.target.value })}>
+                  {COVER_GLASS.map((entry) => <option key={entry.id} value={entry.id}>{t(`cover.glass.${entry.id}`)}</option>)}
+                </select>
+              </Field>
+            )}
+            <Field label={t('cover.sides')}>
+              <select data-testid="cover-sides" style={inputStyle} value={cover.sides} onChange={(event) => commit({ sides: event.target.value })}>
+                {COVER_SIDES.map((entry) => <option key={entry.id} value={entry.id}>{t(`cover.side.${entry.id}`)}</option>)}
+              </select>
+            </Field>
+            <Field label={t('cover.height')}>
+              <input data-testid="cover-height" style={inputStyle} type="number" step="0.1" min="1.6" value={cover.height} onChange={(event) => commit({ height: Number(event.target.value) || cover.height })} />
+            </Field>
+            <Field label={t('cover.pitch')}>
+              <input data-testid="cover-pitch" style={inputStyle} type="number" step="1" min="0" value={cover.pitch} onChange={(event) => commit({ pitch: Number(event.target.value) || 0 })} />
+            </Field>
+            <Field label={t('cover.postSize')}>
+              <input data-testid="cover-post-size" style={inputStyle} type="number" step="0.01" min="0.06" value={cover.postSize} onChange={(event) => commit({ postSize: Number(event.target.value) || cover.postSize })} />
+            </Field>
+            <Field label={t('cover.postSpacing')}>
+              <input data-testid="cover-post-spacing" style={inputStyle} type="number" step="0.1" min="0.6" value={cover.postSpacing} onChange={(event) => commit({ postSpacing: Number(event.target.value) || cover.postSpacing })} />
+            </Field>
+            <Field label={t('cover.rafter')}>
+              <input data-testid="cover-rafter" style={inputStyle} type="number" step="0.05" min="0.25" value={cover.rafterSpacing} onChange={(event) => commit({ rafterSpacing: Number(event.target.value) || cover.rafterSpacing })} />
+            </Field>
+            <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input data-testid="cover-lights" type="checkbox" checked={cover.lights} onChange={(event) => commit({ lights: event.target.checked })} />{t('cover.lights')}</label>
+            <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input data-testid="cover-heaters" type="checkbox" checked={cover.heaters} onChange={(event) => commit({ heaters: event.target.checked })} />{t('cover.heaters')}</label>
+          </>
+        )
+      })()}
       {(selection.collection === 'objects' || selection.collection === 'buildings') && (
         <button type="button" style={btn} onClick={() => onCommit(rotateYardItem(plan, selection.collection, selection.id))}>Kierrä 90°</button>
       )}
