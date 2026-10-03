@@ -36,7 +36,8 @@ import {
   updateWall,
 } from '@/lib/floorplan'
 import { ServiceMenu } from './ServicesLayer'
-import { ensureServices, serviceObjectTitle } from '@/lib/services'
+import { applyHeating, ensureServices, serviceObjectTitle } from '@/lib/services'
+import { HEAT_SOURCES, normalizeHeating } from '@/lib/hydronic'
 
 const inputStyle = {
   width: '100%',
@@ -103,6 +104,59 @@ const STRUCTURES = [
   ['hirsi', 'Hirsi'],
 ]
 
+function HeatingSettings({ plan, onApply }) {
+  const heating = normalizeHeating(plan)
+  const set = (patch) => onApply(applyHeating(plan, patch))
+  return (
+    <div data-testid="heating-settings" style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>Lämmitysjärjestelmä</div>
+      <Field label="Lämmönlähde">
+        <select data-testid="heat-source" style={inputStyle} value={heating.source} onChange={(event) => set({ source: event.target.value, distribution: event.target.value === 'direct-electric' ? 'none' : (heating.distribution === 'none' ? 'floor' : heating.distribution) })}>
+          {HEAT_SOURCES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Jakotapa">
+        <select data-testid="heat-distribution" style={inputStyle} value={heating.distribution} onChange={(event) => set({ distribution: event.target.value })}>
+          <option value="floor">Lattialämmitys</option>
+          <option value="radiator">Patteriverkosto</option>
+          <option value="both">Molemmat</option>
+          <option value="none">Ei vesikiertoa (suora sähkö)</option>
+        </select>
+      </Field>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        <input data-testid="heat-buffer" type="checkbox" checked={Boolean(heating.buffer)} onChange={(event) => set({ buffer: event.target.checked })} />
+        Lämmityspiirin puskurivaraaja
+      </label>
+      {heating.buffer && (
+        <Field label="Puskurin tilavuus (l)">
+          <input data-testid="heat-buffer-litres" style={inputStyle} type="number" min="50" step="50" value={heating.bufferLitres} onChange={(event) => set({ bufferLitres: Math.max(50, parseInt(event.target.value, 10) || 300) })} />
+        </Field>
+      )}
+      {heating.source === 'ground' && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+          <input data-testid="heat-borehole" type="checkbox" checked={heating.borehole !== false} onChange={(event) => set({ borehole: event.target.checked })} />
+          Lämpökaivo / keruupiiri
+        </label>
+      )}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        <input data-testid="heat-air" type="checkbox" checked={Boolean(heating.supplementAir)} onChange={(event) => set({ supplementAir: event.target.checked })} />
+        Ilmalämpöpumppu lisänä
+      </label>
+      <Field label="Käyttövesi">
+        <select data-testid="heat-dhw" style={inputStyle} value={heating.dhw} onChange={(event) => set({ dhw: event.target.value })}>
+          <option value="tank">Lämminvesivaraaja</option>
+          <option value="exchanger">Kaukolämmön siirrin</option>
+        </select>
+      </Field>
+      {heating.dhw === 'tank' && (
+        <Field label="Varaajan tilavuus (l)">
+          <input data-testid="heat-dhw-litres" style={inputStyle} type="number" min="50" step="50" value={heating.dhwLitres} onChange={(event) => set({ dhwLitres: Math.max(50, parseInt(event.target.value, 10) || 300) })} />
+        </Field>
+      )}
+    </div>
+  )
+}
+
 export function HouseSettings({ plan, onApply }) {
   const scale = STANDARD_SCALES.includes(plan.drawingScale) ? plan.drawingScale : null
   return (
@@ -147,6 +201,7 @@ export function HouseSettings({ plan, onApply }) {
       <SwatchRow group="exterior" value={plan.exteriorId} onPick={(id) => onApply({ ...plan, exteriorId: id })} />
       <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>Katemateriaali</div>
       <SwatchRow group="roof" value={plan.roofId} onPick={(id) => onApply({ ...plan, roofId: id })} />
+      <HeatingSettings plan={plan} onApply={onApply} />
       <div style={{ fontSize: 12, fontWeight: 700, margin: '10px 0 6px' }}>Mittakaava</div>
       <div style={{ display: 'flex', gap: 6 }}>
         {STANDARD_SCALES.map((ratio) => (
