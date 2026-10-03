@@ -8,6 +8,7 @@ import { pointInEquipment } from '@/lib/placement'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
 import { highlightedPorts, pipeAppearance, snapPort } from '@/lib/pipeTopology'
 import { followEndpoint, moveSegmentPoints, moveVertexPoints, riseMetres, translatePoints } from '@/lib/routeEdit'
+import { designerHits, mergeIds, selectionBox } from '@/lib/cadEdit'
 import { calculateProject } from '@/lib/heatLoad'
 import { doorPlanFigures } from '@/lib/doors'
 import {
@@ -381,6 +382,10 @@ export default function PlanView({
   onContextMenu,
   onPreviewPipes,
   onPreviewCables,
+  cad = null,
+  onCadDown,
+  onCadMove,
+  onCadStretch,
   pipes = [],
   cables = [],
   pipeKind = 'suction',
@@ -406,7 +411,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
-    onPreviewPipes, onPreviewCables,
+    onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch,
   }
 
   const setCamera = (next) => {
@@ -623,6 +628,7 @@ export default function PlanView({
       }
       if (!g) {
         setCursor({ ...world, kind: null })
+        if (p.cad?.step === 'to') p.onCadMove?.(world)
         const eq = hitEquipment(p.rooms, world.x, world.z)
         setHoverId(eq?.room?.id || hitRoom(p.rooms, world.x, world.z)?.id || null)
         return
@@ -643,7 +649,8 @@ export default function PlanView({
         return
       }
       if (g.kind === 'marquee') {
-        setDraft({ kind: 'marquee', x1: g.x1, z1: g.z1, x2: world.x, z2: world.z })
+        const mode = g.stretch || g.x1 > world.x ? 'crossing' : 'window'
+        setDraft({ kind: 'marquee', x1: g.x1, z1: g.z1, x2: world.x, z2: world.z, mode })
         return
       }
       const snapped = snapWorld(world.x, world.z, {
@@ -823,15 +830,18 @@ export default function PlanView({
         const right = Math.max(g.x1, x2)
         const top = Math.min(g.z1, z2)
         const bottom = Math.max(g.z1, z2)
-        if (right - left < 0.15 && bottom - top < 0.15) {
-          if (!g.shift) p.onSelect([])
+        const box = selectionBox({ x: g.x1, z: g.z1 }, { x: x2, z: z2 })
+        const modeBox = g.stretch ? { ...box, mode: 'crossing' } : box
+        if (g.stretch) {
+          p.onCadStretch?.(modeBox)
           return
         }
-        const hits = p.rooms.filter((room) => {
-          const box = bboxOf(outlineOf(room))
-          return box.right >= left && box.left <= right && box.bottom >= top && box.top <= bottom
-        }).map((room) => room.id)
-        p.onSelect(g.shift ? [...new Set([...p.selectedIds, ...hits])] : hits)
+        if (right - left < 0.15 && bottom - top < 0.15) {
+          if (!g.shift && !g.ctrl) p.onSelect([])
+          return
+        }
+        const hits = designerHits({ rooms: p.rooms, pipes: p.pipes, cables: p.cables }, modeBox).map((item) => item.id)
+        p.onSelect(mergeIds(p.selectedIds, hits, { shift: g.shift, ctrl: g.ctrl }))
       } else if (g.started) {
         p.onGestureEnd()
       }
@@ -868,6 +878,14 @@ export default function PlanView({
     }
     if (event.button !== 0) return
     const p = propsRef.current
+    if (p.cad && p.tool === 'select' && !p.placing) {
+      if (p.cad.step === 'window' || p.cad.name === 'stretch' && p.cad.step === 'window') {
+        gesture.current = { kind: 'marquee', x1: world.x, z1: world.z, stretch: true, shift: false, ctrl: false }
+        return
+      }
+      p.onCadDown?.(world)
+      return
+    }
     const handle = event.target?.dataset?.handle
     const handleRoom = event.target?.dataset?.room
     if (isRouteTool(p.tool)) {
@@ -996,7 +1014,8 @@ export default function PlanView({
     }
     const room = hitRoom(p.rooms, world.x, world.z)
     if (room) {
-      const next = event.shiftKey
+      const toggle = event.shiftKey || event.ctrlKey || event.metaKey
+      const next = toggle
         ? (p.selectedIds.includes(room.id) ? p.selectedIds.filter((id) => id !== room.id) : [...p.selectedIds, room.id])
         : (p.selectedIds.includes(room.id) ? p.selectedIds : [room.id])
       p.onSelect(next)
@@ -1014,7 +1033,7 @@ export default function PlanView({
       }
       return
     }
-    gesture.current = { kind: 'marquee', x1: world.x, z1: world.z, shift: event.shiftKey }
+    gesture.current = { kind: 'marquee', x1: world.x, z1: world.z, shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey }
   }
 
   const { minor, major } = gridSpec(view.scale)
@@ -1101,7 +1120,7 @@ export default function PlanView({
               />
             )
           })}
-          {rooms.map((room) => {
+          {rooms.filter((room) => !room.hidden).map((room) => {
             const outer = outlineOf(room)
             const inner = insetOrthogonal(outer, room.wallThickness) || outer
             const active = selected.has(room.id)
@@ -1122,7 +1141,7 @@ export default function PlanView({
                   stroke={active ? TEAL : 'none'}
                   strokeWidth={(active ? 1.6 : 0) / view.scale}
                 />
-                {(room.equipment || []).map((eq) => {
+                {(room.equipment || []).filter((eq) => !eq.hidden).map((eq) => {
                   if (eq.category === 'door') {
                     return <DoorGlyph key={eq.id} room={room} eq={eq} scale={view.scale} />
                   }
@@ -1217,7 +1236,7 @@ export default function PlanView({
           {(() => {
             const projectNow = calculateProject(rooms)
             const placedLabels = []
-            return pipes.map((pipe) => {
+            return pipes.filter((pipe) => !pipe.hidden).map((pipe) => {
               const points = pipe.points || []
               if (points.length < 2) return null
               const { sized } = sizePlacedPipe(pipe, rooms, projectNow.rooms, pipes)
@@ -1383,7 +1402,7 @@ export default function PlanView({
               <text x={port.x + 8 / view.scale} y={port.z - 6 / view.scale} fontSize={9 / view.scale} fill="#1c1917" fontFamily="ui-sans-serif, system-ui, sans-serif">{port.label}</text>
             </g>
           ))}
-          {cables.map((cable) => {
+          {cables.filter((cable) => !cable.hidden).map((cable) => {
             const points = cable.points || []
             const activeCable = selected.has(cable.id)
             return (
@@ -1459,13 +1478,16 @@ export default function PlanView({
           )}
           {draft?.kind === 'marquee' && (
             <rect
+              data-testid={draft.mode === 'crossing' ? 'select-crossing' : 'select-window'}
+              data-mode={draft.mode || 'window'}
               x={Math.min(draft.x1, draft.x2)}
               y={Math.min(draft.z1, draft.z2)}
               width={Math.abs(draft.x2 - draft.x1)}
               height={Math.abs(draft.z2 - draft.z1)}
-              fill="rgba(15,118,110,0.08)"
-              stroke={TEAL}
-              strokeWidth={1 / view.scale}
+              fill={draft.mode === 'crossing' ? 'rgba(217,119,6,0.12)' : 'rgba(15,118,110,0.12)'}
+              stroke={draft.mode === 'crossing' ? '#d97706' : TEAL}
+              strokeWidth={1.4 / view.scale}
+              strokeDasharray={draft.mode === 'crossing' ? `${7 / view.scale} ${4 / view.scale}` : undefined}
             />
           )}
           {cursor?.kind && (

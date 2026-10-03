@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import { CAD_COMMANDS, CAD_LAYERS, sharedProperties } from '@/lib/cadEdit'
 import { CadItem, CadMenu, CadSep, CadStyles, Flyout, Segmented } from './CadMenu'
+import { MultiProperties } from './CadTools'
 import {
   CLADDING,
   MATERIALS,
@@ -329,7 +331,41 @@ export function selectionLabel(plan, selection) {
   return 'Kohde'
 }
 
-export function SelectionPanel({ plan, selection, onApply, onCommit, onClear, onRedrawRoute }) {
+export function SelectionPanel({ plan, selection, picks, onApply, onCommit, onClear, onRedrawRoute, onPatchMany }) {
+  if (picks && picks.length > 1) {
+    const shared = sharedProperties(plan, picks)
+    return (
+      <div data-testid="selection-form">
+        <CadStyles />
+        <MultiProperties count={picks.length}>
+          <Field label="Taso">
+            <select data-testid="multi-layer" style={inputStyle} value={shared.layer || ''} onChange={(event) => onPatchMany({ layer: event.target.value })}>
+              <option value="">Sekalaiset</option>
+              {CAD_LAYERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+          </Field>
+          {shared.kinds.length === 1 && shared.kinds[0] === 'wall' && (
+            <Field label="Tyyppi">
+              <select data-testid="multi-kind" style={inputStyle} value={shared.kind || 'exterior'} onChange={(event) => onPatchMany({ kind: event.target.value, layer: event.target.value })}>
+                <option value="exterior">Ulkoseinä</option>
+                <option value="bearing">Kantava</option>
+                <option value="interior">Väliseinä</option>
+              </select>
+            </Field>
+          )}
+          {shared.kinds.length === 1 && shared.kinds[0] === 'fixture' && (
+            <Field label="Kierto (°)" >
+              <input data-testid="multi-rotation" style={inputStyle} type="number" value={Number.isFinite(shared.rotation) ? shared.rotation : 0} onChange={(event) => onPatchMany({ rotation: Number(event.target.value) || 0 })} />
+            </Field>
+          )}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650 }}>
+            <input data-testid="multi-lock" type="checkbox" checked={Boolean(shared.cadLock)} onChange={(event) => onPatchMany({ cadLock: event.target.checked })} />
+            Lukittu
+          </label>
+        </MultiProperties>
+      </div>
+    )
+  }
   let body = null
   if (!selection?.id && selection?.kind !== 'roof' && selection?.kind !== 'house') {
     body = <div style={{ fontSize: 12, color: '#78716c' }}>Valitse kohde pohjasta tai avaa talon asetukset.</div>
@@ -742,6 +778,19 @@ function claddingChoices(wall) {
   return CLADDING.map((item) => ({ id: item.id, name: item.group ? `${item.group}: ${item.name}` : item.name, color: item.color }))
 }
 
+function CadEditItems({ onNavigate }) {
+  return (
+    <Flyout label="Muokkaa" testid="ctx-cad">
+      {CAD_COMMANDS.map((cmd) => (
+        <CadItem key={cmd.id} testid={`ctx-${cmd.testid}`} shortcut={cmd.short} onClick={() => onNavigate(`cad:${cmd.id}`)}>{cmd.label}</CadItem>
+      ))}
+      <CadItem testid="ctx-cad-delete" onClick={() => onNavigate('cad:delete')}>Poista</CadItem>
+      <CadItem testid="ctx-cad-group" onClick={() => onNavigate('cad:group')}>Ryhmitä</CadItem>
+      <CadItem testid="ctx-cad-lock" onClick={() => onNavigate('cad:lock')}>Lukitse</CadItem>
+    </Flyout>
+  )
+}
+
 export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
   if (!menu || menu.kind === 'service') return null
   const wall = (plan.walls || []).find((item) => item.id === menu.id)
@@ -772,6 +821,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
           ]}
         />
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        <CadEditItems onNavigate={onNavigate} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
           Suunta
           <input
@@ -838,6 +888,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
     body = (
       <>
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        <CadEditItems onNavigate={onNavigate} />
         <CadSep />
         <CadItem testid="ctx-flip" onClick={() => act(flipOpening(plan, opening.id))}>Käännä</CadItem>
         <CadSep />
@@ -849,6 +900,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
     body = (
       <>
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        <CadEditItems onNavigate={onNavigate} />
         <CadSep />
         <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteRoom(plan, room.id), true)}>Poista</CadItem>
       </>
@@ -859,6 +911,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
       <>
         <ColorSwatches value={fixture.color} onChange={(color) => onApply(updateFixture(plan, fixture.id, { color }))} testid="ctx-fixture-color" customTestid="ctx-color-custom" />
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        <CadEditItems onNavigate={onNavigate} />
         <CadSep />
         <CadItem testid="ctx-rotate" shortcut="R" onClick={() => onCommit(rotateFixture(plan, fixture.id))}>Kierrä</CadItem>
         <CadItem testid="ctx-mirror" onClick={() => onCommit(mirrorFixture(plan, fixture.id))}>Peilaa</CadItem>
@@ -897,6 +950,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
     body = (
       <>
         <CadItem testid="ctx-paste" onClick={() => onNavigate('paste')}>Liitä</CadItem>
+        <CadEditItems onNavigate={onNavigate} />
         <CadItem testid="ctx-draw-wall" onClick={() => onNavigate('wall')}>Piirrä seinä</CadItem>
         <CadItem testid="ctx-draw-room" onClick={() => onNavigate('room')}>Piirrä huone</CadItem>
         <CadSep />

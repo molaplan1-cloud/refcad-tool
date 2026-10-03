@@ -24,7 +24,8 @@ import {
   updateServiceRun,
 } from '@/lib/services'
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
-import { CadItem, CadMenu, CadSep, Segmented } from './CadMenu'
+import { CAD_COMMANDS } from '@/lib/cadEdit'
+import { CadItem, CadMenu, CadSep, Flyout, Segmented } from './CadMenu'
 
 const barBtn = (active) => ({
   height: 26,
@@ -445,8 +446,8 @@ function CableMark({ points, text, X, Y }) {
 
 export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown }) {
   const services = ensureServices(plan)
-  const visibleRuns = services.runs.filter((run) => layerVisible(plan, run.system))
-  const visibleNodes = services.nodes.filter((node) => layerVisible(plan, node.system))
+  const visibleRuns = services.runs.filter((run) => layerVisible(plan, run.system) && !run.hidden)
+  const visibleNodes = services.nodes.filter((node) => layerVisible(plan, node.system) && !node.hidden)
   const order = { drain: 0, water: 1, heat: 2, electric: 3, iv: 4 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
@@ -886,7 +887,7 @@ function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
   )
 }
 
-export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperties, onRedraw, docked = false }) {
+export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperties, onRedraw, onCad, docked = false }) {
   if (!menu || menu.kind !== 'service') return null
   const services = ensureServices(plan)
   const node = menu.service?.target === 'node' ? services.nodes.find((item) => item.id === menu.service.id) : null
@@ -920,6 +921,13 @@ export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperti
           />
         )}
         <CadItem testid="ctx-properties" onClick={() => (onProperties ? onProperties() : onClose())}>Ominaisuudet…</CadItem>
+        {onCad && (
+          <Flyout label="Muokkaa" testid="ctx-cad">
+            {CAD_COMMANDS.map((cmd) => (
+              <CadItem key={cmd.id} testid={`ctx-${cmd.testid}`} shortcut={cmd.short} onClick={() => { onCad(cmd.id); onClose() }}>{cmd.label}</CadItem>
+            ))}
+          </Flyout>
+        )}
         {run && (
           <>
             <CadSep />
