@@ -34,6 +34,7 @@ import {
   openingSymbol,
   planBounds,
   pointInPolygon,
+  duplicateFixture,
   removeFixture,
   roomLabelPoint,
   rotateFixture,
@@ -45,7 +46,7 @@ import {
   wallQuads,
   buildFloorPlanPdf,
 } from '@/lib/floorplan'
-import { FloorMenu, HouseSettings, SelectionPanel } from './FloorMenus'
+import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
 import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
@@ -53,6 +54,8 @@ import {
   PLACEABLES,
   addServiceNode,
   addServiceRun,
+  deleteServiceNode,
+  deleteServiceRun,
   autoRouteAll,
   buildServicePdf,
   SERVICE_SYSTEMS,
@@ -646,6 +649,15 @@ export default function FloorPlanApp() {
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedFixture) {
         commit(removeFixture(plan, selectedFixture))
         setSelectedFixture(null)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'service' && pick.service) {
+        const next = pick.service.target === 'node'
+          ? deleteServiceNode(plan, pick.service.id)
+          : deleteServiceRun(plan, pick.service.id)
+        commit(next)
+        choose(null)
+      } else if ((event.key === 'd' || event.key === 'D') && (event.metaKey || event.ctrlKey) && selectedFixture) {
+        event.preventDefault()
+        commit(duplicateFixture(plan, selectedFixture))
       } else if ((event.key === 'r' || event.key === 'R') && selectedFixture) {
         commit(rotateFixture(plan, selectedFixture))
       } else if ((event.key === 'z' || event.key === 'Z') && (event.metaKey || event.ctrlKey)) {
@@ -731,9 +743,12 @@ export default function FloorPlanApp() {
       setMenu(null)
       return
     }
-    if (action === 'house' || action === 'focus') {
+    if (action === 'house' || action === 'focus' || action === 'properties') {
       setPanel(action === 'house' ? 'house' : 'object')
       setMenu(null)
+      if (action === 'properties') {
+        requestAnimationFrame(() => document.querySelector('[data-testid="selection-title"]')?.scrollIntoView({ block: 'nearest' }))
+      }
       return
     }
     if (action === 'wall') {
@@ -1235,7 +1250,14 @@ export default function FloorPlanApp() {
         </div>
 
         <aside data-testid="materials-panel" style={{ width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}>
-          <button type="button" data-testid="open-house-panel" style={{ ...sideBtn(panel === 'house'), marginBottom: 10 }} onClick={() => setPanel(panel === 'house' ? 'object' : 'house')}>Talon asetukset</button>
+          {pick && panel !== 'house' ? (
+            <div data-testid="panel-heading" style={{ marginBottom: 10 }}>
+              <button type="button" data-testid="panel-back-house" onClick={() => setPanel('house')} style={{ display: 'block', padding: 0, border: 'none', background: 'transparent', color: '#0f766e', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 4 }}>← Talon asetukset</button>
+              <div data-testid="selection-title" style={{ fontSize: 15, fontWeight: 750 }}>{selectionLabel(plan, pick)}</div>
+            </div>
+          ) : (
+            <button type="button" data-testid="open-house-panel" style={{ ...sideBtn(panel === 'house'), marginBottom: 10 }} onClick={() => setPanel(panel === 'house' ? 'object' : 'house')}>Talon asetukset</button>
+          )}
           {panel === 'house' ? (
             <HouseSettings plan={plan} onApply={setPlan} />
           ) : (
@@ -1313,7 +1335,7 @@ export default function FloorPlanApp() {
         />
       )}
       <FloorMenu menu={menu} plan={plan} onApply={setPlan} onCommit={commit} onNavigate={onMenuNavigate} />
-      <ServiceMenu menu={menu} plan={plan} onApply={setPlan} onClose={() => setMenu(null)} />
+      <ServiceMenu menu={menu} plan={plan} onApply={setPlan} onClose={() => setMenu(null)} onProperties={() => onMenuNavigate('properties')} />
     </div>
   )
 }

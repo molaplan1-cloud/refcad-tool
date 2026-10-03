@@ -13,9 +13,11 @@ import {
   nodeColor,
   runColor,
   serviceLegend,
+  serviceObjectTitle,
   updateServiceNode,
   updateServiceRun,
 } from '@/lib/services'
+import { CadItem, CadMenu, CadSep, Segmented } from './CadMenu'
 
 const barBtn = (active) => ({
   height: 26,
@@ -434,32 +436,50 @@ function MenuBtn({ children, onClick, testid }) {
   )
 }
 
-export function ServiceMenu({ menu, plan, onApply, onClose, docked = false }) {
+export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked = false }) {
   if (!menu || menu.kind !== 'service') return null
   const services = ensureServices(plan)
   const node = menu.service?.target === 'node' ? services.nodes.find((item) => item.id === menu.service.id) : null
   const run = menu.service?.target === 'run' ? services.runs.find((item) => item.id === menu.service.id) : null
   const target = node || run
   if (!target) return null
-  const left = docked ? 0 : Math.max(8, Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 280))
-  const top = docked ? 0 : Math.max(8, Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 320))
-  const systemName = SERVICE_SYSTEMS.find((item) => item.id === target.system)?.title || 'Talotekniikka'
   const patchNode = (patch) => onApply(updateServiceNode(plan, node.id, patch))
   const patchRun = (patch) => onApply(updateServiceRun(plan, run.id, patch))
   const remove = () => {
     onApply(node ? deleteServiceNode(plan, node.id) : deleteServiceRun(plan, run.id))
     onClose()
   }
+  if (!docked) {
+    const sizeOptions = run && run.system !== 'electric'
+      ? (run.system === 'iv' ? [100, 125, 160] : run.system === 'water' ? [16, 20, 25] : [50, 75, 110]).map((size) => ({
+        value: size,
+        label: run.system === 'drain' ? `DN${size}` : run.system === 'water' ? `${size}` : `Ø${size}`,
+        testid: `ctx-size-${size}`,
+      }))
+      : null
+    return (
+      <CadMenu x={menu.x} y={menu.y} testid="service-menu" kind="service" title={serviceObjectTitle(target)}>
+        {sizeOptions && (
+          <Segmented
+            label="Koko"
+            value={Number(run.size) || sizeOptions[0].value}
+            options={sizeOptions}
+            onChange={(size) => patchRun({ size })}
+          />
+        )}
+        <CadItem testid="ctx-properties" onClick={() => (onProperties ? onProperties() : onClose())}>Ominaisuudet…</CadItem>
+        <CadSep />
+        <CadItem testid="service-delete" danger shortcut="Del" onClick={remove}>Poista</CadItem>
+      </CadMenu>
+    )
+  }
   return (
     <div
-      data-testid="service-menu"
-      style={docked
-        ? { position: 'relative', width: '100%', background: 'transparent', padding: 0 }
-        : { position: 'fixed', left, top, zIndex: 60, width: 260, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }}
+      data-testid="service-form"
+      style={{ position: 'relative', width: '100%', background: 'transparent', padding: 0 }}
       onPointerDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{systemName}</div>
       {node && (
         <>
           <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
@@ -547,7 +567,7 @@ export function ServiceMenu({ menu, plan, onApply, onClose, docked = false }) {
           )}
         </>
       )}
-      <MenuBtn testid="service-delete" onClick={remove}>Poista</MenuBtn>
+      <MenuBtn testid="service-form-delete" onClick={remove}>Poista</MenuBtn>
     </div>
   )
 }
