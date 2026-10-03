@@ -52,6 +52,7 @@ import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
 import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import { ElectricPanel } from './ElectricPanel'
+import { HeatingPanel } from './HeatingPanel'
 import {
   PLACEABLES,
   addServiceNode,
@@ -59,9 +60,12 @@ import {
   deleteServiceNode,
   deleteServiceRun,
   autoRouteAll,
+  applyHeating,
   buildElectricPdf,
+  buildHydronicPdf,
   buildServicePdf,
   rewireElectric,
+  rewireWater,
   SERVICE_SYSTEMS,
   ensureServices,
   hitService,
@@ -436,6 +440,7 @@ export default function FloorPlanApp() {
   const [svcPoints, setSvcPoints] = useState([])
   const [floorHeating, setFloorHeating] = useState(false)
   const [electricView, setElectricView] = useState(null)
+  const [heatView, setHeatView] = useState(null)
   const [wallMode, setWallMode] = useState('solid')
   const [roofMode, setRoofMode] = useState('solid')
   const [fitToken, setFitToken] = useState(1)
@@ -739,6 +744,7 @@ export default function FloorPlanApp() {
           size: spec.size,
           circuit: spec.circuit,
           name: spec.name,
+          pointType: spec.pointType,
           x: snapped.x,
           z: snapped.z,
         }))
@@ -881,6 +887,7 @@ export default function FloorPlanApp() {
         setSvcPoints([])
         setSvcTool(null)
         setElectricView(null)
+        setHeatView(null)
       } else if (event.key === 'Enter' && svcTool === 'run' && svcPoints.length >= 2) {
         finishServiceRun()
       } else if (event.key === 'Enter' && tool === 'room' && poly.length >= 3) {
@@ -1300,10 +1307,31 @@ export default function FloorPlanApp() {
           setView('2d')
           setElectricView('diagram')
         }}
+        onRewireWater={() => {
+          commit(rewireWater(plan))
+          setView('2d')
+          setHeatView(null)
+        }}
+        onRewireHeat={() => {
+          commit(applyHeating(plan, {}))
+          setView('2d')
+          setSvcSystem('heat')
+          setHeatView(null)
+        }}
+        onHeatTable={() => {
+          setView('2d')
+          setHeatView('table')
+          setElectricView(null)
+        }}
+        onHeatSchematic={() => {
+          setView('2d')
+          setHeatView('schematic')
+          setElectricView(null)
+        }}
         onFloorHeating={setFloorHeating}
         onFinish={finishServiceRun}
         onPdf={(id) => {
-          const doc = id === 'electric' ? buildElectricPdf(plan) : buildServicePdf(plan, id)
+          const doc = id === 'electric' ? buildElectricPdf(plan) : id === 'heat' || id === 'water' ? buildHydronicPdf(plan) : buildServicePdf(plan, id)
           doc.save(`${(plan.name || 'talotekniikka').replace(/\s+/g, '-')}-${id}.pdf`)
         }}
       />
@@ -1668,6 +1696,15 @@ export default function FloorPlanApp() {
               onMode={setElectricView}
               onClose={() => setElectricView(null)}
               onPrint={() => buildElectricPdf(plan).save(`${(plan.name || 'sahko').replace(/\s+/g, '-')}-sahko.pdf`)}
+            />
+          )}
+          {heatView && (
+            <HeatingPanel
+              plan={plan}
+              mode={heatView}
+              onMode={setHeatView}
+              onClose={() => setHeatView(null)}
+              onPrint={() => buildHydronicPdf(plan).save(`${(plan.name || 'lammitys').replace(/\s+/g, '-')}-lammitys.pdf`)}
             />
           )}
         </div>
