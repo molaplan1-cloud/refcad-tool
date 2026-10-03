@@ -114,8 +114,26 @@ export function ServiceBar({
   )
 }
 
-function pointsOf(run, X, Y) {
-  return (run.points || []).map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')
+function pointsOf(points, X, Y) {
+  return (points || []).map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')
+}
+
+const RUN_SHIFT = { drain: -0.22, water: -0.08, electric: 0.08, iv: 0.22 }
+
+function shiftPoints(points, system, multi) {
+  if (!multi || !points || points.length < 2) return points || []
+  const dist = RUN_SHIFT[system] || 0
+  if (!dist) return points
+  return points.map((point, index) => {
+    const prev = points[Math.max(0, index - 1)]
+    const next = points[Math.min(points.length - 1, index + 1)]
+    let dx = next.x - prev.x
+    let dz = next.z - prev.z
+    const len = Math.hypot(dx, dz) || 1
+    dx /= len
+    dz /= len
+    return { x: point.x - dz * dist, z: point.z + dx * dist }
+  })
 }
 
 function SlopeMark({ run, X, Y }) {
@@ -268,57 +286,90 @@ function NodeSymbol({ node }) {
   return <circle r="4" fill={color} />
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, interactive, preview, onContext }) {
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext }) {
   const services = ensureServices(plan)
   const visibleRuns = services.runs.filter((run) => layerVisible(plan, run.system))
   const visibleNodes = services.nodes.filter((node) => layerVisible(plan, node.system))
   const order = { drain: 0, water: 1, electric: 2, iv: 3 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
-  const fittings = collectFittings(runs)
-  const legend = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id)).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
+  const multi = new Set(runs.map((run) => run.system)).size > 1
+  const drawn = runs.map((run) => ({ run, points: shiftPoints(run.points, run.system, multi) }))
+  const fittings = collectFittings(drawn.map((item) => ({ ...item.run, points: item.points })))
+  const legend = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
   const open = (event, hit) => {
     event.preventDefault()
     event.stopPropagation()
     onContext(event, hit)
   }
+  const leaders = []
+  const bestTrunk = new Map()
+  drawn.forEach(({ run, points }) => {
+    if (!['trunk', 'main', 'header'].includes(run.role) || !run.size || points.length < 2) return
+    let longest = 0
+    let mid = null
+    let normal = { x: 0, z: -1 }
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const dx = points[i + 1].x - points[i].x
+      const dz = points[i + 1].z - points[i].z
+      const len = Math.hypot(dx, dz)
+      if (len <= longest) continue
+      longest = len
+      mid = { x: (points[i].x + points[i + 1].x) / 2, z: (points[i].z + points[i + 1].z) / 2 }
+      normal = { x: -dz / (len || 1), z: dx / (len || 1) }
+    }
+    if (!mid || longest < 1.1) return
+    const prev = bestTrunk.get(run.system)
+    if (!prev || longest > prev.longest) {
+      const text = run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`
+      bestTrunk.set(run.system, { longest, mid, normal, text, color: runColor(run) })
+    }
+  })
+  bestTrunk.forEach((item) => leaders.push(item))
+  const legendX = legendBox?.x ?? (sheet.x + sheet.w - 176)
+  const legendY = legendBox?.y ?? (sheet.y + 74)
+  const legendW = Math.max(108, legendBox?.w ?? 160)
+  const legendH = legend.length ? 22 + legend.length * 15 : 0
   return (
     <g data-testid="service-layer">
-      {runs.map((run) => {
+      {drawn.map(({ run, points }) => {
         const color = runColor(run)
         const dashed = run.system === 'electric'
+        const width = multi
+          ? (run.system === 'iv' ? 1.15 : run.system === 'drain' ? 1.05 : 0.8)
+          : (run.system === 'iv' ? 2.05 : run.system === 'drain' ? 1.85 : dashed ? 1.15 : 1.45)
         return (
           <g key={run.id}>
             <polyline
-              points={pointsOf(run, X, Y)}
+              points={pointsOf(points, X, Y)}
               fill="none"
               stroke={color}
-              strokeWidth={run.system === 'iv' ? 2.5 : run.system === 'drain' ? 2.3 : dashed ? 1.15 : 1.7}
+              strokeWidth={width}
               strokeDasharray={dashed ? '5 3' : undefined}
               strokeLinejoin="round"
               strokeLinecap="round"
               style={{ pointerEvents: 'none' }}
             />
             <polyline
-              points={pointsOf(run, X, Y)}
+              points={pointsOf(points, X, Y)}
               fill="none"
               stroke="transparent"
               strokeWidth={12}
               style={{ pointerEvents: interactive ? 'auto' : 'none' }}
               onContextMenu={(event) => open(event, { target: 'run', id: run.id, system: run.system })}
             />
-            {(run.role === 'trunk' || run.role === 'main' || run.role === 'header') && run.size && (run.points || []).length > 1 && (
-              <text
-                x={(X(run.points[0].x) + X(run.points[1].x)) / 2}
-                y={(Y(run.points[0].z) + Y(run.points[1].z)) / 2 - 7}
-                fontSize="10"
-                fontWeight="700"
-                fill={color}
-                style={{ pointerEvents: 'none' }}
-              >
-                {run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`}
-              </text>
-            )}
-            <SlopeMark run={run} X={X} Y={Y} />
+            <SlopeMark run={{ ...run, points }} X={X} Y={Y} />
+          </g>
+        )
+      })}
+      {leaders.map((item) => {
+        const ax = X(item.mid.x)
+        const ay = Y(item.mid.z)
+        const bx = ax + item.normal.x * 22
+        const by = ay + item.normal.z * 22
+        return (
+          <g key={item.text} style={{ pointerEvents: 'none' }}>
+            <line x1={ax} y1={ay} x2={bx} y2={by} stroke={item.color} strokeWidth={0.7} />
+            <text x={bx} y={by - 3} fontSize="9" fontWeight="700" fill={item.color} stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{item.text}</text>
           </g>
         )
       })}
@@ -339,10 +390,13 @@ export function ServiceDrawing({ plan, X, Y, sheet, interactive, preview, onCont
         >
           <NodeSymbol node={node} />
           {node.flow ? (
-            <text x="10" y="-8" fontSize="10" fontWeight="700" fill={nodeColor(node)}>{node.flow} l/s</text>
+            <g style={{ pointerEvents: 'none' }}>
+              <line x1="5" y1="-3" x2="14" y2="-14" stroke={nodeColor(node)} strokeWidth="0.7" />
+              <text x="16" y="-14" fontSize="8" fontWeight="700" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth="2.2" paintOrder="stroke">{node.flow} l/s</text>
+            </g>
           ) : null}
-          {node.system === 'electric' && node.circuit && node.kind !== 'junction' ? (
-            <text x="9" y="4" fontSize="8" fill="#44403c">{node.circuit}</text>
+          {!multi && node.system === 'electric' && node.circuit && (node.kind === 'panel' || node.kind === 'stove' || node.kind === 'heater') ? (
+            <text x="10" y="4" fontSize="8" fill="#44403c" stroke="#fbfaf7" strokeWidth="2" paintOrder="stroke">{node.circuit}</text>
           ) : null}
         </g>
       ))}
@@ -356,14 +410,18 @@ export function ServiceDrawing({ plan, X, Y, sheet, interactive, preview, onCont
           style={{ pointerEvents: 'none' }}
         />
       )}
-      <g data-testid="service-legend" style={{ pointerEvents: 'none' }}>
-        {legend.map((item, index) => (
-          <g key={`${item.system}-${item.name}`} transform={`translate(${sheet.x + 16} ${sheet.y + 20 + index * 14})`}>
-            <rect width="12" height="8" fill={item.color} stroke="#44403c" strokeWidth="0.5" />
-            <text x="16" y="8" fontSize="10" fill="#1c1917">{item.name}</text>
-          </g>
-        ))}
-      </g>
+      {legendH > 0 && (
+        <g data-testid="service-legend" style={{ pointerEvents: 'none' }}>
+          <rect x={legendX} y={legendY} width={legendW} height={legendH} fill="#ffffff" stroke="#1c1917" strokeWidth="1" />
+          <text x={legendX + 8} y={legendY + 14} fontSize="10" fontWeight="700" fill="#1c1917">Selite</text>
+          {legend.map((item, index) => (
+            <g key={`${item.system}-${item.name}`} transform={`translate(${legendX + 8} ${legendY + 22 + index * 15})`}>
+              <rect width="12" height="8" fill={item.color} stroke="#44403c" strokeWidth="0.5" />
+              <text x="18" y="8" fontSize="10" fill="#1c1917">{item.name}</text>
+            </g>
+          ))}
+        </g>
+      )}
     </g>
   )
 }

@@ -15,6 +15,7 @@ import {
   facadePaints,
   formatArea,
   formatMm,
+  roofModel,
   updateFacadeZone,
 } from '@/lib/floorplan'
 
@@ -84,6 +85,70 @@ function PatternDefs() {
   )
 }
 
+function ElevationOpening({ opening, X, Y, metres }) {
+  const x = X(opening.u0)
+  const y = Y(opening.y1)
+  const w = Math.max(2, metres(opening.u1 - opening.u0))
+  const h = Math.max(2, metres(opening.y1 - opening.y0))
+  const frame = Math.max(2.4, Math.min(w, h) * 0.09)
+  if (opening.kind === 'window') {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill="#f8fafc" stroke="#1c1917" strokeWidth="1.35" />
+        <rect x={x + frame} y={y + frame} width={Math.max(1, w - frame * 2)} height={Math.max(1, h - frame * 2)} fill="#dbeafe" stroke="#1c1917" strokeWidth="0.95" />
+        <line x1={x + frame} y1={y + h / 2} x2={x + w - frame} y2={y + h / 2} stroke="#1c1917" strokeWidth="1.05" />
+        <line x1={x + w / 2} y1={y + frame} x2={x + w / 2} y2={y + h - frame} stroke="#1c1917" strokeWidth="1.05" />
+      </g>
+    )
+  }
+  return (
+    <g>
+      <rect x={x} y={y} width={w} height={h} fill="#d6d3d1" stroke="#1c1917" strokeWidth="1.4" />
+      <rect x={x + frame} y={y + frame * 0.55} width={Math.max(1, w - frame * 2)} height={Math.max(1, h - frame * 1.2)} fill="#f5f5f4" stroke="#1c1917" strokeWidth="0.9" />
+      <line x1={x + frame} y1={y + h * 0.38} x2={x + w - frame} y2={y + h * 0.38} stroke="#1c1917" strokeWidth="0.7" />
+      <line x1={x + frame} y1={y + h * 0.68} x2={x + w - frame} y2={y + h * 0.68} stroke="#1c1917" strokeWidth="0.7" />
+      <circle cx={x + w - frame * 2.1} cy={y + h * 0.52} r={Math.max(1.5, frame * 0.32)} fill="#1c1917" />
+    </g>
+  )
+}
+
+function FacadeHeights({ X, Y, length, wallH, ridge, openings }) {
+  const windows = openings.filter((item) => item.kind === 'window')
+  const marks = [{ y: 0, text: '0' }]
+  if (windows.length) {
+    const sill = Math.min(...windows.map((item) => item.y0))
+    const head = Math.max(...windows.map((item) => item.y1))
+    marks.push({ y: sill, text: formatMm(sill) })
+    marks.push({ y: head, text: formatMm(head) })
+  }
+  marks.push({ y: wallH, text: formatMm(wallH) })
+  marks.push({ y: ridge, text: formatMm(ridge) })
+  const unique = []
+  marks.forEach((mark) => {
+    if (!unique.some((item) => Math.abs(item.y - mark.y) < 0.08)) unique.push(mark)
+  })
+  const x = X(length + 0.72)
+  const x2 = X(length + 1.45)
+  return (
+    <g fill="#1c1917">
+      <line x1={x} y1={Y(0)} x2={x} y2={Y(ridge)} stroke="#292524" strokeWidth={0.85} />
+      <line x1={x2} y1={Y(0)} x2={x2} y2={Y(ridge)} stroke="#292524" strokeWidth={0.85} />
+      {unique.map((mark) => (
+        <g key={`${mark.text}-${mark.y}`}>
+          <line x1={X(length)} y1={Y(mark.y)} x2={x + 4} y2={Y(mark.y)} stroke="#a8a29e" strokeWidth={0.55} />
+          <line x1={x - 3.5} y1={Y(mark.y) - 3.5} x2={x + 3.5} y2={Y(mark.y) + 3.5} stroke="#292524" strokeWidth={0.8} />
+          <text x={x + 7} y={Y(mark.y) + 3} fontSize="10" stroke="none">{mark.text}</text>
+        </g>
+      ))}
+      <line x1={X(0)} y1={Y(-0.42)} x2={X(length)} y2={Y(-0.42)} stroke="#292524" strokeWidth={0.85} />
+      <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(-0.55)} stroke="#a8a29e" strokeWidth={0.55} />
+      <line x1={X(length)} y1={Y(0)} x2={X(length)} y2={Y(-0.55)} stroke="#a8a29e" strokeWidth={0.55} />
+      <text x={(X(0) + X(length)) / 2} y={Y(-0.42) + 12} textAnchor="middle" fontSize="10">{formatMm(length)}</text>
+      <text x={x2 + 8} y={(Y(0) + Y(ridge)) / 2} fontSize="10" transform={`rotate(90 ${x2 + 8} ${(Y(0) + Y(ridge)) / 2})`}>{formatMm(ridge)}</text>
+    </g>
+  )
+}
+
 export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
   const hostRef = useRef(null)
   const [size, setSize] = useState({ w: 900, h: 640 })
@@ -106,19 +171,51 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
     return () => observer.disconnect()
   }, [])
 
-  const pad = 56
-  const scale = Math.min((size.w - pad * 2) / layout.length, (size.h - pad * 2) / Math.max(layout.height, 0.1))
-  const ox = (size.w - layout.length * scale) / 2
-  const base = (size.h + layout.height * scale) / 2
-  const X = (u) => ox + u * scale
-  const Y = (y) => base - y * scale
+  const roof = roofModel(plan)
+  const gableEnd = roof.alongX ? (side === 'east' || side === 'west') : (side === 'north' || side === 'south')
+  const overhang = roof.overhang
+  const wallH = layout.height
+  const rise = roof.type === 'flat' ? roof.rise : roof.rise
+  const ridge = wallH + rise
+  const contentLeft = -overhang - 0.15
+  const contentRight = layout.length + overhang + 1.7
+  const contentTop = ridge + 0.4
+  const contentBottom = -0.85
+  const worldW = contentRight - contentLeft
+  const worldH = contentTop - contentBottom
+  const pageW = 420
+  const pageH = 297
+  const margin = 12
+  const titleW = 84
+  const titleH = 54
+  const frame = { x: margin, y: margin, w: pageW - margin * 2, h: pageH - margin * 2 }
+  const drawW = frame.w - titleW - 8
+  const drawH = frame.h - 16
+  const ratio = worldW * 20 <= drawW && worldH * 20 <= drawH ? 50 : 100
+  const mm = 1000 / ratio
+  const oxMm = frame.x + 8 + Math.max(0, (drawW - worldW * mm) / 2)
+  const oyMm = frame.y + 8 + Math.max(0, (drawH - worldH * mm) / 2)
+  const sheetPad = 12
+  const availW = Math.max(280, size.w - sheetPad * 2)
+  const availH = Math.max(200, size.h - sheetPad * 2)
+  let sheetW = availW
+  let sheetH = sheetW / (pageW / pageH)
+  if (sheetH > availH) {
+    sheetH = availH
+    sheetW = sheetH * (pageW / pageH)
+  }
+  const sheet = { x: (size.w - sheetW) / 2, y: (size.h - sheetH) / 2, w: sheetW, h: sheetH, k: sheetW / pageW }
+  const k = sheet.k
+  const X = (u) => sheet.x + (oxMm + (u - contentLeft) * mm) * k
+  const Y = (y) => sheet.y + (oyMm + (contentTop - y) * mm) * k
+  const metres = (value) => value * mm * k
   const toFacade = (event) => {
     const rect = hostRef.current.getBoundingClientRect()
     const px = event.clientX - rect.left
     const py = event.clientY - rect.top
     return {
-      u: Math.max(0, Math.min(layout.length, (px - ox) / scale)),
-      y: Math.max(0, Math.min(layout.height, (base - py) / scale)),
+      u: contentLeft + ((px - sheet.x) / k - oxMm) / mm,
+      y: contentTop - ((py - sheet.y) / k - oyMm) / mm,
     }
   }
   const hitZone = (point) => {
@@ -194,62 +291,77 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
             const zone = hitZone(point)
             setMenu({ kind: zone ? 'zone' : 'facade', id: zone?.id, x: event.clientX, y: event.clientY, at: point })
           }}
-          style={{ display: 'block', background: '#fbfaf7', touchAction: 'none', cursor: tool === 'rect' ? 'crosshair' : 'default' }}
+          style={{ display: 'block', background: '#d6d3d1', touchAction: 'none', cursor: tool === 'rect' ? 'crosshair' : 'default' }}
         >
           <PatternDefs />
-          <text x={ox} y={Y(layout.height) - 16} fontSize="14" fontWeight="700" fill="#1c1917">Julkisivu {layout.name}</text>
-          {paints.filter((piece) => piece.materialId).map((piece, index) => (
-            <rect
-              key={`${piece.wallId}-${index}-${piece.y0}`}
-              x={X(piece.u0)}
-              y={Y(piece.y1)}
-              width={Math.max(0, (piece.u1 - piece.u0) * scale)}
-              height={Math.max(0, (piece.y1 - piece.y0) * scale)}
-              fill={`url(#clad-${claddingOf(piece.materialId).id})`}
-              stroke="#44403c"
-              strokeWidth="0.4"
-            />
-          ))}
-          {layout.openings.map((opening) => (
-            <g key={opening.id}>
+          <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.3} />
+          <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
+          <line x1={X(-overhang - 0.8)} y1={Y(-0.06)} x2={X(layout.length + overhang + 1.1)} y2={Y(-0.06)} stroke="#44403c" strokeWidth={2.4} />
+          <line x1={X(-overhang - 0.35)} y1={Y(0)} x2={X(layout.length + overhang + 0.45)} y2={Y(0)} stroke="#1c1917" strokeWidth={1.3} />
+          {paints.filter((piece) => piece.materialId && piece.y1 > 0.3).map((piece, index) => {
+            const y0 = Math.max(piece.y0, 0.3)
+            return (
               <rect
-                x={X(opening.u0)}
-                y={Y(opening.y1)}
-                width={(opening.u1 - opening.u0) * scale}
-                height={(opening.y1 - opening.y0) * scale}
-                fill="#f8fafc"
-                stroke="#1c1917"
-                strokeWidth="1.3"
+                key={`${piece.wallId}-${index}-${piece.y0}`}
+                x={X(piece.u0)}
+                y={Y(piece.y1)}
+                width={Math.max(0, metres(piece.u1 - piece.u0))}
+                height={Math.max(0, metres(piece.y1 - y0))}
+                fill={`url(#clad-${claddingOf(piece.materialId).id})`}
+                stroke="#44403c"
+                strokeWidth="0.35"
               />
-              {opening.kind === 'window' && (
-                <g stroke="#1c1917" strokeWidth="0.8">
-                  <line x1={X(opening.u0)} y1={Y((opening.y0 + opening.y1) / 2)} x2={X(opening.u1)} y2={Y((opening.y0 + opening.y1) / 2)} />
-                  <line x1={X((opening.u0 + opening.u1) / 2)} y1={Y(opening.y0)} x2={X((opening.u0 + opening.u1) / 2)} y2={Y(opening.y1)} />
-                </g>
-              )}
+            )
+          })}
+          <rect x={X(0)} y={Y(0.3)} width={metres(layout.length)} height={metres(0.3)} fill="#9ca3af" stroke="#1c1917" strokeWidth={0.9} />
+          {gableEnd ? (
+            <polygon
+              points={`${X(-overhang)},${Y(wallH)} ${X(layout.length / 2)},${Y(ridge)} ${X(layout.length + overhang)},${Y(wallH)}`}
+              fill="#e7e5e4"
+              stroke="#1c1917"
+              strokeWidth={1.2}
+              strokeLinejoin="miter"
+            />
+          ) : (
+            <g>
+              <polygon
+                points={`${X(-overhang)},${Y(wallH)} ${X(layout.length + overhang)},${Y(wallH)} ${X(layout.length + overhang)},${Y(ridge)} ${X(-overhang)},${Y(ridge)}`}
+                fill="#e7e5e4"
+                stroke="#1c1917"
+                strokeWidth={1.15}
+              />
+              <line x1={X(-overhang)} y1={Y(ridge)} x2={X(layout.length + overhang)} y2={Y(ridge)} stroke="#1c1917" strokeWidth={1.5} />
             </g>
+          )}
+          <rect x={X(-overhang)} y={Y(wallH)} width={metres(layout.length + overhang * 2)} height={metres(0.14)} fill="#d6d3d1" stroke="#1c1917" strokeWidth={0.8} />
+          {layout.openings.map((opening) => (
+            <ElevationOpening key={opening.id} opening={opening} X={X} Y={Y} metres={metres} />
           ))}
           {draft && cursor && (
             <rect
               x={X(Math.min(draft.u, cursor.u))}
               y={Y(Math.max(draft.y, cursor.y))}
-              width={Math.abs(cursor.u - draft.u) * scale}
-              height={Math.abs(cursor.y - draft.y) * scale}
+              width={metres(Math.abs(cursor.u - draft.u))}
+              height={metres(Math.abs(cursor.y - draft.y))}
               fill="#0f766e33"
               stroke="#0f766e"
               strokeDasharray="4 3"
             />
           )}
-          <line x1={X(0)} y1={Y(0)} x2={X(layout.length)} y2={Y(0)} stroke="#1c1917" strokeWidth="1.2" />
-          <text x={(X(0) + X(layout.length)) / 2} y={Y(0) + 16} textAnchor="middle" fontSize="11" fill="#1c1917">{formatMm(layout.length)}</text>
-          <text x={X(layout.length) + 8} y={(Y(0) + Y(layout.height)) / 2} fontSize="11" fill="#1c1917" transform={`rotate(90 ${X(layout.length) + 8} ${(Y(0) + Y(layout.height)) / 2})`}>{formatMm(layout.height)}</text>
+          <FacadeHeights X={X} Y={Y} metres={metres} length={layout.length} wallH={wallH} ridge={ridge} openings={layout.openings} />
           <g data-testid="facade-legend">
             {areas.map((row, index) => (
-              <g key={row.id} transform={`translate(${ox} ${Y(0) + 28 + index * 16})`}>
+              <g key={row.id} transform={`translate(${sheet.x + 18} ${sheet.y + 18 + index * 16})`}>
                 <rect width="14" height="10" fill={`url(#clad-${row.item.id})`} stroke="#44403c" strokeWidth="0.5" />
                 <text x="18" y="9" fontSize="11" fill="#1c1917">{row.item.name} {formatArea(row.area)}</text>
               </g>
             ))}
+          </g>
+          <g data-testid="facade-title">
+            <rect x={sheet.x + (frame.x + frame.w - titleW - 2) * k} y={sheet.y + (frame.y + frame.h - titleH - 2) * k} width={titleW * k} height={titleH * k} fill="#fff" stroke="#1c1917" strokeWidth={1} />
+            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 14) * k} fontSize="13" fontWeight="750" fill="#1c1917">Julkisivu {layout.name}</text>
+            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 30) * k} fontSize="11" fill="#292524">Mittakaava 1:{ratio}</text>
+            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 44) * k} fontSize="11" fill="#292524">{roof.type === 'gable' ? 'Harjakatto' : roof.type === 'hip' ? 'Aumakatto' : roof.type === 'shed' ? 'Pulpettikatto' : 'Tasakatto'}</text>
           </g>
         </svg>
         {menu && (

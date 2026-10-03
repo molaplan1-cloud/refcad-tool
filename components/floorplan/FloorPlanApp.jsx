@@ -54,8 +54,10 @@ import {
   addServiceRun,
   autoRouteAll,
   buildServicePdf,
+  SERVICE_SYSTEMS,
   ensureServices,
   hitService,
+  layerVisible,
   snapServicePoint,
 } from '@/lib/services'
 
@@ -114,6 +116,46 @@ function sheetPixels(size, plan) {
     k: w / layout.pageW,
     layout,
   }
+}
+
+function RoomName({ item, label, X, Y }) {
+  const poly = item.polygon || []
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  poly.forEach((point) => {
+    const x = X(point.x)
+    const y = Y(point.z)
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+  })
+  const boxW = Math.max(16, maxX - minX - 8)
+  const boxH = Math.max(16, maxY - minY - 6)
+  const name = item.name || 'Huone'
+  const whole = boxW / Math.max(name.length * 0.58, 1)
+  const splitAt = whole >= 9.5 || name.length <= 8
+    ? name.length
+    : (name.indexOf('huone') > 2 ? name.indexOf('huone') : Math.ceil(name.length / 2))
+  const lines = splitAt < name.length ? [name.slice(0, splitAt), name.slice(splitAt)] : [name]
+  const longest = Math.max(...lines.map((line) => line.length), 1)
+  const font = Math.max(7.5, Math.min(13, boxW / (longest * 0.6), boxH / (lines.length + 1.2)))
+  const areaSize = Math.max(7, font - 1.5)
+  const cx = X(label.x)
+  const cy = Y(label.z)
+  const lineH = font + 1
+  const blockH = lines.length * lineH + areaSize + 3
+  const top = cy - blockH / 2 + font
+  return (
+    <>
+      {lines.map((line, index) => (
+        <text key={`${line}-${index}`} x={cx} y={top + index * lineH} textAnchor="middle" fontSize={font} fontWeight={700} fill="#1c1917" stroke="#fbfaf7" strokeWidth={3.2} paintOrder="stroke">{line}</text>
+      ))}
+      <text x={cx} y={top + lines.length * lineH + 1} textAnchor="middle" fontSize={areaSize} fill="#44403c" stroke="#fbfaf7" strokeWidth={3} paintOrder="stroke">{formatArea(item.area)}</text>
+    </>
+  )
 }
 
 function DimLine({ dim, offset, X, Y }) {
@@ -663,6 +705,8 @@ export default function FloorPlanApp() {
   })
   const totalArea = visibleRooms(plan).reduce((sum, item) => sum + item.area, 0)
   const dims = dimensionChains(plan)
+  const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
+  const sheetTitle = activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva'
   const liveEnd = draft && snappedCursor ? snappedCursor : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
@@ -839,17 +883,22 @@ export default function FloorPlanApp() {
                     strokeWidth={1.2}
                   />
                 ))}
-                {(plan.walls || []).map((wall) => wallQuads(wall, plan.openings, plan.walls, plan).map((quad, index) => (
-                  <polygon
-                    key={`${wall.id}-${index}`}
-                    points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
-                    fill={wall.materialId
-                      ? materialOf(wall.kind === 'interior' ? 'interior' : 'exterior', wall.materialId).color
-                      : (wall.kind === 'exterior' || wall.kind === 'bearing' ? 'url(#poche)' : '#6b6560')}
-                    stroke={pick?.kind === 'wall' && pick.id === wall.id ? '#0f766e' : 'none'}
-                    strokeWidth={1.6}
-                  />
-                )))}
+                {(plan.walls || []).map((wall) => wallQuads(wall, plan.openings, plan.walls, plan).map((quad, index) => {
+                  const interior = wall.kind === 'interior' || wall.kind === 'partition'
+                  const selected = pick?.kind === 'wall' && pick.id === wall.id
+                  return (
+                    <polygon
+                      key={`${wall.id}-${index}`}
+                      points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
+                      fill={wall.materialId
+                        ? materialOf(interior ? 'interior' : 'exterior', wall.materialId).color
+                        : (interior ? '#e7e5e4' : 'url(#poche)')}
+                      stroke={selected ? '#0f766e' : '#1c1917'}
+                      strokeWidth={interior ? 1.2 : 0.45}
+                      strokeLinejoin="miter"
+                    />
+                  )
+                }))}
                 {(plan.openings || []).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
                   if (!wall) return null
@@ -905,41 +954,11 @@ export default function FloorPlanApp() {
                     </g>
                   )
                 })}
-                {shownRooms.map((item) => {
-                  const label = roomLabelPoint(item, plan.fixtures, plan.openings, plan.walls)
-                  return (
-                    <g
-                      key={`label-${item.id}`}
-                      data-testid="room-label"
-                      data-name={item.name}
-                      onContextMenu={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        const world = toWorld(event)
-                        choose({ kind: 'room', id: item.id })
-                        setMenu({ x: event.clientX, y: event.clientY, kind: 'room', id: item.id, at: world })
-                      }}
-                      style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
-                      onPointerDown={(event) => {
-                        if (event.button !== 0) return
-                        event.stopPropagation()
-                        setSelectedRoom(item.id)
-                        setSelectedFixture(null)
-                        dragLabel.current = item.id
-                        dragBefore.current = plan
-                      }}
-                    >
-                      <rect x={X(label.x) - 46} y={Y(label.z) - 16} width={92} height={34} fill="transparent" />
-                      <text x={X(label.x)} y={Y(label.z) - 2} textAnchor="middle" fontSize={13} fontWeight={700} fill="#1c1917">{item.name}</text>
-                      <text x={X(label.x)} y={Y(label.z) + 13} textAnchor="middle" fontSize={11} fill="#44403c">{formatArea(item.area)}</text>
-                    </g>
-                  )
-                })}
                 {plan.walls.length > 0 && (
                   <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
-                    {dims.rooms.map((dim, index) => <DimLine key={`room-${index}-${dim.label}`} dim={dim} offset={0.4} X={X} Y={Y} />)}
-                    {dims.chains.map((dim, index) => <DimLine key={`chain-${index}-${dim.label}`} dim={dim} offset={0.72} X={X} Y={Y} />)}
-                    {dims.overall.map((dim, index) => <DimLine key={`overall-${index}`} dim={dim} offset={1.4} X={X} Y={Y} />)}
+                    {dims.rooms.map((dim, index) => <DimLine key={`room-${index}-${dim.label}`} dim={dim} offset={0} X={X} Y={Y} />)}
+                    {dims.chains.map((dim, index) => <DimLine key={`chain-${index}-${dim.label}`} dim={dim} offset={0.48} X={X} Y={Y} />)}
+                    {dims.overall.map((dim, index) => <DimLine key={`overall-${index}`} dim={dim} offset={0.82} X={X} Y={Y} />)}
                   </g>
                 )}
                 {liveEnd && tool !== 'room' && (
@@ -1018,7 +1037,7 @@ export default function FloorPlanApp() {
                       <g data-testid="title-block">
                         <rect x={tx} y={ty} width={tw} height={th} fill="#fff" stroke="#1c1917" strokeWidth={1} />
                         <line x1={tx} y1={ty + header} x2={tx + tw} y2={ty + header} stroke="#1c1917" strokeWidth={0.7} />
-                        <text x={tx + 8} y={ty + header * 0.68} fontSize={13} fontWeight={750} fill="#1c1917">Pohjakuva</text>
+                        <text x={tx + 8} y={ty + header * 0.68} fontSize={13} fontWeight={750} fill="#1c1917">{sheetTitle}</text>
                         {lines.map((line, index) => (
                           <text key={`${index}-${line}`} x={tx + 8} y={top + step * index} fontSize={10} fill="#292524">{line}</text>
                         ))}
@@ -1041,10 +1060,44 @@ export default function FloorPlanApp() {
                   X={X}
                   Y={Y}
                   sheet={sheet}
+                  legendBox={{
+                    x: sheet.x + layout.title.x * k,
+                    y: sheet.y + 70,
+                    w: layout.title.w * k,
+                  }}
                   interactive={!svcTool}
                   preview={svcTool === 'run' ? { points: svcPoints, cursor: cursor ? snapServicePoint(cursor, plan, { mode: 'free', system: svcSystem }) : null } : null}
                   onContext={openServiceMenu}
                 />
+                {shownRooms.map((item) => {
+                  const label = roomLabelPoint(item, plan.fixtures, plan.openings, plan.walls)
+                  return (
+                    <g
+                      key={`label-${item.id}`}
+                      data-testid="room-label"
+                      data-name={item.name}
+                      onContextMenu={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        const world = toWorld(event)
+                        choose({ kind: 'room', id: item.id })
+                        setMenu({ x: event.clientX, y: event.clientY, kind: 'room', id: item.id, at: world })
+                      }}
+                      style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) return
+                        event.stopPropagation()
+                        setSelectedRoom(item.id)
+                        setSelectedFixture(null)
+                        dragLabel.current = item.id
+                        dragBefore.current = plan
+                      }}
+                    >
+                      <rect x={X(label.x) - 28} y={Y(label.z) - 16} width={56} height={34} fill="transparent" />
+                      <RoomName item={item} label={label} X={X} Y={Y} />
+                    </g>
+                  )
+                })}
                 {plan.walls.length === 0 && (
                   <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">Piirrä ulkoseinät tai avaa esimerkkitalo</text>
                 )}
