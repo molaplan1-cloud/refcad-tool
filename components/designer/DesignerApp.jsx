@@ -868,6 +868,7 @@ export default function DesignerApp({
         background: '#14181f', borderBottom: '1px solid #0c0f14', color: '#f5f5f4',
       }}>
         <Link href="/projects" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, letterSpacing: -0.2, flexShrink: 0 }}>RefCAD</Link>
+        <Link href="/pohjakuva" data-testid="open-floorplan" title="Talon pohjakuva" style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>Pohjakuva</Link>
         <input
           aria-label="Projektin nimi"
           value={name}
