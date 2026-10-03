@@ -26,6 +26,18 @@ const DIST = {
   none: 'Suora sähkö',
 }
 
+const ELECTRIC_KIND = {
+  'floor-heat': 'Sähköinen lattialämmitys',
+  'ceiling-heat': 'Kattolämmitys',
+  radiator: 'Sähköpatteri',
+  thermostat: 'Termostaatti',
+  actuator: 'Toimilaite',
+  'manifold-pump': 'Jakotukin pumppu',
+}
+
+const cell = { padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }
+const head = { textAlign: 'left', borderBottom: '1px solid #1c1917', padding: '6px 8px' }
+
 export function HeatingSchematic({ plan }) {
   const heating = normalizeHeating(plan)
   const report = ensureServices(plan).heat || {}
@@ -88,40 +100,86 @@ export function HeatingTable({ plan }) {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, background: '#fff' }}>
         <thead>
           <tr>
-            {['Huone', 'Tyyppi', 'Piiri', 'Teho', 'Virtaama', 'Pituus', 'Jakoväli', 'Putki'].map((title) => (
-              <th key={title} style={{ textAlign: 'left', borderBottom: '1px solid #1c1917', padding: '6px 8px' }}>{title}</th>
+            {['Huone', 'Pinta-ala', 'Tyyppi', 'Piiri', 'Teho', 'Virtaama', 'Pituus', 'Jakoväli', 'Putki'].map((title) => (
+              <th key={title} style={head}>{title}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {(report.loops || []).map((loop) => (
-            <tr key={`${loop.roomId}-${loop.index}`} data-testid="loop-row">
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{loop.roomName}</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>Lattialämmitys</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{loop.index}</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{loop.power} W</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{fmt(loop.flow, 3)} l/s</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{fmt(loop.length, 1)} m</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{fmt(loop.spacing * 1000, 0)} mm</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>PEX {loop.size}</td>
+            <tr key={`${loop.roomId}-${loop.index}-${loop.outlet || ''}`} data-testid="loop-row">
+              <td style={cell}>{loop.roomName}</td>
+              <td style={cell}>{loop.area ? `${fmt(loop.area, 1)} m²` : ''}</td>
+              <td style={cell}>Lattialämmitys</td>
+              <td style={cell}>{loop.outlet || loop.index}</td>
+              <td style={cell}>{loop.power} W</td>
+              <td style={cell}>{fmt(loop.flow, 3)} l/s</td>
+              <td style={cell}>{fmt(loop.length, 1)} m</td>
+              <td style={cell}>{fmt(loop.spacing * 1000, 0)} mm</td>
+              <td style={cell}>PEX {loop.size}</td>
             </tr>
           ))}
           {(report.radiators || []).map((row) => (
             <tr key={row.id} data-testid="radiator-row">
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{row.roomName}</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>Patteri</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{row.name}</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{row.power} W</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>{fmt(row.flow, 3)} l/s</td>
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }} />
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }} />
-              <td style={{ padding: '6px 8px', borderBottom: '1px solid #e7e5e4' }}>PEX {row.size}</td>
+              <td style={cell}>{row.roomName}</td>
+              <td style={cell} />
+              <td style={cell}>Patteri</td>
+              <td style={cell}>{row.name}</td>
+              <td style={cell}>{row.power} W</td>
+              <td style={cell}>{fmt(row.flow, 3)} l/s</td>
+              <td style={cell} />
+              <td style={cell} />
+              <td style={cell}>PEX {row.size}</td>
             </tr>
           ))}
           {(report.loops || []).length + (report.radiators || []).length === 0 && (
             <tr>
-              <td colSpan={8} style={{ padding: 12, color: '#78716c' }}>Ei piirejä. Valitse jakotapa talon asetuksista.</td>
+              <td colSpan={9} style={{ padding: 12, color: '#78716c' }}>Ei piirejä. Valitse lämmitys huoneen tai talon asetuksista.</td>
             </tr>
+          )}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 16, fontWeight: 750, margin: '18px 0 8px' }}>Jakotukit</div>
+      <table data-testid="manifold-schedule" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, background: '#fff', marginBottom: 8 }}>
+        <thead>
+          <tr>
+            {['Jakotukki', 'Lähdöt', 'Huoneet'].map((title) => <th key={title} style={head}>{title}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {(report.manifolds || []).map((row) => (
+            <tr key={row.id} data-testid="manifold-row">
+              <td style={cell}>{row.name}</td>
+              <td style={cell}>{row.outlets}</td>
+              <td style={cell}>{(row.rooms || []).join(', ')}</td>
+            </tr>
+          ))}
+          {(report.manifolds || []).length === 0 && (
+            <tr><td colSpan={3} style={{ padding: 12, color: '#78716c' }}>Ei jakotukkeja.</td></tr>
+          )}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 16, fontWeight: 750, margin: '18px 0 8px' }}>Sähkölämmitys</div>
+      <table data-testid="electric-heat-schedule" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, background: '#fff' }}>
+        <thead>
+          <tr>
+            {['Huone', 'Laite', 'Teho', 'Jännite', 'Ryhmä', 'Johto', 'Vikavirtasuoja'].map((title) => <th key={title} style={head}>{title}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {(report.electric || []).map((row) => (
+            <tr key={row.id} data-testid="electric-heat-row">
+              <td style={cell}>{row.roomName}</td>
+              <td style={cell}>{row.name || ELECTRIC_KIND[row.kind] || row.kind}</td>
+              <td style={cell}>{row.power} W</td>
+              <td style={cell}>{row.voltage ? `${row.voltage} V` : ''}</td>
+              <td style={cell}>{row.circuit || ''}</td>
+              <td style={cell}>{row.cable || ''}</td>
+              <td style={cell}>{row.rcd ? 'kyllä' : ''}</td>
+            </tr>
+          ))}
+          {(report.electric || []).length === 0 && (
+            <tr><td colSpan={7} style={{ padding: 12, color: '#78716c' }}>Ei sähkölämmityslaitteita.</td></tr>
           )}
         </tbody>
       </table>
