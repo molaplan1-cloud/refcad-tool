@@ -19,11 +19,8 @@ import {
   deleteWall,
   detectRoomAt,
   detectRooms,
-  dimensionChains,
   dimensionRotation,
   faceSide,
-  layoutDimensionLabels,
-  openingDimensions,
   resolveFaceMaterial,
   drawRoom,
   emptyPlan,
@@ -38,13 +35,15 @@ import {
   moveOpening,
   moveRoomLabel,
   openingSymbol,
+  openingTags,
   planBounds,
+  planDimensions,
+  structureMarks,
   pointInPolygon,
   duplicateFixture,
   furnishAll,
   furnishRoom,
   removeFixture,
-  roomLabelPoint,
   rotateFixture,
   segmentLength,
   viewLayout,
@@ -85,6 +84,8 @@ import {
 } from '@/lib/cadEdit'
 import { CadPrompt, CadToolbar } from './CadTools'
 import { buildPlanPdf } from '@/lib/roominfo'
+import { applyDisplay, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { DisplayPanel } from './DisplayPanel'
 import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
@@ -140,6 +141,7 @@ import {
   hitService,
   layerVisible,
   roomKind,
+  setServiceLayer,
   snapServicePoint,
   updateServiceNode,
 } from '@/lib/services'
@@ -294,68 +296,31 @@ function sheetPixels(size, plan, site = false) {
   }
 }
 
-function roomNameLayout(name, boxW, boxH) {
-  const text = String(name || 'Huone').trim() || 'Huone'
-  const words = text.split(/\s+/).filter(Boolean)
-  const widthAt = (line, font) => line.length * font * 0.56
-  const shrink = (line, maxW, cap) => {
-    let font = cap
-    while (font > 6.2 && widthAt(line, font) > maxW) font -= 0.4
-    return Math.max(6.2, font)
-  }
-  if (words.length <= 1) return { lines: [text], font: shrink(text, boxW, Math.min(13, boxH * 0.42)) }
-  const longest = words.reduce((best, word) => (word.length > best.length ? word : best), words[0])
-  let font = Math.min(12, shrink(longest, boxW, 12), boxH / (Math.min(words.length, 3) + 1.8))
-  font = Math.max(6.2, font)
-  const lines = []
-  let current = ''
-  words.forEach((word) => {
-    const trial = current ? `${current} ${word}` : word
-    if (!current || widthAt(trial, font) <= boxW) current = trial
-    else {
-      lines.push(current)
-      current = word
-    }
-  })
-  if (current) lines.push(current)
-  return { lines, font }
-}
-
-function RoomName({ item, label, X, Y }) {
-  const poly = item.polygon || []
-  let minX = Infinity
-  let maxX = -Infinity
-  let minY = Infinity
-  let maxY = -Infinity
-  poly.forEach((point) => {
-    const x = X(point.x)
-    const y = Y(point.z)
-    minX = Math.min(minX, x)
-    maxX = Math.max(maxX, x)
-    minY = Math.min(minY, y)
-    maxY = Math.max(maxY, y)
-  })
-  const boxW = Math.max(16, maxX - minX - 8)
-  const boxH = Math.max(16, maxY - minY - 6)
-  const { lines, font } = roomNameLayout(item.name || 'Huone', boxW, boxH)
-  const areaSize = Math.max(7, font - 1.5)
+function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
   const cx = X(label.x)
   const cy = Y(label.z)
-  const lineH = font + 1
-  const blockH = lines.length * lineH + areaSize + 3
-  const top = cy - blockH / 2 + font
+  const name = label.text || ''
+  const area = label.area || ''
+  const block = (name ? nameSize : 0) + (area ? areaSize + 1 : 0)
+  const nameY = cy - block / 2 + nameSize * 0.35
+  const areaY = name ? nameY + nameSize + 1 : cy + areaSize * 0.15
   return (
     <>
-      {lines.map((line, index) => (
-        <text key={`${line}-${index}`} x={cx} y={top + index * lineH} textAnchor="middle" fontSize={font} fontWeight={700} fill="#1c1917" stroke="#fbfaf7" strokeWidth={3.2} paintOrder="stroke">{line}</text>
-      ))}
-      <text x={cx} y={top + lines.length * lineH + 1} textAnchor="middle" fontSize={areaSize} fill="#44403c" stroke="#fbfaf7" strokeWidth={3} paintOrder="stroke">{formatArea(item.area)}</text>
+      {label.leader && (
+        <line data-testid="room-leader" x1={X(label.leader.x)} y1={Y(label.leader.z)} x2={cx} y2={cy} stroke="#78716c" strokeWidth={0.7} />
+      )}
+      {name && (
+        <text x={cx} y={nameY} textAnchor="middle" fontSize={nameSize} fontWeight={700} fill="#1c1917">{name}</text>
+      )}
+      {area && (
+        <text x={cx} y={areaY} textAnchor="middle" fontSize={areaSize} fill="#57534e">{area}</text>
+      )}
     </>
   )
 }
 
-function DimLine({ dim, offset, X, Y }) {
-  const off = Number.isFinite(dim.offset) ? dim.offset : offset
+function DimLine({ dim, X, Y, fontSize, ppm }) {
+  const off = Number.isFinite(dim.offset) ? dim.offset : 0
   const x1 = X(dim.x1 + (dim.nx || 0) * off)
   const y1 = Y(dim.z1 + (dim.nz || 0) * off)
   const x2 = X(dim.x2 + (dim.nx || 0) * off)
@@ -364,17 +329,19 @@ function DimLine({ dim, offset, X, Y }) {
   const len = Math.hypot(x2 - x1, y2 - y1) || 1
   const ux = (x2 - x1) / len
   const uy = (y2 - y1) / len
-  const tick = 4.2
+  const tick = Math.max(3.2, fontSize * 0.42)
   const tx = Math.cos(ang + Math.PI / 4) * tick
   const ty = Math.sin(ang + Math.PI / 4) * tick
   const vertical = Math.abs(x2 - x1) < Math.abs(y2 - y1)
-  const textW = Math.max(22, String(dim.label).length * 6.2)
+  const textW = Math.max(fontSize * 1.6, String(dim.label).length * fontSize * 0.58)
   const textSide = dim.textSide || 0
-  const gap = !textSide && len > textW + 18 ? textW : 0
-  const mx = (x1 + x2) / 2
-  const my = (y1 + y2) / 2
-  const labelX = mx + (gap || textSide ? 0 : -uy * 11) - uy * 11 * textSide
-  const labelY = my + (gap || textSide ? 0 : ux * 11) + ux * 11 * textSide
+  const textT = Number.isFinite(dim.textT) ? dim.textT : 0.5
+  const gap = !textSide && len > textW + fontSize ? textW : 0
+  const alongX = x1 + (x2 - x1) * textT
+  const alongY = y1 + (y2 - y1) * textT
+  const side = textSide * 0.16 * ppm
+  const labelX = alongX - uy * side
+  const labelY = alongY + ux * side
   const ax1 = X(dim.ax ?? dim.x1)
   const ay1 = Y(dim.az ?? dim.z1)
   const ax2 = X(dim.bx ?? dim.x2)
@@ -383,17 +350,20 @@ function DimLine({ dim, offset, X, Y }) {
     const dx = ex - sx
     const dy = ey - sy
     const span = Math.hypot(dx, dy) || 1
-    const inset = Math.min(7, span * 0.35)
+    const inset = Math.min(fontSize * 0.7, span * 0.35)
     return { x1: sx + (dx / span) * inset, y1: sy + (dy / span) * inset, x2: ex, y2: ey }
   }
   const ext1 = gapLine(ax1, ay1, x1, y1)
   const ext2 = gapLine(ax2, ay2, x2, y2)
+  const breakAt = gap ? textT : 0.5
+  const bx = x1 + (x2 - x1) * breakAt
+  const by = y1 + (y2 - y1) * breakAt
   return (
-    <g stroke="#292524" fill="#1c1917" strokeWidth={0.7}>
-      {Math.hypot(ax1 - x1, ay1 - y1) > 8 && <line x1={ext1.x1} y1={ext1.y1} x2={ext1.x2} y2={ext1.y2} stroke="#a8a29e" strokeWidth={0.45} />}
-      {Math.hypot(ax2 - x2, ay2 - y2) > 8 && <line x1={ext2.x1} y1={ext2.y1} x2={ext2.x2} y2={ext2.y2} stroke="#a8a29e" strokeWidth={0.45} />}
-      <line x1={x1} y1={y1} x2={mx - ux * gap / 2} y2={my - uy * gap / 2} />
-      <line x1={mx + ux * gap / 2} y1={my + uy * gap / 2} x2={x2} y2={y2} />
+    <g data-testid={`dim-${dim.kind || 'dim'}`} data-label={dim.label} stroke="#44403c" fill="#292524" strokeWidth={0.6}>
+      {Math.hypot(ax1 - x1, ay1 - y1) > 6 && <line x1={ext1.x1} y1={ext1.y1} x2={ext1.x2} y2={ext1.y2} stroke="#a8a29e" strokeWidth={0.4} />}
+      {Math.hypot(ax2 - x2, ay2 - y2) > 6 && <line x1={ext2.x1} y1={ext2.y1} x2={ext2.x2} y2={ext2.y2} stroke="#a8a29e" strokeWidth={0.4} />}
+      <line x1={x1} y1={y1} x2={bx - ux * gap / 2} y2={by - uy * gap / 2} />
+      <line x1={bx + ux * gap / 2} y1={by + uy * gap / 2} x2={x2} y2={y2} />
       <line x1={x1 - tx} y1={y1 - ty} x2={x1 + tx} y2={y1 + ty} />
       <line x1={x2 - tx} y1={y2 - ty} x2={x2 + tx} y2={y2 + ty} />
       <text
@@ -401,10 +371,8 @@ function DimLine({ dim, offset, X, Y }) {
         y={labelY}
         textAnchor="middle"
         dominantBaseline="middle"
-        fontSize={11}
-        stroke="#fbfaf7"
-        strokeWidth={3}
-        paintOrder="stroke"
+        fontSize={fontSize}
+        fill="#292524"
         transform={vertical ? `rotate(${dimensionRotation(true)} ${labelX} ${labelY})` : undefined}
       >
         {dim.label}
@@ -527,6 +495,7 @@ export default function FloorPlanApp() {
   const [electricView, setElectricView] = useState(null)
   const [heatView, setHeatView] = useState(null)
   const [sheetMode, setSheetMode] = useState('plan')
+  const [displayOpen, setDisplayOpen] = useState(false)
   const [yardTool, setYardTool] = useState(null)
   const [yardPoints, setYardPoints] = useState([])
   const [wallMode, setWallMode] = useState('solid')
@@ -1255,7 +1224,7 @@ export default function FloorPlanApp() {
   useEffect(() => {
     const onKey = (event) => {
       const tag = event.target?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (event.key === 'Shift' && !event.repeat) {
         setAngleStep((value) => {
           if (value === 0) return angleMemory.current || 90
@@ -1365,6 +1334,14 @@ export default function FloorPlanApp() {
         commit(rotateYardItem(plan, pick.collection, pick.id))
       } else if ((event.key === 'r' || event.key === 'R') && selectedFixture) {
         commit(rotateFixture(plan, selectedFixture))
+      } else if (event.altKey && !event.ctrlKey && !event.metaKey && ['1', '2', '3'].includes(event.key)) {
+        event.preventDefault()
+        const preset = event.key === '1' ? 'plain' : event.key === '2' ? 'measure' : 'all'
+        const sheet = sheetMode === 'site' ? 'site' : 'plan'
+        setPlan((current) => applyDisplay(current, { preset }, sheet))
+      } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'v' && !command && tool === 'select') {
+        event.preventDefault()
+        setDisplayOpen((open) => !open)
       } else if (!event.ctrlKey && !event.metaKey && !event.altKey && !command && tool === 'select') {
         const key = event.key.toLowerCase()
         const shortcut = { m: 'move', c: 'copy', e: 'rotate', s: 'scale', f: 'mirror', b: 'array', o: 'offset', t: 'stretch', n: 'align', d: 'measure' }[key]
@@ -1390,7 +1367,7 @@ export default function FloorPlanApp() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [commit, plan, selectedFixture, undo, redoChange, tool, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints])
+  }, [commit, plan, selectedFixture, undo, redoChange, tool, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode])
 
   const loadHouse = (house, roomName, panel) => {
     const next = { ...house, services: ensureServices(house) }
@@ -1665,7 +1642,9 @@ export default function FloorPlanApp() {
   }
 
   const room = (plan.rooms || []).find((item) => item.id === selectedRoom) || null
-  const shownRooms = visibleRooms(plan).filter((item) => item.showLabel !== false)
+  const sheetKey = sheetMode === 'site' ? 'site' : 'plan'
+  const display = normalizeDisplay(plan.sheetDisplay?.[sheetKey] || plan.display)
+  const setDisplay = (patch) => setPlan((current) => applyDisplay(current, patch, sheetKey))
   const rows = materialsList(plan)
   const query = fixtureQuery.trim().toLowerCase()
   const matchesQuery = (item) => !query || item.name.toLowerCase().includes(query) || item.group.toLowerCase().includes(query)
@@ -1681,13 +1660,12 @@ export default function FloorPlanApp() {
   })
   const chimneyNotes = flueWarnings(plan)
   const totalArea = visibleRooms(plan).reduce((sum, item) => sum + item.area, 0)
-  const dims = dimensionChains(plan)
-  const dimLines = layoutDimensionLabels([
-    ...openingDimensions(plan),
-    ...dims.rooms.map((dim) => ({ ...dim, offset: 0 })),
-    ...dims.chains.map((dim) => ({ ...dim, offset: 1.05 })),
-    ...dims.overall.map((dim) => ({ ...dim, offset: 1.7 })),
-  ])
+  const dimLines = planDimensions(plan, display)
+  const roomLabels = layoutRoomLabels(visibleRooms(plan), {
+    ratio: layout.ratio,
+    showNames: display.roomNames,
+    showAreas: display.areas,
+  })
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = sheetMode === 'site' ? 'Asemapiirros' : (activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva')
   const liveEnd = draft && (tool === 'exterior' || tool === 'interior') ? (drawGuide || snapVisual?.point || null) : null
@@ -1764,6 +1742,10 @@ export default function FloorPlanApp() {
         <button type="button" data-testid="plan-new" onClick={() => { setMenu(null); setNewOpen(true) }} style={textBtn(false)}>Uusi</button>
         <button type="button" data-testid="plan-open" onClick={() => { setMenu(null); setLibraryOpen(true) }} style={textBtn(false)}>Avaa/Tallenna</button>
         <button type="button" data-testid="house-settings" onClick={() => { setPanel('house'); setMenu(null) }} style={textBtn(panel === 'house')}>Talon asetukset</button>
+        <button type="button" data-testid="open-display" onClick={() => setDisplayOpen((open) => !open)} style={textBtn(displayOpen)}>Näytä</button>
+        <button type="button" data-testid="toolbar-preset-plain" title="Pelkistetty (Alt+1)" onClick={() => setDisplay({ preset: 'plain' })} style={textBtn(display.preset === 'plain')}>Pelkistetty</button>
+        <button type="button" data-testid="toolbar-preset-measure" title="Mitoitus (Alt+2)" onClick={() => setDisplay({ preset: 'measure' })} style={textBtn(display.preset === 'measure')}>Mitoitus</button>
+        <button type="button" data-testid="toolbar-preset-all" title="Kaikki (Alt+3)" onClick={() => setDisplay({ preset: 'all' })} style={textBtn(display.preset === 'all')}>Kaikki</button>
         <button type="button" data-testid="example-house" onClick={loadExample} style={textBtn(false)}>Esimerkkitalo</button>
         <button type="button" data-testid="family-house" onClick={loadFamily} style={textBtn(false)}>Huoneisto</button>
         <button type="button" data-testid="export-floor-pdf" onClick={exportPdf} style={textBtn(false)}>PDF</button>
@@ -2041,7 +2023,7 @@ export default function FloorPlanApp() {
           {view === 'facade' ? (
             <FacadeView plan={plan} side={facadeSideId} onSide={setFacadeSideId} onApply={setPlan} onCommit={commit} />
           ) : view === '2d' ? (
-            <div ref={hostRef} style={{ flex: 1, minHeight: 0, background: '#d6d3d1' }}>
+            <div ref={hostRef} style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative' }}>
               <svg
                 ref={svgRef}
                 data-testid="floor-plan-svg"
@@ -2108,7 +2090,7 @@ export default function FloorPlanApp() {
                     </g>
                   )
                 })}
-                {sheetMode !== 'site' && (plan.fixtures || []).filter((fixture) => !fixture.hidden).map((fixture) => {
+                {sheetMode !== 'site' && display.fixtures && (plan.fixtures || []).filter((fixture) => !fixture.hidden).map((fixture) => {
                   const spec = resolveFixture(fixture)
                   const draw = drawingOf(fixture)
                   const w = px(spec.w)
@@ -2194,9 +2176,45 @@ export default function FloorPlanApp() {
                 }} />
                 {sheetMode !== 'site' && plan.walls.length > 0 && (
                   <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
-                    {dimLines.map((dim, index) => <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}`} dim={dim} offset={0} X={X} Y={Y} />)}
+                    {dimLines.map((dim, index) => (
+                      <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}-${dim.x1}`} dim={dim} X={X} Y={Y} fontSize={Math.max(6.5, 2.35 * k)} ppm={layout.scale * k} />
+                    ))}
                   </g>
                 )}
+                {sheetMode !== 'site' && display.openingSizes && openingTags(plan).map((tag) => (
+                  <text
+                    key={`tag-${tag.id}`}
+                    data-testid="opening-tag"
+                    x={X(tag.x)}
+                    y={Y(tag.z)}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize={Math.max(6, 2 * k)}
+                    fill="#44403c"
+                    transform={tag.vertical ? `rotate(-90 ${X(tag.x)} ${Y(tag.z)})` : undefined}
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {tag.label}
+                  </text>
+                ))}
+                {sheetMode !== 'site' && display.structures && structureMarks(plan).map((mark) => (
+                  <text
+                    key={`mark-${mark.id}`}
+                    data-testid="structure-mark"
+                    data-code={mark.code}
+                    x={X(mark.x)}
+                    y={Y(mark.z)}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize={Math.max(6, 1.9 * k)}
+                    fill="#0f766e"
+                    fontWeight={700}
+                    transform={mark.vertical ? `rotate(-90 ${X(mark.x)} ${Y(mark.z)})` : undefined}
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {mark.code}
+                  </text>
+                ))}
                 {liveEnd && tool !== 'room' && (
                   <g style={{ pointerEvents: 'none' }}>
                     <line x1={X(draft.x)} y1={Y(draft.z)} x2={X(liveEnd.x)} y2={Y(liveEnd.z)} stroke="#0f766e" strokeWidth={1.5 / camera.zoom} strokeDasharray={`${6 / camera.zoom} ${4 / camera.zoom}`} />
@@ -2313,37 +2331,34 @@ export default function FloorPlanApp() {
                   preview={svcTool === 'run' ? { points: svcPoints, cursor: cursor ? snapServicePoint(cursor, plan, { mode: 'free', system: svcSystem }) : null } : null}
                   onContext={openServiceMenu}
                 />
-                {shownRooms.map((item) => {
-                  const label = roomLabelPoint(item, plan.fixtures, plan.openings, plan.walls)
-                  return (
-                    <g
-                      key={`label-${item.id}`}
-                      data-testid="room-label"
-                      data-name={item.name}
-                      onContextMenu={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        const world = toWorld(event)
-                        choose({ kind: 'room', id: item.id })
-                        setMenu({ x: event.clientX, y: event.clientY, kind: 'room', id: item.id, at: world })
-                      }}
-                      style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
-                      onPointerDown={(event) => {
-                        if (event.button !== 0) return
-                        if (commandRef.current) return
-                        event.stopPropagation()
-                        choose({ kind: 'room', id: item.id })
-                        setSelectedRoom(item.id)
-                        setSelectedFixture(null)
-                        dragLabel.current = item.id
-                        dragBefore.current = plan
-                      }}
-                    >
-                      <rect x={X(label.x) - 28} y={Y(label.z) - 16} width={56} height={34} fill="transparent" />
-                      <RoomName item={item} label={label} X={X} Y={Y} />
-                    </g>
-                  )
-                })}
+                {roomLabels.map((label) => (
+                  <g
+                    key={`label-${label.id}`}
+                    data-testid="room-label"
+                    data-name={label.roomName}
+                    data-text={label.text}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      const world = toWorld(event)
+                      choose({ kind: 'room', id: label.id })
+                      setMenu({ x: event.clientX, y: event.clientY, kind: 'room', id: label.id, at: world })
+                    }}
+                    style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
+                    onPointerDown={(event) => {
+                      if (event.button !== 0) return
+                      if (commandRef.current) return
+                      event.stopPropagation()
+                      choose({ kind: 'room', id: label.id })
+                      setSelectedRoom(label.id)
+                      setSelectedFixture(null)
+                      dragLabel.current = label.id
+                      dragBefore.current = plan
+                    }}
+                  >
+                    <SheetRoomLabel label={label} X={X} Y={Y} nameSize={Math.max(7, 2.8 * k)} areaSize={Math.max(6, 2.15 * k)} />
+                  </g>
+                ))}
                 {plan.walls.length === 0 && (
                   <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">Piirrä ulkoseinät tai avaa esimerkkitalo</text>
                 )}
@@ -2377,6 +2392,14 @@ export default function FloorPlanApp() {
                 <AngleMarks marks={cornerAngles(plan.walls)} X={X} Y={Y} zoom={camera.zoom} />
                 </g>
               </svg>
+              {displayOpen && (
+                <DisplayPanel
+                  plan={plan}
+                  display={display}
+                  onChange={setDisplay}
+                  onLayer={(id, visible) => setPlan((current) => setServiceLayer(current, id, visible))}
+                />
+              )}
             </div>
           ) : (
             <div ref={hostRef} data-testid="floor-3d" style={{ flex: 1, minHeight: 0, position: 'relative', background: '#e7e5e4' }}>
