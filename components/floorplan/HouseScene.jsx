@@ -222,8 +222,14 @@ function markOf(selected, hovered, pick) {
 
 function noopRaycast() {}
 
+function outlineScale(args, mark) {
+  const pad = mark === 'selected' ? 0.07 : 0.035
+  return args.map((size) => (Math.max(size, 0.02) + pad * 2) / Math.max(size, 0.02))
+}
+
 function Solid({ args, position, rotation, color, map, opacity = 1, edges = true, pick, mark }) {
   const transparent = opacity < 0.98
+  const face = mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#ccfbf1' : color
   const edge = mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : '#1e293b'
   return (
     <mesh
@@ -236,13 +242,21 @@ function Solid({ args, position, rotation, color, map, opacity = 1, edges = true
     >
       <boxGeometry args={args} />
       <meshLambertMaterial
-        color={mark ? '#ccfbf1' : color}
+        color={face}
+        emissive={mark === 'selected' ? '#115e59' : '#000000'}
+        emissiveIntensity={mark === 'selected' ? 0.55 : 0}
         map={mark || transparent ? null : map || null}
         transparent={transparent}
         opacity={opacity}
         depthWrite={!transparent}
       />
       {edges && !transparent && <Edges threshold={20} color={edge} />}
+      {mark && (
+        <mesh scale={outlineScale(args, mark)} raycast={noopRaycast}>
+          <boxGeometry args={args} />
+          <meshBasicMaterial color={edge} side={THREE.BackSide} />
+        </mesh>
+      )}
     </mesh>
   )
 }
@@ -271,7 +285,12 @@ function WallMesh({ plan, mode, selected, hovered }) {
           const map = mode !== 'solid' ? null : cladding ? repeatedCladding(cladding.id, span, height) : finishTexture('interior', finish.id)
           const zone = wall.kind === 'exterior' ? zoneCovering(plan, wall, (piece.from + piece.to) / 2, y) : null
           const pick = zone ? { kind: 'zone', id: zone.id, wallId: wall.id } : { kind: 'wall', id: wall.id }
-          const mark = markOf(selected, hovered, pick) || ((selected?.kind === 'wall' && selected.id === wall.id && !zone) ? 'selected' : null)
+          const onThisWall = (item) => item?.kind === 'wall' && item.id === wall.id
+          const mark = samePick(selected, pick) || onThisWall(selected)
+            ? 'selected'
+            : samePick(hovered, pick) || onThisWall(hovered)
+              ? 'hover'
+              : null
           return (
             <Solid
               key={`${wall.id}-${piece.from}-${piece.to}-${piece.y0}-${piece.y1}-${piece.materialId || 'base'}`}
@@ -333,13 +352,16 @@ function FloorMesh({ room, translucent, selected, hovered }) {
   return (
     <mesh geometry={geom} position={[0, 0.012, 0]} receiveShadow={false} userData={{ pick }}>
       <meshLambertMaterial
-        color={mark ? '#99f6e4' : finish.color}
+        color={mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#99f6e4' : finish.color}
+        emissive={mark === 'selected' ? '#115e59' : '#000000'}
+        emissiveIntensity={mark === 'selected' ? 0.45 : 0}
         map={mark || translucent ? null : map}
         transparent={Boolean(translucent) && !mark}
         opacity={translucent && !mark ? 0.28 : 1}
         depthWrite={!translucent || Boolean(mark)}
         side={THREE.DoubleSide}
       />
+      {mark && <Edges threshold={1} color={mark === 'selected' ? '#0f766e' : '#14b8a6'} />}
     </mesh>
   )
 }
@@ -432,13 +454,16 @@ function RoofMesh({ plan, mode, selected, hovered }) {
     <group>
       <mesh geometry={geom} userData={{ pick }} raycast={ghost ? noopRaycast : undefined}>
         <meshLambertMaterial
-          color={mark ? '#99f6e4' : ghost ? '#94a3b8' : finish.color}
+          color={mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#99f6e4' : ghost ? '#94a3b8' : finish.color}
+          emissive={mark === 'selected' ? '#115e59' : '#000000'}
+          emissiveIntensity={mark === 'selected' ? 0.45 : 0}
           map={mark ? null : map}
           side={THREE.DoubleSide}
           transparent={ghost && !mark}
           opacity={ghost && !mark ? 0.15 : 1}
           depthWrite={!ghost || Boolean(mark)}
         />
+        {mark && <Edges threshold={15} color={mark === 'selected' ? '#0f766e' : '#14b8a6'} />}
       </mesh>
       {edgeSpecs.map((edge, index) => (
         <mesh key={index} position={edge.position} quaternion={edge.quaternion}>
@@ -601,9 +626,9 @@ function FixtureMesh({ fixture, selected, hovered }) {
     <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]} userData={{ pick }}>
       <FixtureBody type={fixture.type} w={w} d={d} />
       {mark && (
-        <mesh position={[0, 0.04, 0]}>
-          <boxGeometry args={[w + 0.08, 0.04, d + 0.08]} />
-          <meshBasicMaterial color={mark === 'selected' ? '#0f766e' : '#14b8a6'} />
+        <mesh position={[0, 0.45, 0]}>
+          <boxGeometry args={[w + (mark === 'selected' ? 0.14 : 0.07), 0.95, d + (mark === 'selected' ? 0.14 : 0.07)]} />
+          <meshBasicMaterial color={mark === 'selected' ? '#0f766e' : '#14b8a6'} wireframe />
         </mesh>
       )}
     </group>
@@ -734,7 +759,7 @@ export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0, sel
           translucent={layerVisible(plan, 'drain') && (plan.services?.runs || []).some((run) => run.system === 'drain')}
         />
       ))}
-      <RoomLabels plan={plan} />
+      {roofMode !== 'solid' && <RoomLabels plan={plan} />}
       <WallMesh plan={plan} mode={wallMode} selected={selected} hovered={hovered} />
       {(plan.openings || []).map((opening) => (
         <OpeningMesh key={opening.id} plan={plan} opening={opening} selected={selected} hovered={hovered} />
