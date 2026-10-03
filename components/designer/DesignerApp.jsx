@@ -29,6 +29,8 @@ import {
 } from '@/lib/placement'
 import { applyOutline, bboxOf, clampGroupTranslation, cleanOrthogonal, isRectangleOutline, scaleOutline, selfIntersects, translateOutline } from '@/lib/cadDraw'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
+import { panelSchedule } from '@/lib/sharedWalls'
+import { doorChoices, doorEquipmentPatch, doorSchedule, doorTypeById } from '@/lib/doors'
 import { buildDxf, dxfFilename } from '@/lib/dxf'
 import { buildPdf, pdfFilename } from '@/lib/pdfExport'
 import SchematicView from './SchematicView'
@@ -266,6 +268,8 @@ export default function DesignerApp({
   const snapFlags = { grid: snapOn, endpoint: true, midpoint: true, wall: true, ortho: true }
 
   const result = useMemo(() => calculateProject(rooms), [rooms])
+  const panels = useMemo(() => panelSchedule(rooms), [rooms])
+  const doors = useMemo(() => doorSchedule(rooms), [rooms])
   const placing = placingId ? getTemplate(placingId) : null
 
   const selectedRoom = rooms.find((room) => room.id === selectedId)
@@ -990,6 +994,21 @@ export default function DesignerApp({
           {roomsOpen && (
             <div style={{ padding: '4px 8px 8px' }}>
               {rooms.length === 0 && <div style={{ fontSize: 12, color: '#78716c', margin: '4px 4px 8px', lineHeight: 1.4 }}>Piirrä huone tai avaa esimerkki.</div>}
+              {panels.count > 0 && (
+                <div data-testid="panel-schedule" style={{ fontSize: 11, color: '#44403c', margin: '4px 4px 8px', lineHeight: 1.45 }}>
+                  <strong>Paneelit</strong>
+                  <div>{panels.count} kpl · {panels.net.toFixed(1)} m²</div>
+                  <div>{panels.shared} yhteistä seinää, laskettu kerran</div>
+                </div>
+              )}
+              {doors.length > 0 && (
+                <div data-testid="door-schedule" style={{ fontSize: 11, color: '#44403c', margin: '4px 4px 8px', lineHeight: 1.45 }}>
+                  <strong>Ovet</strong>
+                  {doors.map((row) => (
+                    <div key={`${row.name}-${row.uValue}`}>{row.count} × {row.name} · U {row.uValue}</div>
+                  ))}
+                </div>
+              )}
               {rooms.map((room) => (
                 <button
                   key={room.id}
@@ -1030,7 +1049,7 @@ export default function DesignerApp({
                 </div>
               )}
               {TEMPLATE_GROUPS.map((group) => {
-                const items = templatesForGroup(group.id, roomResult ? roomResult.total / 1000 : null, { showAll: showAllSizes || !roomResult })
+                const items = templatesForGroup(group.id, roomResult ? roomResult.total / 1000 : null, { showAll: showAllSizes || !roomResult, room: selectedRoom, rooms })
                 if (!items.length) return null
                 return (
                 <div key={group.id} style={{ marginBottom: 8 }}>
@@ -1209,13 +1228,23 @@ export default function DesignerApp({
           }}
           onDuplicate={() => { duplicateSelected(); setMenu(null) }}
           onDelete={() => { deleteSelected(); setMenu(null) }}
+          onDoorType={(id) => {
+            const spec = doorTypeById(id)
+            if (!spec) return
+            pushUndo()
+            patchEquipment(menu.id, doorEquipmentPatch(spec))
+          }}
+          onDoorFamily={(family) => {
+            pushUndo()
+            patchEquipment(menu.id, { doorFamily: family })
+          }}
         />
       )}
     </div>
   )
 }
 
-function ContextMenu({ menu, rooms, pipes, onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete }) {
+function ContextMenu({ menu, rooms, pipes, onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily }) {
   const host = rooms.find((room) => room.id === menu.id) || rooms.find((room) => (room.equipment || []).some((eq) => eq.id === menu.id))
   const eq = host?.equipment?.find((item) => item.id === menu.id) || null
   const pipe = pipes.find((item) => item.id === menu.id) || null
@@ -1225,15 +1254,37 @@ function ContextMenu({ menu, rooms, pipes, onClose, onRotate, onAngle, onResize,
   const [height, setHeight] = useState(eq?.height || host?.height || 1)
   const [elevation, setElevation] = useState(eq ? (Number.isFinite(eq.elevation) ? eq.elevation : defaultElevation(host, eq)) : 0)
   const [mount, setMount] = useState(eq?.mount || 'floor')
-  const left = Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 280)
-  const top = Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 420)
+  const doorOptions = eq?.category === 'door' ? doorChoices(host, rooms, eq) : []
+  const left = Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 300)
+  const top = Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 520)
   return (
-    <div data-testid="context-menu" style={{ position: 'fixed', left, top, zIndex: 40, width: 260, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }} onMouseDown={(event) => event.stopPropagation()}>
+    <div data-testid="context-menu" style={{ position: 'fixed', left, top, zIndex: 40, width: 280, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }} onMouseDown={(event) => event.stopPropagation()}>
       <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{eq?.name || pipe?.kind || host?.name || 'Kohde'}</div>
       {menu.kind !== 'pipe' && menu.kind !== 'cable' && (
         <>
           <MenuBtn testid="ctx-rotate-cw" onClick={() => onRotate(90)}>Käännä 90° myötäpäivään  ]</MenuBtn>
           <MenuBtn testid="ctx-rotate-ccw" onClick={() => onRotate(-90)}>Käännä 90° vastapäivään  [</MenuBtn>
+          {eq?.category === 'door' && (
+            <>
+              <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>
+                Sääntö
+                <select data-testid="ctx-door-family" value={eq.doorFamily === 'cold' || eq.doorFamily === 'ambient' ? eq.doorFamily : 'auto'} onChange={(e) => onDoorFamily(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
+                  <option value="auto">Automaattinen (kylmempi puoli)</option>
+                  <option value="cold">Kylmäovi</option>
+                  <option value="ambient">Tavallinen ovi</option>
+                </select>
+              </label>
+              <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>
+                Oivityyppi
+                <select data-testid="ctx-door-type" value={doorOptions.some((item) => item.id === eq.catalogId) ? eq.catalogId : ''} onChange={(e) => onDoorType(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
+                  {!doorOptions.some((item) => item.id === eq.catalogId) && <option value="">{eq.name}</option>}
+                  {doorOptions.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
           {eq && eq.category !== 'door' && (
             <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, padding: '4px 6px' }}>
               Kulma

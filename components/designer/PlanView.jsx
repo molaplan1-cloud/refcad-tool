@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
@@ -8,6 +8,7 @@ import { pointInEquipment } from '@/lib/placement'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
 import { highlightedPorts, pipeAppearance, snapPort } from '@/lib/pipeTopology'
 import { calculateProject } from '@/lib/heatLoad'
+import { doorPlanFigures } from '@/lib/doors'
 import {
   applyBox,
   applyOutline,
@@ -15,7 +16,6 @@ import {
   clampGroupTranslation,
   clampResizeBox,
   cleanOrthogonal,
-  doorSymbol,
   edgesOf,
   fitView,
   footprintInside,
@@ -32,6 +32,7 @@ import {
   snapWorld,
   translateOutline,
 } from '@/lib/cadDraw'
+import { panelPolygon, sharedWallPanels } from '@/lib/sharedWalls'
 
 const PAPER = '#f4f1ea'
 const INK = '#292524'
@@ -309,6 +310,53 @@ function longestMid(points) {
   }
   const span = Math.hypot(dx, dz) || 1
   return { ...mid, nx: -dz / span, nz: dx / span }
+}
+
+function DoorGlyph({ room, eq, scale }) {
+  const drawn = doorPlanFigures(room, eq)
+  const px = (n) => n / scale
+  return (
+    <g data-eq={eq.id} data-door-style={drawn.style}>
+      {drawn.figures.map((fig, index) => {
+        if (fig.kind === 'rect') {
+          return (
+            <rect
+              key={index}
+              x={fig.x}
+              y={fig.z}
+              width={fig.w}
+              height={fig.h}
+              fill={fig.fill === 'paper' ? PAPER : (fig.fill || 'none')}
+              stroke={fig.stroke || 'none'}
+              strokeWidth={fig.stroke ? px(fig.strokeWidth || 1.1) : 0}
+            />
+          )
+        }
+        if (fig.kind === 'line') {
+          return <line key={index} x1={fig.x1} y1={fig.z1} x2={fig.x2} y2={fig.z2} stroke={fig.stroke || '#9a3412'} strokeWidth={px(fig.strokeWidth || 1.3)} />
+        }
+        if (fig.kind === 'polyline') {
+          return (
+            <polyline
+              key={index}
+              points={fig.points.map((point) => `${point.x},${point.z}`).join(' ')}
+              fill="none"
+              stroke={fig.stroke || '#9a3412'}
+              strokeWidth={px(fig.strokeWidth || 1.1)}
+            />
+          )
+        }
+        if (fig.kind === 'text') {
+          return (
+            <text key={index} x={fig.x} y={fig.z} textAnchor="middle" fill="#9a3412" fontSize={px(11)} fontWeight="700">
+              {fig.text}
+            </text>
+          )
+        }
+        return null
+      })}
+    </g>
+  )
 }
 
 export default function PlanView({
@@ -937,6 +985,7 @@ export default function PlanView({
     }
   }
   const bar = scaleBarMetres(view.scale)
+  const wallPanels = useMemo(() => sharedWallPanels(rooms), [rooms])
   const selected = new Set(selectedIds)
   const drawing = tool === 'draw' || tool === 'partition' || isRouteTool(tool)
   const hint = tool === 'pipe'
@@ -988,6 +1037,19 @@ export default function PlanView({
               strokeWidth={(line.major ? 1.1 : 0.7) / view.scale}
             />
           ))}
+          {wallPanels.map((panel) => {
+            const points = panelPolygon(panel)
+            return (
+              <polygon
+                key={panel.id}
+                points={points.map((point) => `${point.x},${point.z}`).join(' ')}
+                fill={panel.shared ? '#e7e5e4' : 'url(#panel-hatch)'}
+                stroke="#44403c"
+                strokeWidth={0.7 / view.scale}
+                style={{ pointerEvents: 'none' }}
+              />
+            )
+          })}
           {rooms.map((room) => {
             const outer = outlineOf(room)
             const inner = insetOrthogonal(outer, room.wallThickness) || outer
@@ -1003,42 +1065,15 @@ export default function PlanView({
               <g key={room.id}>
                 <path
                   data-room={room.id}
-                  d={isRefrigerated(room.type) ? `${pathOf(outer)} ${pathOf(inner)}` : pathOf(outer)}
-                  fillRule="evenodd"
-                  fill={isRefrigerated(room.type) ? 'url(#panel-hatch)' : (room.type === 'yard' ? '#d9e7c4' : '#f5f5f4')}
-                  stroke={active ? TEAL : isRefrigerated(room.type) ? '#44403c' : '#78716c'}
-                  strokeWidth={(active ? 1.8 : 1.15) / view.scale}
-                  strokeDasharray={isRefrigerated(room.type) ? undefined : `${0.18} ${0.12}`}
+                  d={pathOf(room.type === 'yard' ? outer : inner)}
+                  fill={room.type === 'yard' ? '#d9e7c4' : isRefrigerated(room.type) ? (room.color || '#3b82f6') : '#f5f5f4'}
+                  fillOpacity={room.type === 'yard' ? 0.85 : isRefrigerated(room.type) ? (active || hot ? 0.22 : 0.14) : 1}
+                  stroke={active ? TEAL : 'none'}
+                  strokeWidth={(active ? 1.6 : 0) / view.scale}
                 />
-                {isRefrigerated(room.type) && (
-                  <path
-                    data-room={room.id}
-                    d={pathOf(inner)}
-                    fill={room.color || '#3b82f6'}
-                    fillOpacity={active || hot ? 0.22 : 0.12}
-                    stroke="none"
-                  />
-                )}
                 {(room.equipment || []).map((eq) => {
                   if (eq.category === 'door') {
-                    const symbol = doorSymbol(room, eq)
-                    const thickness = Math.max(room.wallThickness, 0.08)
-                    const gapW = symbol.iz !== 0 ? symbol.width : thickness
-                    const gapD = symbol.ix !== 0 ? symbol.width : thickness
-                    const gx = (symbol.x1 + symbol.x2) / 2 + symbol.ix * thickness / 2
-                    const gz = (symbol.z1 + symbol.z2) / 2 + symbol.iz * thickness / 2
-                    return (
-                      <g key={eq.id} data-eq={eq.id}>
-                        <rect x={gx - gapW / 2} y={gz - gapD / 2} width={gapW} height={gapD} fill={PAPER} />
-                        <polyline
-                          points={symbol.arc.map((point) => `${point.x},${point.z}`).join(' ')}
-                          fill="none"
-                          stroke="#9a3412"
-                          strokeWidth={1 / view.scale}
-                        />
-                        <line x1={symbol.hinge.x} y1={symbol.hinge.z} x2={symbol.open.x} y2={symbol.open.z} stroke="#9a3412" strokeWidth={1.4 / view.scale} />
-                      </g>
-                    )
+                    return <DoorGlyph key={eq.id} room={room} eq={eq} scale={view.scale} />
                   }
                   const ex = room.x + eq.x
                   const ez = room.z + eq.z
