@@ -44,7 +44,7 @@ import {
   updateWall,
 } from '@/lib/floorplan'
 import { ServiceMenu } from './ServicesLayer'
-import { applyHeating, ensureServices, serviceObjectTitle } from '@/lib/services'
+import { applyHeating, ensureServices, refreshHeat, serviceObjectTitle } from '@/lib/services'
 import { HEAT_SOURCES, normalizeHeating } from '@/lib/hydronic'
 import { CLIMATE_ZONES, formatRoomInfo, roomReport, thermalOf } from '@/lib/roominfo'
 
@@ -357,7 +357,7 @@ function SplitField({ plan, wall, onCommit }) {
     <Field label="Jaa kohdasta (mm)">
       <span style={{ display: 'flex', gap: 4 }}>
         <input data-testid="wall-split-mm" style={{ ...inputStyle, flex: 1 }} type="number" value={value} onChange={(event) => setValue(event.target.value)} />
-        <button type="button" data-testid="wall-split-at" onClick={() => onCommit(splitWallAt(plan, wall.id, fromMm(value)))} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1' }}>Jaa</button>
+        <button type="button" data-testid="wall-split-at" onClick={() => onCommit(refreshHeat(splitWallAt(plan, wall.id, fromMm(value))))} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1' }}>Jaa</button>
       </span>
     </Field>
   )
@@ -371,7 +371,7 @@ function WallFields({ plan, id, onApply, onCommit }) {
   const wall = (plan.walls || []).find((item) => item.id === id)
   if (!wall) return null
   const thick = wallThicknessMm(plan, wall)
-  const setKind = (kind) => onCommit(updateWall(plan, id, { kind }))
+  const setKind = (kind) => onCommit(refreshHeat(updateWall(plan, id, { kind })))
   const setThick = (metres, custom = true) => onCommit(updateWall(plan, id, { thickness: metres, thicknessCustom: custom }))
   return (
     <div>
@@ -395,7 +395,7 @@ function WallFields({ plan, id, onApply, onCommit }) {
         </select>
       </Field>
       <Field label="Korkeus (mm)">
-        <input style={inputStyle} type="number" value={mm(wall.height || plan.floorHeight || 2.6)} onChange={(event) => onApply(updateWall(plan, id, { height: fromMm(event.target.value) || 2.6, heightCustom: true }))} />
+        <input style={inputStyle} type="number" value={mm(wall.height || plan.floorHeight || 2.6)} onChange={(event) => onApply(refreshHeat(updateWall(plan, id, { height: fromMm(event.target.value) || 2.6, heightCustom: true })))} />
       </Field>
       <Field label="Rakenne">
         <select data-testid="wall-structure" style={inputStyle} value={wall.structure || 'puuranka'} onChange={(event) => onApply(updateWall(plan, id, { structure: event.target.value }))}>
@@ -418,7 +418,7 @@ function WallFields({ plan, id, onApply, onCommit }) {
           type="number"
           defaultValue={mm(segmentLength(wall.a, wall.b))}
           key={`${id}-${mm(segmentLength(wall.a, wall.b))}`}
-          onBlur={(event) => onCommit(setWallLength(plan, id, fromMm(event.target.value)))}
+          onBlur={(event) => onCommit(refreshHeat(setWallLength(plan, id, fromMm(event.target.value))))}
         />
       </Field>
       <Field label="Suunta (°)">
@@ -428,7 +428,7 @@ function WallFields({ plan, id, onApply, onCommit }) {
           type="number"
           defaultValue={wallDirection(wall)}
           key={`${id}-${wallDirection(wall)}`}
-          onBlur={(event) => onCommit(setWallDirection(plan, id, Number(event.target.value)))}
+          onBlur={(event) => onCommit(refreshHeat(setWallDirection(plan, id, Number(event.target.value))))}
           onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
         />
       </Field>
@@ -440,7 +440,7 @@ function WallFields({ plan, id, onApply, onCommit }) {
 function OpeningFields({ plan, id, onApply, onCommit }) {
   const opening = (plan.openings || []).find((item) => item.id === id)
   if (!opening) return null
-  const patch = (next) => onApply(updateOpening(plan, id, next))
+  const patch = (next) => onApply(refreshHeat(updateOpening(plan, id, next)))
   return (
     <div>
       <Field label="Leveys (mm)">
@@ -495,12 +495,12 @@ function WallFaces({ plan, wall, onApply }) {
 function ThermalFields({ plan, onApply }) {
   const thermal = thermalOf(plan)
   const stored = plan.thermal || {}
-  const setThermal = (patch, resetU = false) => onApply(updateHouse(plan, {
+  const setThermal = (patch, resetU = false) => onApply(refreshHeat(updateHouse(plan, {
     thermal: { ...stored, ...patch, ...(resetU ? { u: undefined } : {}) },
-  }))
-  const setU = (key, value) => onApply(updateHouse(plan, {
+  })))
+  const setU = (key, value) => onApply(refreshHeat(updateHouse(plan, {
     thermal: { ...stored, u: { ...(stored.u || {}), [key]: value } },
-  }))
+  })))
   return (
     <div data-testid="thermal-settings">
       <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>Lämmitys</div>
@@ -554,7 +554,7 @@ function RoomFields({ plan, id, wallId, onApply }) {
           const type = ROOM_TYPES.find((item) => item.id === event.target.value)
           const previous = ROOM_TYPES.find((item) => item.id === (room.type || 'huone'))
           const keep = room.name && room.name !== previous?.name && room.name !== 'Huone'
-          onApply(applyRoomType(plan, id, event.target.value, keep ? room.name : (type?.name || room.name)))
+          onApply(refreshHeat(applyRoomType(plan, id, event.target.value, keep ? room.name : (type?.name || room.name))))
         }}>
           {ROOM_TYPES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
@@ -587,10 +587,10 @@ function RoomFields({ plan, id, wallId, onApply }) {
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Katto</div>
       <SwatchRow group="ceiling" value={room.ceilingId || 'paint'} onPick={(material) => patch({ ceilingId: material })} />
       <Field label="Huonekorkeus (mm)">
-        <input style={inputStyle} type="number" value={mm(room.ceilingHeight || plan.floorHeight || 2.6)} onChange={(event) => patch({ ceilingHeight: fromMm(event.target.value) || 2.6 })} />
+        <input style={inputStyle} type="number" value={mm(room.ceilingHeight || plan.floorHeight || 2.6)} onChange={(event) => onApply(refreshHeat(updateRoom(plan, id, { ceilingHeight: fromMm(event.target.value) || 2.6 })))} />
       </Field>
       <Field label="Sisälämpötila (°C)">
-        <input data-testid="room-setpoint" style={inputStyle} type="number" value={Number.isFinite(room.setpoint) ? room.setpoint : defaultRoomSetpoint(room.type)} onChange={(event) => patch({ setpoint: parseFloat(event.target.value) })} />
+        <input data-testid="room-setpoint" style={inputStyle} type="number" value={Number.isFinite(room.setpoint) ? room.setpoint : defaultRoomSetpoint(room.type)} onChange={(event) => onApply(refreshHeat(updateRoom(plan, id, { setpoint: parseFloat(event.target.value) })))} />
       </Field>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, marginBottom: 8 }}>
         <input type="checkbox" checked={room.showLabel !== false} onChange={(event) => patch({ showLabel: event.target.checked })} />
@@ -743,8 +743,8 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
   const room = (plan.rooms || []).find((item) => item.id === menu.id)
   const fixture = (plan.fixtures || []).find((item) => item.id === menu.id)
   const zone = (plan.facades || []).find((item) => item.id === menu.id)
-  const act = (next) => {
-    onCommit(next)
+  const act = (next, resizeHeat = false) => {
+    onCommit(resizeHeat ? refreshHeat(next) : next)
     onNavigate('close')
   }
   const properties = () => onNavigate('properties')
@@ -773,16 +773,16 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
             type="number"
             defaultValue={wallDirection(wall)}
             key={`dir-${wall.id}-${wallDirection(wall)}`}
-            onBlur={(event) => onCommit(setWallDirection(plan, wall.id, Number(event.target.value)))}
+            onBlur={(event) => onCommit(refreshHeat(setWallDirection(plan, wall.id, Number(event.target.value))))}
             onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
             style={{ width: 64, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
           />
           °
         </label>
         <CadSep />
-        <CadItem testid="ctx-split" onClick={() => act(splitWall(plan, wall.id, menu.at || { x: (wall.a.x + wall.b.x) / 2, z: (wall.a.z + wall.b.z) / 2 }))}>Jaa seinä</CadItem>
-        <CadItem testid="ctx-door" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'door'))}>Lisää ovi</CadItem>
-        <CadItem testid="ctx-window" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'window'))}>Lisää ikkuna</CadItem>
+        <CadItem testid="ctx-split" onClick={() => act(splitWall(plan, wall.id, menu.at || { x: (wall.a.x + wall.b.x) / 2, z: (wall.a.z + wall.b.z) / 2 }), true)}>Jaa seinä</CadItem>
+        <CadItem testid="ctx-door" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'door'), true)}>Lisää ovi</CadItem>
+        <CadItem testid="ctx-window" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'window'), true)}>Lisää ikkuna</CadItem>
         <Flyout label="Verhous" testid="ctx-cladding">
           {claddingChoices(wall).map((item) => (
             <CadItem key={item.id} onClick={() => onApply(updateWall(plan, wall.id, { materialId: item.id }))}>
@@ -796,7 +796,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
         </Flyout>
         <CadItem testid="ctx-facade" onClick={() => onNavigate('facade')}>Julkisivu</CadItem>
         <CadSep />
-        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteWall(plan, wall.id))}>Poista</CadItem>
+        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteWall(plan, wall.id), true)}>Poista</CadItem>
       </>
     )
   } else if (menu.kind === 'corner') {
@@ -817,7 +817,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
             key={`corner-${degrees}-${joint?.x}-${joint?.z}`}
             onBlur={(event) => {
               if (!joint) return
-              onCommit(setCornerAngle(plan, joint, Number(event.target.value)))
+              onCommit(refreshHeat(setCornerAngle(plan, joint, Number(event.target.value))))
             }}
             onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
             style={{ width: 64, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
@@ -835,7 +835,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
         <CadSep />
         <CadItem testid="ctx-flip" onClick={() => act(flipOpening(plan, opening.id))}>Käännä</CadItem>
         <CadSep />
-        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteOpening(plan, opening.id))}>Poista</CadItem>
+        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteOpening(plan, opening.id), true)}>Poista</CadItem>
       </>
     )
   } else if (menu.kind === 'room' && room) {
@@ -844,7 +844,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
       <>
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
         <CadSep />
-        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteRoom(plan, room.id))}>Poista</CadItem>
+        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteRoom(plan, room.id), true)}>Poista</CadItem>
       </>
     )
   } else if (menu.kind === 'fixture' && fixture) {

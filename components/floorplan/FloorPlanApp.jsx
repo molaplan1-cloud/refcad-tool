@@ -68,6 +68,7 @@ import {
   deleteServiceRun,
   autoRouteAll,
   applyHeating,
+  refreshHeat,
   buildElectricPdf,
   buildHydronicPdf,
   buildServicePdf,
@@ -790,7 +791,7 @@ export default function FloorPlanApp() {
 
   const closeRoom = (points) => {
     if (!points || points.length < 3) return
-    const next = drawRoom(plan, points, { partitions, name: 'Huone', type: 'huone' })
+    const next = refreshHeat(drawRoom(plan, points, { partitions, name: 'Huone', type: 'huone' }))
     commit(next)
     const mid = points.reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 })
     mid.x /= points.length
@@ -889,7 +890,7 @@ export default function FloorPlanApp() {
     if (tool === 'detect') {
       const roomHit = (plan.rooms || []).find((item) => pointInPolygon(world.x, world.z, item.polygon || []))
       if (roomHit) {
-        commit(detectRoomAt(plan, world))
+        commit(refreshHeat(detectRoomAt(plan, world)))
         choose({ kind: 'room', id: roomHit.id })
       }
       return
@@ -898,7 +899,7 @@ export default function FloorPlanApp() {
       const next = drawGuide || point
       if (!draft) setDraft(next)
       else {
-        commit(addWall(plan, draft, next, tool))
+        commit(refreshHeat(addWall(plan, draft, next, tool)))
         setDraft(null)
         setDrawGuide(null)
       }
@@ -906,7 +907,7 @@ export default function FloorPlanApp() {
     }
     if (tool === 'door' || tool === 'window') {
       const along = visual?.wall ? visual : snapAlongWall(world, plan.walls, Math.max(12 / Math.max(ppm, 0.001), 0.35), !altRef.current)
-      if (along?.wall) commit(addOpening(plan, along.wall.id, along.point || point, tool))
+      if (along?.wall) commit(refreshHeat(addOpening(plan, along.wall.id, along.point || point, tool)))
       return
     }
     if (placing) {
@@ -1007,10 +1008,10 @@ export default function FloorPlanApp() {
       } else if (event.key === 'Enter' && tool === 'room' && poly.length >= 3) {
         closeRoom(poly)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'wall') {
-        commit(deleteWall(plan, pick.id))
+        commit(refreshHeat(deleteWall(plan, pick.id)))
         choose(null)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'opening') {
-        commit(deleteOpening(plan, pick.id))
+        commit(refreshHeat(deleteOpening(plan, pick.id)))
         choose(null)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'room') {
         commit(deleteRoom(plan, pick.id))
@@ -1505,7 +1506,7 @@ export default function FloorPlanApp() {
                 onCommit={() => {
                   const end = drawGuide || liveEnd
                   if (!draft || !end) return
-                  commit(addWall(plan, draft, end, tool))
+                  commit(refreshHeat(addWall(plan, draft, end, tool)))
                   setDraft(null)
                   setDrawGuide(null)
                 }}

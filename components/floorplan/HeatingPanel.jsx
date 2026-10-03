@@ -82,6 +82,7 @@ export function HeatingTable({ plan }) {
         <strong>{report.source || 'Lämmönlähde'}</strong>
         {heating.buffer ? ` · puskurivaraaja ${heating.bufferLitres} l` : ' · ei puskurivaraajaa'}
         {` · ${DIST[heating.distribution] || ''}`}
+        {report.demandPower ? ` · lämmitystarve ${report.demandPower} W` : ''}
         {report.totalPower ? ` · ${report.totalPower} W` : ''}
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, background: '#fff' }}>
