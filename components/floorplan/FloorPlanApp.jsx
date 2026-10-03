@@ -60,6 +60,33 @@ import FacadeView from './FacadeView'
 import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import { ElectricPanel } from './ElectricPanel'
 import { HeatingPanel } from './HeatingPanel'
+import YardLayer, { YARD_DRAW_TOOLS, yardToolLabel } from './YardLayer'
+import {
+  BUILDINGS,
+  OBJECTS,
+  PLANTS,
+  addBed,
+  addBuilding,
+  addFence,
+  addObject,
+  addPath,
+  addPlant,
+  addTerrace,
+  applyExampleYard,
+  buildSitePdf,
+  deleteYardItem,
+  ensureYard,
+  formatSquare,
+  hitTestYard,
+  moveYardItem,
+  plotMetrics,
+  rotateYardItem,
+  setPlot,
+  siteViewLayout,
+  snapYardPoint,
+  syncYardServices,
+  updateYardItem,
+} from '@/lib/yard'
 import {
   PLACEABLES,
   addServiceNode,
@@ -210,8 +237,8 @@ function SnapMark({ snap, X, Y, zoom }) {
   )
 }
 
-function sheetPixels(size, plan) {
-  const layout = viewLayout(plan)
+function sheetPixels(size, plan, site = false) {
+  const layout = site ? siteViewLayout(plan) : viewLayout(plan)
   const pad = 14
   const availW = Math.max(280, size.w - pad * 2)
   const availH = Math.max(200, size.h - pad * 2)
@@ -557,6 +584,9 @@ export default function FloorPlanApp() {
   const [floorHeating, setFloorHeating] = useState(false)
   const [electricView, setElectricView] = useState(null)
   const [heatView, setHeatView] = useState(null)
+  const [sheetMode, setSheetMode] = useState('plan')
+  const [yardTool, setYardTool] = useState(null)
+  const [yardPoints, setYardPoints] = useState([])
   const [wallMode, setWallMode] = useState('solid')
   const [roofMode, setRoofMode] = useState('solid')
   const [fitToken, setFitToken] = useState(1)
@@ -573,6 +603,7 @@ export default function FloorPlanApp() {
   const dragBefore = useRef(null)
   const dragId = useRef(null)
   const dragOpen = useRef(null)
+  const dragYard = useRef(null)
   const dragLabel = useRef(null)
   const clip = useRef(null)
   const hostRef = useRef(null)
@@ -596,6 +627,7 @@ export default function FloorPlanApp() {
             ...emptyPlan(),
             ...parsed,
             services: ensureServices(parsed),
+            yard: ensureYard(parsed),
             rooms: detectRooms(parsed.walls, parsed.rooms || []),
           })
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
@@ -647,7 +679,7 @@ export default function FloorPlanApp() {
     if (prev) setPlan(prev)
   }, [])
 
-  const sheet = useMemo(() => sheetPixels(size, plan), [size, plan])
+  const sheet = useMemo(() => sheetPixels(size, plan, sheetMode === 'site'), [size, plan, sheetMode])
   const { layout, k } = sheet
   const X = useCallback((x) => sheet.x + (layout.ox + (x - layout.box.minX) * layout.scale) * k, [sheet, layout, k])
   const Y = useCallback((z) => sheet.y + (layout.oy + (z - layout.box.minZ) * layout.scale) * k, [sheet, layout, k])
@@ -688,8 +720,12 @@ export default function FloorPlanApp() {
       const placed = snapFixturePoint(world, walls, { radius: Math.max(radius, 0.45), enabled, grid: gridStep, depth: tpl?.d || 0.6 })
       return { point: { x: placed.x, z: placed.z }, kind: placed.kind, guides: [], rotation: placed.rotation }
     }
+    if (yardTool) {
+      const origin = yardPoints[yardPoints.length - 1] || null
+      return snapYardPoint(world, plan, { grid: gridStep, radius, origin, ortho: angleStep === 90 && Boolean(origin) })
+    }
     return null
-  }, [ppm2d, plan.walls, tool, draft, angleStep, gridStep, roomShape, poly, placing, svcTool])
+  }, [ppm2d, plan, tool, draft, angleStep, gridStep, roomShape, poly, placing, svcTool, yardTool, yardPoints])
 
   useEffect(() => {
     if (view !== '2d') return undefined
@@ -723,7 +759,7 @@ export default function FloorPlanApp() {
     }
     const next = hit.kind === 'service'
       ? { kind: 'service', id: hit.service?.id, service: hit.service }
-      : { kind: hit.kind, id: hit.id || hit.kind }
+      : { kind: hit.kind, id: hit.id || hit.kind, collection: hit.collection }
     setPick(next)
     setSelectedRoom(hit.kind === 'room' ? hit.id : null)
     setSelectedFixture(hit.kind === 'fixture' ? hit.id : null)
@@ -751,6 +787,7 @@ export default function FloorPlanApp() {
         y: event.clientY,
         kind: point.kind,
         id: point.id || point.kind,
+        collection: point.collection,
         at: point.at,
       })
     }
@@ -776,6 +813,7 @@ export default function FloorPlanApp() {
     if (!typingDraw) setDrawGuide(null)
     const radius = Math.max(12 / Math.max(ppm2d, 0.001), 0.45)
     if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z, radius))
+    if (dragYard.current) setPlan((current) => moveYardItem(current, dragYard.current.collection, dragYard.current.id, world.x, world.z))
     if (dragOpen.current) setPlan((current) => moveOpening(current, dragOpen.current, world))
     if (dragLabel.current) setPlan((current) => moveRoomLabel(current, dragLabel.current, world.x, world.z))
   }
@@ -783,11 +821,14 @@ export default function FloorPlanApp() {
   const onPointerUp = () => {
     if (panRef.current?.button === 2 && panRef.current.moved) suppressMenu.current = true
     panRef.current = null
-    if ((dragId.current || dragLabel.current || dragOpen.current) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+    const movedYard = dragYard.current
+    if ((dragId.current || dragLabel.current || dragOpen.current || movedYard) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
     dragId.current = null
     dragOpen.current = null
     dragLabel.current = null
+    dragYard.current = null
     dragBefore.current = null
+    if (movedYard?.collection === 'objects') setPlan((current) => syncYardServices(current))
   }
 
   const closeRoom = (points) => {
@@ -841,13 +882,57 @@ export default function FloorPlanApp() {
       return
     }
     const hit = hitTest(plan, world)
+    const yardHit = sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
+    if (hit.kind !== 'opening' && hit.kind !== 'wall' && yardHit && (yardHit.collection !== 'plot' || hit.kind === 'canvas')) {
+      setMenu({ x: event.clientX, y: event.clientY, kind: 'yard', id: yardHit.id, collection: yardHit.collection, at: world })
+      choose(yardHit)
+      return
+    }
     setMenu({ x: event.clientX, y: event.clientY, kind: hit.kind, id: hit.id, at: world })
     if (hit.kind !== 'canvas') choose(hit)
+  }
+
+  const finishYard = (points) => {
+    if (!yardTool) return
+    let next = plan
+    if (yardTool === 'plot') next = setPlot(plan, points)
+    else if (yardTool === 'terrace') next = addTerrace(plan, points, { railing: true, steps: true })
+    else if (yardTool === 'lawn' || yardTool === 'flowerbed') next = addBed(plan, points, yardTool)
+    else if (yardTool === 'path' || yardTool === 'drive' || yardTool === 'parking') next = addPath(plan, points, { kind: yardTool })
+    else if (yardTool === 'fence') next = addFence(plan, points, {})
+    else return
+    commit(next)
+    setYardPoints([])
   }
 
   const placeAt = (world, ppm) => {
     const visual = describeSnap(world, ppm)
     const point = visual?.point || world
+    if (yardTool) {
+      if (yardTool.startsWith('plant:')) {
+        commit(addPlant(plan, yardTool.slice(6), point.x, point.z))
+        return
+      }
+      if (yardTool.startsWith('object:')) {
+        commit(addObject(plan, yardTool.slice(7), point.x, point.z))
+        return
+      }
+      if (yardTool.startsWith('building:')) {
+        commit(addBuilding(plan, yardTool.slice(9), point.x, point.z))
+        return
+      }
+      const closed = yardTool === 'plot' || yardTool === 'terrace' || yardTool === 'lawn' || yardTool === 'flowerbed'
+      if (closed && yardPoints.length >= 3 && segmentLength(point, yardPoints[0]) < Math.max(0.45, 16 / Math.max(ppm, 0.001))) {
+        finishYard(yardPoints)
+        return
+      }
+      setYardPoints((points) => {
+        const prev = points[points.length - 1]
+        if (prev && segmentLength(prev, point) < 0.05) return points
+        return [...points, point]
+      })
+      return
+    }
     if (svcTool) {
       const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES[0]
       const snapped = snapServicePoint(world, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system })
@@ -943,7 +1028,7 @@ export default function FloorPlanApp() {
     if (event.button !== 0) return
     setMenu(null)
     const world = toWorld(event)
-    if (svcTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing) {
+    if (svcTool || yardTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing) {
       placeAt(world, ppm2d)
       return
     }
@@ -952,7 +1037,16 @@ export default function FloorPlanApp() {
       choose({ kind: 'service', service: serviceHit })
       return
     }
+    const yardHit = sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
     const hit = hitTest(plan, world)
+    if (yardHit && hit.kind !== 'opening' && hit.kind !== 'wall' && (yardHit.collection !== 'plot' || hit.kind === 'canvas')) {
+      choose(yardHit)
+      if (yardHit.movable) {
+        dragYard.current = yardHit
+        dragBefore.current = plan
+      }
+      return
+    }
     if (hit.kind === 'opening') {
       dragOpen.current = hit.id
       dragBefore.current = plan
@@ -1002,12 +1096,19 @@ export default function FloorPlanApp() {
         setMenu(null)
         setSvcPoints([])
         setSvcTool(null)
+        setYardPoints([])
+        setYardTool(null)
         setElectricView(null)
         setHeatView(null)
       } else if (event.key === 'Enter' && svcTool === 'run' && svcPoints.length >= 2) {
         finishServiceRun()
       } else if (event.key === 'Enter' && tool === 'room' && poly.length >= 3) {
         closeRoom(poly)
+      } else if (event.key === 'Enter' && yardTool && yardPoints.length >= ((yardTool === 'path' || yardTool === 'drive' || yardTool === 'parking' || yardTool === 'fence') ? 2 : 3)) {
+        finishYard(yardPoints)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'yard') {
+        commit(deleteYardItem(plan, pick.collection, pick.id))
+        choose(null)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'wall') {
         commit(refreshHeat(deleteWall(plan, pick.id)))
         choose(null)
@@ -1029,6 +1130,8 @@ export default function FloorPlanApp() {
       } else if ((event.key === 'd' || event.key === 'D') && (event.metaKey || event.ctrlKey) && selectedFixture) {
         event.preventDefault()
         commit(duplicateFixture(plan, selectedFixture))
+      } else if ((event.key === 'r' || event.key === 'R') && pick?.kind === 'yard' && (pick.collection === 'objects' || pick.collection === 'buildings')) {
+        commit(rotateYardItem(plan, pick.collection, pick.id))
       } else if ((event.key === 'r' || event.key === 'R') && selectedFixture) {
         commit(rotateFixture(plan, selectedFixture))
       } else if ((event.key === 'z' || event.key === 'Z') && (event.metaKey || event.ctrlKey)) {
@@ -1052,7 +1155,7 @@ export default function FloorPlanApp() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions, svcTool, svcPoints, svcKind, view])
+  }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints])
 
   const loadHouse = (house, roomName, panel) => {
     const next = { ...house, services: ensureServices(house) }
@@ -1065,6 +1168,9 @@ export default function FloorPlanApp() {
     setSelectedFixture(null)
     setMenu(null)
     setView('2d')
+    setSheetMode('plan')
+    setYardTool(null)
+    setYardPoints([])
     setPanel(panel || (room ? 'object' : 'house'))
     setReady(true)
     setStartOpen(false)
@@ -1151,6 +1257,17 @@ export default function FloorPlanApp() {
     }
   }
 
+  const onYardDrag3d = (hit, spot, phase) => {
+    if (!dragBefore.current) dragBefore.current = plan
+    setPlan((current) => moveYardItem(current, hit.collection, hit.id, spot.x, spot.z))
+    setPick(hit)
+    if (phase === 'end') {
+      history.current = [...history.current, dragBefore.current].slice(-40)
+      dragBefore.current = null
+      if (hit.collection === 'objects') setPlan((current) => syncYardServices(current))
+    }
+  }
+
   const onDropFixture3d = (type, spot) => {
     const radius = Math.max(12 / Math.max(spot.ppm, 0.001), 0.45)
     const next = addFixture(plan, type, spot.x, spot.z, radius)
@@ -1174,7 +1291,7 @@ export default function FloorPlanApp() {
     })
   }
 
-  const loadExample = () => loadHouse(exampleHouse(), 'Olohuone')
+  const loadExample = () => loadHouse(syncYardServices(applyExampleYard(exampleHouse())), 'Olohuone')
 
   const loadFamily = () => loadHouse(familyHouse(), 'Eteinen')
 
@@ -1274,7 +1391,7 @@ export default function FloorPlanApp() {
     ...dims.overall.map((dim) => ({ ...dim, offset: 1.7 })),
   ])
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
-  const sheetTitle = activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva'
+  const sheetTitle = sheetMode === 'site' ? 'Asemapiirros' : (activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva')
   const liveEnd = draft && (tool === 'exterior' || tool === 'interior') ? (drawGuide || snapVisual?.point || null) : null
   const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
@@ -1285,7 +1402,9 @@ export default function FloorPlanApp() {
       ? `${spec?.name || 'Piste'}: napsauta paikka. Piste tarttuu verkkoon ja lähellä olevaan osaan.`
     : liveEnd
     ? `Pituus ${formatMm(liveLength)} mm`
-    : placing
+    : yardTool
+      ? yardToolLabel(yardTool)
+      : placing
       ? 'Napsauta pohjaan kalusteen paikka'
       : tool === 'room' && roomShape === 'poly'
         ? 'Huone: napsauta kulmat. Sulje ensimmäiseen pisteeseen tai paina Enter.'
@@ -1330,7 +1449,8 @@ export default function FloorPlanApp() {
           <button type="button" data-testid="tool-detect" style={textBtn(tool === 'detect')} onClick={() => { setTool('detect'); setPlacing(null); setDraft(null); setPoly([]) }}>Tunnista</button>
         </div>
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
-          <button type="button" data-testid="view-floor-2d" style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
+          <button type="button" data-testid="view-floor-2d" style={textBtn(view === '2d' && sheetMode !== 'site')} onClick={() => { setView('2d'); setSheetMode('plan'); setYardTool(null); setYardPoints([]) }}>2D</button>
+          <button type="button" data-testid="view-site" style={textBtn(view === '2d' && sheetMode === 'site')} onClick={() => { setView('2d'); setSheetMode('site'); setCamera(FIT_CAMERA); setYardTool(null); setYardPoints([]) }}>Piha</button>
           <button type="button" data-testid="view-floor-3d" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
           <button type="button" data-testid="view-facade" style={textBtn(view === 'facade')} onClick={() => setView('facade')}>Julkisivu</button>
         </div>
@@ -1346,6 +1466,7 @@ export default function FloorPlanApp() {
         <button type="button" data-testid="example-house" onClick={loadExample} style={textBtn(false)}>Esimerkkitalo</button>
         <button type="button" data-testid="family-house" onClick={loadFamily} style={textBtn(false)}>Huoneisto</button>
         <button type="button" data-testid="export-floor-pdf" onClick={exportPdf} style={textBtn(false)}>PDF</button>
+        <button type="button" data-testid="export-site-pdf" onClick={() => buildSitePdf(plan).save(`${(plan.name || 'asemapiirros').replace(/\s+/g, '-')}-asemapiirros.pdf`)} style={textBtn(false)}>Asemapiirros</button>
         <button type="button" data-testid="export-floor-png" onClick={exportPng} style={textBtn(false)}>PNG</button>
       </header>
       <div style={{ height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', background: '#1c212b', color: '#e7e5e4', flexShrink: 0 }}>
@@ -1355,6 +1476,30 @@ export default function FloorPlanApp() {
         </label>
         {tool === 'room' && roomShape === 'poly' && poly.length >= 3 && (
           <button type="button" data-testid="close-room" style={textBtn(false)} onClick={() => closeRoom(poly)}>Sulje huone</button>
+        )}
+        {sheetMode === 'site' && YARD_DRAW_TOOLS.map(([id, label]) => (
+          <button key={id} type="button" data-testid={`yard-tool-${id}`} style={textBtn(yardTool === id)} onClick={() => { setYardTool(id); setTool('select'); setPlacing(null); setYardPoints([]) }}>{label}</button>
+        ))}
+        {sheetMode === 'site' && (
+          <>
+            <select data-testid="yard-plant-tool" value={yardTool?.startsWith('plant:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
+              <option value="">Kasvi</option>
+              {PLANTS.map((item) => <option key={item.id} value={`plant:${item.id}`}>{item.name}</option>)}
+            </select>
+            <select data-testid="yard-object-tool" value={yardTool?.startsWith('object:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
+              <option value="">Pihaesine</option>
+              {OBJECTS.map((item) => <option key={item.id} value={`object:${item.id}`}>{item.name}</option>)}
+            </select>
+            <select data-testid="yard-building-tool" value={yardTool?.startsWith('building:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
+              <option value="">Ulkorakennus</option>
+              {BUILDINGS.map((item) => <option key={item.id} value={`building:${item.id}`}>{item.name}</option>)}
+            </select>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+              Pohjoinen
+              <input data-testid="north-angle" type="number" value={ensureYard(plan).north} onChange={(event) => commit(updateYardItem(plan, 'north', 'north', { north: Number(event.target.value) || 0 }))} style={{ width: 52, padding: '2px 4px', borderRadius: 6, border: '1px solid #44403c', background: '#111827', color: '#fff' }} />
+              °
+            </label>
+          </>
         )}
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: '#a8a29e' }}>Tartunta</span>
@@ -1411,7 +1556,7 @@ export default function FloorPlanApp() {
           return { ...current, services: { ...services, layers: { ...services.layers, [id]: visible } } }
         })}
         onRoute={() => {
-          commit(autoRouteAll(plan, { floorHeating }))
+          commit(syncYardServices(autoRouteAll(plan, { floorHeating })))
           setSvcPoints([])
           setView('2d')
         }}
@@ -1528,7 +1673,7 @@ export default function FloorPlanApp() {
                 onPointerDown={onPointerDown}
                 onPointerUp={onPointerUp}
                 onContextMenu={onContextMenu}
-                style={{ display: 'block', cursor: tool === 'select' && !placing && !svcTool ? 'default' : 'crosshair', touchAction: 'none' }}
+                style={{ display: 'block', cursor: tool === 'select' && !placing && !svcTool && !yardTool ? 'default' : 'crosshair', touchAction: 'none' }}
               >
                 <defs>
                   <pattern id="poche" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -1549,6 +1694,17 @@ export default function FloorPlanApp() {
                     strokeWidth={1.2}
                   />
                 ))}
+                {sheetMode === 'site' && (
+                  <YardLayer
+                    plan={plan}
+                    X={X}
+                    Y={Y}
+                    px={px}
+                    sheet={sheet}
+                    selected={pick}
+                    preview={yardPoints.length ? { points: yardPoints, cursor: snapVisual?.point || cursor } : null}
+                  />
+                )}
                 <WallOutlines plan={plan} X={X} Y={Y} selectedId={pick?.kind === 'wall' ? pick.id : null} />
                 {(plan.openings || []).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
@@ -1572,7 +1728,7 @@ export default function FloorPlanApp() {
                     </g>
                   )
                 })}
-                {(plan.fixtures || []).map((fixture) => {
+                {sheetMode !== 'site' && (plan.fixtures || []).map((fixture) => {
                   const tpl = FIXTURES.find((item) => item.id === fixture.type) || FIXTURES[0]
                   const w = px(fixture.w || tpl.w)
                   const d = px(fixture.d || tpl.d)
@@ -1612,7 +1768,7 @@ export default function FloorPlanApp() {
                   setPanel('object')
                   setMenu(null)
                 }} />
-                {plan.walls.length > 0 && (
+                {sheetMode !== 'site' && plan.walls.length > 0 && (
                   <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
                     {dimLines.map((dim, index) => <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}`} dim={dim} offset={0} X={X} Y={Y} />)}
                   </g>
@@ -1646,12 +1802,13 @@ export default function FloorPlanApp() {
                     style={{ pointerEvents: 'none' }}
                   />
                 )}
-                <g style={{ pointerEvents: 'none' }} data-testid="north-arrow">
+                <g style={{ pointerEvents: 'none' }} data-testid="north-arrow" data-north={ensureYard(plan).north || 0}>
                   {(() => {
                     const ax = sheet.x + sheet.w - 52
                     const ay = sheet.y + 48
+                    const north = sheetMode === 'site' ? (ensureYard(plan).north || 0) : 0
                     return (
-                      <g>
+                      <g transform={`rotate(${north} ${ax} ${ay})`}>
                         <circle cx={ax} cy={ay} r={15} fill="#fff" stroke="#1c1917" strokeWidth={0.8} />
                         <polygon points={`${ax},${ay - 10} ${ax + 4},${ay + 5} ${ax},${ay + 2} ${ax - 4},${ay + 5}`} fill="#1c1917" />
                         <text x={ax} y={ay - 20} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1c1917">N</text>
@@ -1666,7 +1823,15 @@ export default function FloorPlanApp() {
                     const tw = layout.title.w * k
                     const th = layout.title.h * k
                     const roofName = (ROOF_TYPES.find((item) => item.id === plan.roofType) || ROOF_TYPES[0]).name
-                    const lines = [
+                    const yard = ensureYard(plan)
+                    const lines = sheetMode === 'site' ? [
+                      plan.name || 'Omakotitalo',
+                      `Mittakaava 1:${layout.ratio}`,
+                      plan.paper === 'a4' ? 'A4 vaaka' : 'A3 vaaka',
+                      `Tontti ${formatSquare(plotMetrics(plan).area)}`,
+                      `Pohjoinen ${Math.round(yard.north || 0)}°`,
+                      `Ulkorakennukset ${yard.buildings.length}`,
+                    ] : [
                       plan.name || 'Omakotitalo',
                       `Mittakaava 1:${layout.ratio}`,
                       plan.paper === 'a4' ? 'A4 vaaka' : 'A3 vaaka',
@@ -1784,6 +1949,7 @@ export default function FloorPlanApp() {
                 onPlace={onPlace3d}
                 onFixtureDrag={onFixtureDrag3d}
                 onOpeningDrag={onOpeningDrag3d}
+                onYardDrag={onYardDrag3d}
                 onDropFixture={onDropFixture3d}
               />
               <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>

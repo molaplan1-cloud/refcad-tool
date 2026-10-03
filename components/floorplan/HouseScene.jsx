@@ -24,6 +24,8 @@ import {
   zoneCovering,
 } from '@/lib/floorplan'
 import Services3D from './Services3D'
+import YardScene from './YardScene'
+import { sceneBounds } from '@/lib/yard'
 import { layerVisible } from '@/lib/services'
 
 const textureCache = new Map()
@@ -736,10 +738,10 @@ function FloorCursor({ point, ppm, kind }) {
   )
 }
 
-function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onDropFixture }) {
+function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onYardDrag, onDropFixture }) {
   const { camera, gl, scene } = useThree()
   const handlers = useRef({})
-  handlers.current = { drawMode, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onDropFixture }
+  handlers.current = { drawMode, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onYardDrag, onDropFixture }
   useLayoutEffect(() => {
     const raycaster = new THREE.Raycaster()
     const pointer = new THREE.Vector2()
@@ -775,8 +777,8 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
       down = { x: event.clientX, y: event.clientY }
       if (handlers.current.drawMode) return
       const pick = read()
-      if (pick?.kind === 'fixture' || pick?.kind === 'opening') {
-        drag = { kind: pick.kind, id: pick.id, moved: false }
+      if (pick?.kind === 'fixture' || pick?.kind === 'opening' || (pick?.kind === 'yard' && pick.movable)) {
+        drag = { kind: pick.kind, id: pick.id, collection: pick.collection, moved: false }
         if (controlsRef.current) controlsRef.current.enabled = false
       }
     }
@@ -792,8 +794,10 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
         if (controlsRef.current) controlsRef.current.enabled = true
         if (ended.moved && spot) {
           if (ended.kind === 'fixture') handlers.current.onFixtureDrag?.(ended.id, spot, 'end')
+          else if (ended.kind === 'yard') handlers.current.onYardDrag?.({ kind: 'yard', id: ended.id, collection: ended.collection }, spot, 'end')
           else handlers.current.onOpeningDrag?.(ended.id, spot, 'end')
         } else if (ended.kind === 'fixture') handlers.current.onSelect?.({ kind: 'fixture', id: ended.id })
+        else if (ended.kind === 'yard') handlers.current.onSelect?.({ kind: 'yard', id: ended.id, collection: ended.collection })
         else handlers.current.onSelect?.({ kind: 'opening', id: ended.id })
         return
       }
@@ -814,6 +818,7 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
         if (travel > 3) drag.moved = true
         if (drag.moved) {
           if (drag.kind === 'fixture') handlers.current.onFixtureDrag?.(drag.id, spot, 'move')
+          else if (drag.kind === 'yard') handlers.current.onYardDrag?.({ kind: 'yard', id: drag.id, collection: drag.collection }, spot, 'move')
           else handlers.current.onOpeningDrag?.(drag.id, spot, 'move')
           return
         }
@@ -883,16 +888,18 @@ export default function HouseScene({
   onPlace,
   onFixtureDrag,
   onOpeningDrag,
+  onYardDrag,
   onDropFixture,
 }) {
   const controlsRef = useRef(null)
-  const box = planBounds(plan)
-  const cx = (box.minX + box.maxX) / 2
-  const cz = (box.minZ + box.maxZ) / 2
+  const house = planBounds(plan)
+  const box = sceneBounds(plan)
+  const cx = (house.minX + house.maxX) / 2
+  const cz = (house.minZ + house.maxZ) / 2
   const span = Math.max(box.maxX - box.minX, box.maxZ - box.minZ, 8)
   return (
     <Canvas
-      camera={{ position: [cx, span, cz + span], fov: 34, near: 0.08, far: 240 }}
+      camera={{ position: [cx, span * 0.85, cz + span * 0.95], fov: 34, near: 0.08, far: Math.max(240, span * 8) }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
       onCreated={({ gl }) => {
@@ -905,9 +912,10 @@ export default function HouseScene({
       <ambientLight intensity={0.94} />
       <directionalLight position={[8, 22, 10]} intensity={0.5} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.02, cz]} raycast={noopRaycast}>
-        <planeGeometry args={[Math.max(24, span * 2.4), Math.max(24, span * 2.4)]} />
-        <meshBasicMaterial color="#f3f1ec" />
+        <planeGeometry args={[Math.max(24, span * 1.4), Math.max(24, span * 1.4)]} />
+        <meshBasicMaterial color="#efe8d8" />
       </mesh>
+      <YardScene plan={plan} selected={selected} />
       <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2) / (drawMode ? 0.5 : 1)), '#b7b1a4', '#e4e0d8']} position={[cx, 0, cz]} />
       {visibleRooms(plan).map((room) => (
         <FloorMesh
@@ -975,6 +983,7 @@ export default function HouseScene({
         onPlace={onPlace}
         onFixtureDrag={onFixtureDrag}
         onOpeningDrag={onOpeningDrag}
+        onYardDrag={onYardDrag}
         onDropFixture={onDropFixture}
       />
       <FrameCamera plan={plan} fitToken={fitToken} controlsRef={controlsRef} />

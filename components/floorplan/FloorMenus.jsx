@@ -44,6 +44,8 @@ import {
   updateWall,
 } from '@/lib/floorplan'
 import { ServiceMenu } from './ServicesLayer'
+import { YardFields, YardMenuBody } from './YardPanel'
+import { yardTitle } from '@/lib/yard'
 import { applyHeating, ensureServices, refreshHeat, serviceObjectTitle } from '@/lib/services'
 import { HEAT_SOURCES, normalizeHeating } from '@/lib/hydronic'
 import { CLIMATE_ZONES, formatRoomInfo, roomReport, thermalOf } from '@/lib/roominfo'
@@ -315,6 +317,7 @@ export function selectionLabel(plan, selection) {
   if (selection.kind === 'roof') return 'Katto'
   if (selection.kind === 'zone') return 'Julkisivuvyöhyke'
   if (selection.kind === 'house') return 'Talon asetukset'
+  if (selection.kind === 'yard') return yardTitle(plan, selection)
   if (selection.kind === 'service') {
     const services = ensureServices(plan)
     const spec = selection.service || {}
@@ -336,6 +339,7 @@ export function SelectionPanel({ plan, selection, onApply, onCommit, onClear }) 
   else if (selection.kind === 'fixture') body = <FixtureFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
   else if (selection.kind === 'roof') body = <RoofFields plan={plan} onApply={onApply} />
   else if (selection.kind === 'house') body = <HouseSettings plan={plan} onApply={onApply} />
+  else if (selection.kind === 'yard') body = <YardFields plan={plan} selection={selection} onCommit={onCommit} />
   else if (selection.kind === 'zone') body = <ZoneFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
   else if (selection.kind === 'service') {
     body = (
@@ -883,6 +887,9 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
   } else if (menu.kind === 'house') {
     title = plan.name || 'Talo'
     body = <CadItem testid="ctx-house" onClick={() => onNavigate('house')}>Talon asetukset</CadItem>
+  } else if (menu.kind === 'yard') {
+    title = yardTitle(plan, menu)
+    body = <YardMenuBody plan={plan} menu={menu} onCommit={onCommit} onNavigate={onNavigate} />
   } else if (menu.kind === 'canvas') {
     title = 'Pohja'
     body = (
