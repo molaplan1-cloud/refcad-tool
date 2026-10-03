@@ -27,6 +27,7 @@ import Services3D from './Services3D'
 import YardScene from './YardScene'
 import { hasYard, sceneBounds } from '@/lib/yard'
 import { layerVisible } from '@/lib/services'
+import { chimneyKind, chimneyTop, drawingOf } from '@/lib/chimney'
 
 const textureCache = new Map()
 
@@ -749,6 +750,52 @@ function FixtureBody({ body, w, d, h = 0.8 }) {
       <group>
         {box([w, 0.7, d], [0, 0.35, 0], '#44403c')}
         {box([w * 0.7, 0.08, d * 0.15], [0, 0.78, d * 0.1], '#292524')}
+        {box([w * 0.55, 0.22, 0.04], [0, 0.32, d * 0.48], '#1c1917')}
+      </group>
+    )
+  }
+  if (type === 'insert') {
+    return (
+      <group>
+        {box([w, 0.55, d], [0, 0.28, 0], '#44403c')}
+        {box([w * 0.7, 0.28, 0.05], [0, 0.32, d * 0.46], '#111827')}
+      </group>
+    )
+  }
+  if (type === 'kamiina') {
+    return (
+      <group>
+        {cyl(Math.min(w, d) * 0.42, 0.72, [0, 0.4, 0], '#334155')}
+        {cyl(0.05, 0.16, [0, 0.84, -d * 0.1], '#1e293b')}
+      </group>
+    )
+  }
+  if (type === 'leivinuuni') {
+    return (
+      <group>
+        {box([w, h || 1.4, d], [0, (h || 1.4) / 2, 0], '#e7e5e4')}
+        {box([w * 0.4, 0.22, 0.06], [0, 0.55, d * 0.48], '#292524')}
+      </group>
+    )
+  }
+  if (type === 'puuhella') {
+    return (
+      <group>
+        {box([w, 0.8, d], [0, 0.4, 0], '#f5f5f4')}
+        {[-0.16, 0.16].map((x) => (
+          <mesh key={x} position={[x, 0.82, -d * 0.08]}>
+            <cylinderGeometry args={[0.08, 0.08, 0.02, 16]} />
+            <meshLambertMaterial color="#1c1917" />
+          </mesh>
+        ))}
+      </group>
+    )
+  }
+  if (type === 'kakluuni') {
+    return (
+      <group>
+        {box([w, h || 1.7, d], [0, (h || 1.7) / 2, 0], '#f8fafc')}
+        {[0.3, 0.55, 0.8].map((t) => <group key={t}>{box([w * 1.01, 0.015, d * 1.01], [0, (h || 1.7) * t, 0], '#cbd5e1')}</group>)}
       </group>
     )
   }
@@ -765,18 +812,108 @@ function FixtureBody({ body, w, d, h = 0.8 }) {
   return box([w, h || 0.8, d], [0, (h || 0.8) / 2, 0], '#f5f5f4')
 }
 
-function FixtureMesh({ fixture, selected, hovered }) {
+function penetrationYs(plan, top) {
+  const step = plan?.floorHeight || 2.6
+  const floors = Math.max(1, plan?.floors || 1)
+  const ys = []
+  for (let level = 1; level <= floors; level += 1) {
+    const y = level * step
+    if (y > 0.2 && y < top - 0.15) ys.push(y)
+  }
+  return ys
+}
+
+function ChimneyShaft({ fixture, plan, w, d }) {
+  const pose = chimneyTop(plan, fixture)
+  const height = Math.max(0.8, pose.top)
+  const kind = chimneyKind(fixture)
+  const flues = Number(fixture.flues) >= 2 ? 2 : 1
+  const color = fixture.color || (kind === 'steel' ? '#64748b' : kind === 'element' ? '#e7e5e4' : '#9c341f')
+  const rings = penetrationYs(plan, height)
+  if (kind === 'steel') {
+    const radius = Math.min(w, d) / (flues === 2 ? 4 : 2)
+    const spots = flues === 2 ? [-w * 0.25, w * 0.25] : [0]
+    return (
+      <group>
+        {spots.map((x) => (
+          <group key={x}>
+            <mesh position={[x, height / 2, 0]}>
+              <cylinderGeometry args={[radius * 0.92, radius * 0.92, height, 20]} />
+              <meshLambertMaterial color={color} />
+            </mesh>
+            <mesh position={[x, height + 0.08, 0]}>
+              <cylinderGeometry args={[radius * 1.35, radius * 0.55, 0.12, 20]} />
+              <meshLambertMaterial color="#334155" />
+            </mesh>
+          </group>
+        ))}
+        {rings.map((y) => (
+          <mesh key={y} position={[0, y, 0]}>
+            <boxGeometry args={[w + 0.08, 0.04, d + 0.08]} />
+            <meshLambertMaterial color="#a8a29e" />
+          </mesh>
+        ))}
+      </group>
+    )
+  }
+  return (
+    <group>
+      <mesh position={[0, height / 2, 0]}>
+        <boxGeometry args={[w, height, d]} />
+        <meshLambertMaterial color={color} />
+      </mesh>
+      <mesh position={[0, height + 0.07, 0]}>
+        <boxGeometry args={[w + 0.12, 0.12, d + 0.12]} />
+        <meshLambertMaterial color="#44403c" />
+      </mesh>
+      {Array.from({ length: flues }, (_, index) => {
+        const x = flues === 2 ? (index === 0 ? -w * 0.2 : w * 0.2) : 0
+        const pot = Math.min(w, d) * 0.28
+        return (
+          <mesh key={index} position={[x, height + 0.22, 0]}>
+            <boxGeometry args={[pot, 0.2, pot]} />
+            <meshLambertMaterial color="#292524" />
+          </mesh>
+        )
+      })}
+      {rings.map((y) => (
+        <mesh key={y} position={[0, y, 0]}>
+          <boxGeometry args={[w + 0.1, 0.05, d + 0.1]} />
+          <meshLambertMaterial color="#57534e" />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function FixtureMesh({ fixture, plan, selected, hovered }) {
   const tpl = fixtureTemplate(fixture.type)
   const variant = (tpl.variants || []).find((entry) => entry.id === fixture.variant) || tpl.variants?.[0]
   const w = fixture.w || variant?.w || tpl.w
   const d = fixture.d || variant?.d || tpl.d
   const h = fixture.h || variant?.h || tpl.h || 0.8
   const body = variant?.body || tpl.body || variant?.symbol || tpl.symbol || fixture.type
+  const draw = drawingOf(fixture)
   const pick = { kind: 'fixture', id: fixture.id }
   const mark = markOf(selected, hovered, pick)
+  const hearth = draw.hearth
+  const plateW = hearth ? w + (hearth.side || 0) * 2 : 0
+  const plateD = hearth ? d + (hearth.front || 0) : 0
   return (
     <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]} userData={{ pick }}>
-      <FixtureBody body={body} w={w} d={d} h={h} />
+      {hearth && (
+        <mesh position={[0, 0.012, -d / 2 + plateD / 2]}>
+          <boxGeometry args={[plateW, 0.02, plateD]} />
+          <meshLambertMaterial color="#3f3f46" />
+        </mesh>
+      )}
+      {draw.shield && (
+        <mesh position={[0, 0.75, -d / 2 - 0.025]}>
+          <boxGeometry args={[w + 0.06, 1.2, 0.025]} />
+          <meshLambertMaterial color="#e7e5e4" />
+        </mesh>
+      )}
+      {draw.chimney ? <ChimneyShaft fixture={fixture} plan={plan} w={w} d={d} /> : <FixtureBody body={body} w={w} d={d} h={h} />}
       {mark && (
         <mesh position={[0, 0.45, 0]}>
           <boxGeometry args={[w + (mark === 'selected' ? 0.14 : 0.07), 0.95, d + (mark === 'selected' ? 0.14 : 0.07)]} />
@@ -1077,7 +1214,7 @@ export default function HouseScene({
       ))}
       <RoofMesh plan={plan} mode={roofMode} selected={selected} hovered={hovered} />
       {(plan.fixtures || []).map((fixture) => (
-        <FixtureMesh key={fixture.id} fixture={fixture} selected={selected} hovered={hovered} />
+        <FixtureMesh key={fixture.id} plan={plan} fixture={fixture} selected={selected} hovered={hovered} />
       ))}
       <Services3D plan={plan} selected={selected} hovered={hovered} />
       {drawMode && cursor && <FloorCursor point={cursor} ppm={cursorPpm} kind={snapKind} />}

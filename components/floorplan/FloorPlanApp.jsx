@@ -58,6 +58,7 @@ import { wallFigures } from '@/lib/wall-outline'
 import { FixtureSymbol } from './FixtureSymbol'
 import { FURNITURE_GROUPS, layoutFor, resolveFixture, scheduleRows, suggestionsFor } from '@/lib/furniture'
 import { fixtureServiceKey, syncFixtureServices } from '@/lib/fixtureServices'
+import { bindFlues, drawingOf, flueWarnings } from '@/lib/chimney'
 import {
   FLOOR_CLIPBOARD_KEY,
   changeLayer,
@@ -620,7 +621,8 @@ export default function FloorPlanApp() {
     setPlan((current) => {
       history.current = [...history.current, current].slice(-40)
       redo.current = []
-      return fixtureServiceKey(current) === fixtureServiceKey(next) ? next : syncFixtureServices(next)
+      const bound = bindFlues(next)
+      return fixtureServiceKey(current) === fixtureServiceKey(bound) ? bound : syncFixtureServices(bound)
     })
   }, [])
 
@@ -938,7 +940,12 @@ export default function FloorPlanApp() {
     dragNode.current = null
     dragBefore.current = null
     if (movedYard?.collection === 'objects') setPlan((current) => syncYardServices(current))
-    if (draggedFixture) setPlan((current) => syncFixtureServices(current))
+    if (draggedFixture) {
+      setPlan((current) => {
+        const bound = bindFlues(current)
+        return fixtureServiceKey(current) === fixtureServiceKey(bound) ? bound : syncFixtureServices(bound)
+      })
+    }
   }
 
   const closeRoom = (points) => {
@@ -1472,7 +1479,10 @@ export default function FloorPlanApp() {
       if (dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
       dragBefore.current = null
       dragGrab.current = null
-      setPlan((current) => syncFixtureServices(current))
+      setPlan((current) => {
+        const bound = bindFlues(current)
+        return fixtureServiceKey(current) === fixtureServiceKey(bound) ? bound : syncFixtureServices(bound)
+      })
     }
   }
 
@@ -1669,6 +1679,7 @@ export default function FloorPlanApp() {
     const host = visibleRooms(plan).find((item) => pointInPolygon(fixture.x, fixture.z, item.polygon || item.gross || []))
     return host?.name || ''
   })
+  const chimneyNotes = flueWarnings(plan)
   const totalArea = visibleRooms(plan).reduce((sum, item) => sum + item.area, 0)
   const dims = dimensionChains(plan)
   const dimLines = layoutDimensionLabels([
@@ -1961,6 +1972,13 @@ export default function FloorPlanApp() {
               ))}
             </div>
           ))}
+          {chimneyNotes.length > 0 && (
+            <div data-testid="chimney-warnings" style={{ margin: '8px 0', padding: '8px 8px 4px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 8 }}>
+              {chimneyNotes.map((item, index) => (
+                <div key={`${item.id}-${item.code}-${index}`} style={{ fontSize: 11, color: '#9a3412', marginBottom: 4 }}>{item.text}</div>
+              ))}
+            </div>
+          )}
           {schedule.length > 0 && (
             <div data-testid="furniture-schedule" style={{ marginTop: 12, borderTop: '1px solid #e7e5e4', paddingTop: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '0 4px 6px' }}>KALUSTELUETTELO</div>
@@ -2092,8 +2110,14 @@ export default function FloorPlanApp() {
                 })}
                 {sheetMode !== 'site' && (plan.fixtures || []).filter((fixture) => !fixture.hidden).map((fixture) => {
                   const spec = resolveFixture(fixture)
+                  const draw = drawingOf(fixture)
                   const w = px(spec.w)
                   const d = px(spec.d)
+                  const zone = draw.clearance
+                  const side = px(zone?.side || 0)
+                  const rear = px(zone?.rear || 0)
+                  const front = px(zone?.front || 0)
+                  const hearth = draw.hearth
                   return (
                     <g
                       key={fixture.id}
@@ -2118,7 +2142,44 @@ export default function FloorPlanApp() {
                         setMenu({ x: event.clientX, y: event.clientY, kind: 'fixture', id: fixture.id, at: { x: fixture.x, z: fixture.z } })
                       }}
                     >
-                      <FixtureSymbol symbol={spec.symbol} w={w} d={d} color={fixture.color} />
+                      {hearth && (
+                        <rect
+                          data-testid="hearth-plate"
+                          x={-w / 2 - px(hearth.side || 0)}
+                          y={-d / 2}
+                          width={w + px(hearth.side || 0) * 2}
+                          height={d + px(hearth.front || 0)}
+                          fill="#f5f5f4"
+                          stroke="#57534e"
+                          strokeWidth={0.8}
+                        />
+                      )}
+                      <FixtureSymbol symbol={spec.symbol} w={w} d={d} color={fixture.color} flues={draw.flues} />
+                      {draw.shield && (
+                        <rect
+                          data-testid="heat-shield"
+                          x={-w / 2 - px(0.02)}
+                          y={-d / 2 - px(0.04)}
+                          width={w + px(0.04)}
+                          height={px(0.03)}
+                          fill="#e7e5e4"
+                          stroke="#44403c"
+                          strokeWidth={0.7}
+                        />
+                      )}
+                      {zone && (side > 0 || rear > 0 || front > 0) && (
+                        <rect
+                          data-testid="clearance-zone"
+                          x={-w / 2 - side}
+                          y={-d / 2 - rear}
+                          width={w + side * 2}
+                          height={d + rear + front}
+                          fill="none"
+                          stroke="#c2410c"
+                          strokeWidth={0.9}
+                          strokeDasharray="6 4"
+                        />
+                      )}
                       {picks.some((item) => item.kind === 'fixture' && item.id === fixture.id) && (
                         <rect x={-w / 2 - 3} y={-d / 2 - 3} width={w + 6} height={d + 6} fill="none" stroke="#0f766e" strokeWidth={1.4} />
                       )}

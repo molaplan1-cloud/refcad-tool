@@ -1,5 +1,7 @@
 'use client'
 
+import { useId } from 'react'
+
 // Plan symbols in Finnish architectural style: thin even lines, white fill, the wall side at the top.
 
 function useInk(color) {
@@ -10,7 +12,8 @@ function useInk(color) {
   return { stroke, sw, paper, line }
 }
 
-export function FixtureSymbol({ symbol, w, d, color }) {
+export function FixtureSymbol({ symbol, w, d, color, flues = 1 }) {
+  const clipId = `hatch${useId().replace(/:/g, '')}`
   const { stroke, sw, paper, line } = useInk(color)
   const left = -w / 2
   const top = -d / 2
@@ -219,6 +222,49 @@ export function FixtureSymbol({ symbol, w, d, color }) {
         <rect x={left} y={top} width={w} height={d} {...paper} />
         <circle cx={0} cy={0} r={Math.min(w, d) * 0.28} {...line} />
         {[-0.12, 0.02, 0.14].map((t, index) => <circle key={t} cx={w * (index - 1) * 0.16} cy={d * t} r={Math.min(w, d) * 0.07} {...line} />)}
+        {mark === 'heater-wood' && <line x1={left + w * 0.2} y1={top + d * 0.22} x2={w / 2 - w * 0.2} y2={top + d * 0.22} {...line} />}
+      </g>
+    )
+  }
+  if (mark === 'chimney' || mark === 'chimney-masonry' || mark === 'chimney-element' || mark === 'chimney-steel') {
+    const kind = mark === 'chimney-element' ? 'element' : mark === 'chimney-steel' ? 'steel' : 'masonry'
+    const count = flues >= 2 ? 2 : 1
+    if (kind === 'steel') {
+      const spots = count === 2 ? [-w * 0.25, w * 0.25] : [0]
+      const radius = count === 2 ? Math.min(w * 0.22, d * 0.42) : Math.min(w, d) * 0.46
+      return (
+        <g>
+          {spots.map((cx) => (
+            <g key={cx}>
+              <circle cx={cx} cy={0} r={radius} {...paper} />
+              <circle cx={cx} cy={0} r={radius * 0.58} {...line} />
+            </g>
+          ))}
+        </g>
+      )
+    }
+    const span = w + d
+    const step = 6
+    const diagonals = []
+    for (let i = 0; i <= span; i += step) diagonals.push(i)
+    const flueW = count === 2 ? w * 0.22 : Math.min(w, d) * 0.34
+    const flueH = count === 2 ? d * 0.34 : Math.min(w, d) * 0.34
+    const flueX = count === 2 ? [-w * 0.24, w * 0.24] : [0]
+    return (
+      <g>
+        <defs>
+          <clipPath id={clipId}>
+            <rect x={left + 0.8} y={top + 0.8} width={Math.max(1, w - 1.6)} height={Math.max(1, d - 1.6)} />
+          </clipPath>
+        </defs>
+        <rect x={left} y={top} width={w} height={d} {...paper} />
+        <g clipPath={`url(#${clipId})`} stroke={stroke} strokeWidth={kind === 'element' ? 0.45 : 0.7} opacity={kind === 'element' ? 0.55 : 0.9}>
+          {diagonals.map((i) => <line key={`d${i}`} x1={left + i} y1={top} x2={left + i - d} y2={top + d} />)}
+          {kind === 'element' && diagonals.map((i) => <line key={`c${i}`} x1={left + i - d} y1={top} x2={left + i} y2={top + d} />)}
+        </g>
+        {flueX.map((cx) => (kind === 'element'
+          ? <circle key={cx} cx={cx} cy={0} r={Math.min(flueW, flueH) * 0.7} fill="#fff" stroke={stroke} strokeWidth={sw} />
+          : <rect key={cx} x={cx - flueW / 2} y={-flueH / 2} width={flueW} height={flueH} fill="#fff" stroke={stroke} strokeWidth={sw} />))}
       </g>
     )
   }
@@ -388,12 +434,33 @@ export function FixtureSymbol({ symbol, w, d, color }) {
       </g>
     )
   }
-  if (mark === 'fireplace') {
+  if (mark === 'fireplace' || mark === 'insert' || mark === 'leivinuuni' || mark === 'kakluuni') {
     return (
       <g>
         <rect x={left} y={top} width={w} height={d} {...paper} />
-        <rect x={-w * 0.22} y={-d * 0.12} width={w * 0.44} height={d * 0.5} {...line} />
-        <path d={`M 0 ${d * 0.05} q ${w * 0.08} ${-d * 0.12} 0 ${-d * 0.2} q ${-w * 0.08} ${d * 0.08} 0 ${d * 0.2}`} {...line} />
+        {mark === 'kakluuni' && [0.28, 0.5, 0.72].map((t) => <line key={t} x1={left + 2} y1={top + d * t} x2={w / 2 - 2} y2={top + d * t} {...line} />)}
+        {mark === 'leivinuuni' && <path d={`M ${-w * 0.28} ${d * 0.2} Q 0 ${-d * 0.05} ${w * 0.28} ${d * 0.2}`} {...line} />}
+        {mark !== 'kakluuni' && <rect x={-w * (mark === 'insert' ? 0.32 : 0.22)} y={-d * 0.08} width={w * (mark === 'insert' ? 0.64 : 0.44)} height={d * 0.42} {...line} />}
+        {mark === 'fireplace' && <path d={`M 0 ${d * 0.02} q ${w * 0.08} ${-d * 0.12} 0 ${-d * 0.18} q ${-w * 0.08} ${d * 0.08} 0 ${d * 0.18}`} {...line} />}
+      </g>
+    )
+  }
+  if (mark === 'kamiina') {
+    return (
+      <g>
+        <rect x={left} y={top + d * 0.12} width={w} height={d * 0.76} rx={Math.min(w, d) * 0.2} {...paper} />
+        <circle cx={0} cy={top + d * 0.18} r={Math.min(w, d) * 0.12} {...line} />
+        <line x1={-w * 0.28} y1={d * 0.28} x2={-w * 0.16} y2={d * 0.48} {...line} />
+        <line x1={w * 0.28} y1={d * 0.28} x2={w * 0.16} y2={d * 0.48} {...line} />
+      </g>
+    )
+  }
+  if (mark === 'puuhella') {
+    return (
+      <g>
+        <rect x={left} y={top} width={w} height={d} {...paper} />
+        {[-0.22, 0.22].map((t) => <circle key={t} cx={w * t} cy={-d * 0.12} r={Math.min(w, d) * 0.16} {...line} />)}
+        <rect x={-w * 0.22} y={d * 0.08} width={w * 0.44} height={d * 0.28} {...line} />
       </g>
     )
   }
