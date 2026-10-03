@@ -25,6 +25,7 @@ import {
   updateServiceRun,
 } from '@/lib/services'
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
+import { houseBox } from '@/lib/yard'
 import { CAD_COMMANDS } from '@/lib/cadEdit'
 import { CadItem, CadMenu, CadSep, Flyout, Segmented } from './CadMenu'
 
@@ -174,9 +175,9 @@ function shiftPoints(points, system, multi, kind) {
   })
 }
 
-function SlopeMark({ run, X, Y }) {
+function SlopeMark({ run, X, Y, show = true }) {
   const pts = run.points || []
-  if (!run.slope || pts.length < 2) return null
+  if (!show || !run.slope || pts.length < 2) return null
   let best = null
   for (let i = 1; i < pts.length; i += 1) {
     const len = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z)
@@ -419,8 +420,8 @@ function cableMark(run) {
   return ''
 }
 
-function CableMark({ points, text, X, Y }) {
-  if (!text || !points || points.length < 2) return null
+function CableMark({ points, text, X, Y, show = true }) {
+  if (!show || !text || !points || points.length < 2) return null
   let best = null
   for (let i = 1; i < points.length; i += 1) {
     const len = Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z)
@@ -451,10 +452,21 @@ function CableMark({ points, text, X, Y }) {
   )
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown }) {
+function insideHouse(plan, x, z) {
+  const box = houseBox(plan)
+  if (!box) return false
+  return x >= box.minX - 0.15 && x <= box.maxX + 0.15 && z >= box.minZ - 0.15 && z <= box.maxZ + 0.15
+}
+
+function siteRun(plan, run) {
+  if (run.kind === 'collector' || String(run.linkedFrom || '').startsWith('yard:')) return true
+  return (run.points || []).some((point) => !insideHouse(plan, point.x, point.z))
+}
+
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false }) {
   const services = ensureServices(plan)
-  const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run))
-  const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node))
+  const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run) && (!siteMode || siteRun(plan, run)))
+  const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
   const order = { drain: 0, water: 1, heat: 2, electric: 3, iv: 4 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
@@ -491,9 +503,12 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   })
   bestTrunk.forEach((item) => leaders.push(item))
   const legendX = legendBox?.x ?? (sheet.x + sheet.w - 176)
-  const legendY = legendBox?.y ?? (sheet.y + 74)
   const legendW = Math.max(108, legendBox?.w ?? 160)
   const legendH = legend.length ? 22 + legend.length * 15 : 0
+  let legendY = legendBox?.y ?? (sheet.y + 74)
+  if (legendBox?.maxBottom && legendY + legendH > legendBox.maxBottom) {
+    legendY = Math.max(legendBox.y ?? sheet.y + 8, legendBox.maxBottom - legendH)
+  }
   return (
     <g data-testid="service-layer">
       {drawn.map(({ run, points }) => {
@@ -503,6 +518,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const width = multi
           ? (run.system === 'iv' ? 1.15 : run.system === 'drain' ? 1.05 : 0.8)
           : (run.system === 'iv' ? 2.05 : run.system === 'drain' ? 1.85 : dashed ? 1.15 : 1.45)
+        const runSelected = selected?.service?.target === 'run' && selected?.service?.id === run.id
+        const showText = !quietLabels || runSelected
         return (
           <g key={run.id}>
             <polyline
@@ -535,25 +552,19 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               return (
                 <g key={`riser-${run.id}-${index}`} data-testid="route-riser" style={{ pointerEvents: 'none' }}>
                   <circle cx={X(point.x)} cy={Y(point.z)} r={5.5} fill="#fff" stroke={color} strokeWidth={1.6} />
-                  <text x={X(point.x) + 8} y={Y(point.z) - 4} fontSize="9" fontWeight="700" fill={color}>{up ? 'nousu' : 'lasku'}</text>
+                  {showText && <text x={X(point.x) + 8} y={Y(point.z) - 4} fontSize="9" fontWeight="700" fill={color}>{up ? 'nousu' : 'lasku'}</text>}
                 </g>
               )
             })}
-            {run.locked && points.length > 1 && (
-              <text
+            {run.locked && runSelected && points.length > 1 && (
+              <g
                 data-testid="route-lock-badge"
-                x={X((points[0].x + points[1].x) / 2)}
-                y={Y((points[0].z + points[1].z) / 2) - 8}
-                fontSize="9"
-                fontWeight="700"
-                fill="#0f766e"
-                stroke="#fbfaf7"
-                strokeWidth="2.4"
-                paintOrder="stroke"
+                transform={`translate(${X((points[0].x + points[1].x) / 2)} ${Y((points[0].z + points[1].z) / 2) - 10})`}
                 style={{ pointerEvents: 'none' }}
               >
-                Manuaalinen
-              </text>
+                <rect x={-6} y={-3} width={12} height={9} rx={1.5} fill="#fff" stroke="#0f766e" strokeWidth={1} />
+                <path d="M-3.5,-3 v-2.4 a3.5,3.5 0 0 1 7,0 v2.4" fill="none" stroke="#0f766e" strokeWidth={1} />
+              </g>
             )}
             {interactive && selected?.service?.target === 'run' && selected?.service?.id === run.id && points.map((point, index) => (
               <g key={`edit-${run.id}-${index}`}>
@@ -590,12 +601,12 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
                 )}
               </g>
             ))}
-            <SlopeMark run={{ ...run, points }} X={X} Y={Y} />
-            <CableMark points={points} text={cableMark(run)} X={X} Y={Y} />
+            <SlopeMark run={{ ...run, points }} X={X} Y={Y} show={showText} />
+            <CableMark points={points} text={cableMark(run)} X={X} Y={Y} show={showText} />
           </g>
         )
       })}
-      {leaders.map((item) => {
+      {!quietLabels && leaders.map((item) => {
         const ax = X(item.mid.x)
         const ay = Y(item.mid.z)
         const bx = ax + item.normal.x * 22
@@ -623,13 +634,13 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           onContextMenu={(event) => open(event, { target: 'node', id: node.id, system: node.system })}
         >
           <NodeSymbol node={node} />
-          {node.flow ? (
+          {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
             <g style={{ pointerEvents: 'none' }}>
               <line x1="5" y1="-3" x2="14" y2="-14" stroke={nodeColor(node)} strokeWidth="0.7" />
               <text x="16" y="-14" fontSize="8" fontWeight="700" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth="2.2" paintOrder="stroke">{node.flow} l/s</text>
             </g>
           ) : null}
-          {node.system === 'electric' && node.circuit && node.kind !== 'panel' ? (
+          {node.system === 'electric' && node.circuit && node.kind !== 'panel' && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
             <text data-testid="circuit-badge" x="11" y="-2" fontSize="9" fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{`R${node.circuit}`}</text>
           ) : null}
         </g>

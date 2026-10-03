@@ -29,6 +29,19 @@ function mid(a, b) {
   return { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }
 }
 
+function labelOffset(at, center, dist, X, Y) {
+  const sx = X(at.x)
+  const sy = Y(at.z)
+  const dx = X(center.x) - sx
+  const dy = Y(center.z) - sy
+  const len = Math.hypot(dx, dy) || 1
+  return { x: sx + (dx / len) * dist, y: sy + (dy / len) * dist }
+}
+
+export function yardLegendHeight() {
+  return 26 + PLANTS.length * 16 + 4 + BEDS.length * 14 + 18
+}
+
 function inset(points, ratio) {
   const center = centroid(points)
   return points.map((point) => ({
@@ -254,7 +267,7 @@ function selected(selectedHit, collection, id) {
   return selectedHit?.kind === 'yard' && selectedHit.collection === collection && selectedHit.id === id
 }
 
-export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit, preview }) {
+export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit, preview, showClearances = false, legendAt }) {
   const source = ensureYard(plan)
   const keep = (list) => (list || []).filter((item) => !item.hidden)
   const yard = {
@@ -362,22 +375,20 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
           <polygon points={pts(yard.plot.points, X, Y)} fill="none" stroke="#1c1917" strokeWidth={1.6} />
           {metrics.edges.map((edge) => {
             const at = mid(edge.a, edge.b)
+            const place = labelOffset(at, centroid(yard.plot.points), -14, X, Y)
             return (
               <g key={`edge-${edge.index}`}>
-                <line x1={X(edge.a.x)} y1={Y(edge.a.z)} x2={X(edge.b.x)} y2={Y(edge.b.z)} stroke="none" />
-                <text x={X(at.x)} y={Y(at.z) - 5} textAnchor="middle" fontSize={10} fontWeight={650} fill="#1c1917">{formatMetres(edge.length)}</text>
+                <text x={place.x} y={place.y} textAnchor="middle" fontSize={10} fontWeight={650} fill="#1c1917" stroke="#fbfaf7" strokeWidth={2.4} paintOrder="stroke">{formatMetres(edge.length)}</text>
               </g>
             )
           })}
           {setbacks.map((edge) => {
             const at = mid(edge.a, edge.b)
+            const place = labelOffset(at, centroid(yard.plot.points), 14, X, Y)
             return (
-              <text key={`set-${edge.index}`} data-testid="yard-setback" x={X(at.x)} y={Y(at.z) + 12} textAnchor="middle" fontSize={9} fill="#0f766e">{edge.label}</text>
+              <text key={`set-${edge.index}`} data-testid="yard-setback" x={place.x} y={place.y} textAnchor="middle" fontSize={8} fill="#57534e" stroke="#fbfaf7" strokeWidth={2} paintOrder="stroke">{edge.label}</text>
             )
           })}
-          <text data-testid="yard-area" x={X(centroid(yard.plot.points).x)} y={Y(centroid(yard.plot.points).z)} textAnchor="middle" fontSize={13} fontWeight={750} fill="#1c1917">
-            {formatSquare(metrics.area)}
-          </text>
         </g>
       )}
       {yard.fences.map((fence) => {
@@ -422,7 +433,9 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
                 </g>
               )
             })}
-            <text x={X(fence.points[0].x)} y={Y(fence.points[0].z) - 8} fontSize={9} fill={stroke} stroke="none">{kind.name}</text>
+            {selected(selectedHit, 'fences', fence.id) && (
+              <text x={X(fence.points[0].x)} y={Y(fence.points[0].z) - 8} fontSize={9} fill={stroke} stroke="#fbfaf7" strokeWidth={2} paintOrder="stroke">{kind.name}</text>
+            )}
           </g>
         )
       })}
@@ -433,7 +446,9 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
           <g key={item.id} data-testid={`yard-plant-${item.kind}`} transform={`translate(${X(item.x)} ${Y(item.z)})`}>
             <PlantMark kind={item.kind} r={r} />
             {selected(selectedHit, 'plants', item.id) && <circle r={r + 4} fill="none" stroke="#0f766e" strokeWidth={1.6} />}
-            <text y={r + 12} textAnchor="middle" fontSize={9} fill="#1c1917">{spec.name}</text>
+            {selected(selectedHit, 'plants', item.id) && (
+              <text y={r + 12} textAnchor="middle" fontSize={9} fill="#1c1917" stroke="#fbfaf7" strokeWidth={2} paintOrder="stroke">{spec.name}</text>
+            )}
           </g>
         )
       })}
@@ -494,7 +509,7 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
       })}
       {layerVisible(plan, 'ground') && yard.ground.wells.filter((item) => !item.hidden).map((item) => (
         <g key={item.id} data-testid="energy-well" data-depth={item.depth}>
-          {CLEARANCE_RADII.map((radius) => (
+          {(showClearances || selected(selectedHit, 'wells', item.id)) && CLEARANCE_RADII.map((radius) => (
             <circle
               key={radius}
               data-testid="clearance-circle"
@@ -504,9 +519,9 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
               r={px(radius)}
               fill="none"
               stroke={radius === 3 ? '#b45309' : radius === 7.5 ? '#0f766e' : '#1d4ed8'}
-              strokeWidth={1}
-              strokeDasharray="5 4"
-              opacity={0.85}
+              strokeWidth={0.6}
+              strokeDasharray="4 3"
+              opacity={0.55}
             />
           ))}
           <circle cx={X(item.x)} cy={Y(item.z)} r={Math.max(7, px(0.45))} fill="#ccfbf1" stroke="#0f766e" strokeWidth={1.6} />
@@ -554,18 +569,29 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
           strokeDasharray="6 4"
         />
       )}
-      <g data-testid="yard-legend" transform={`translate(${sheet.x + sheet.w - 166} ${sheet.y + 86})`}>
-        <rect width={158} height={58 + PLANTS.length * 20 + BEDS.length * 14} fill="#fff" stroke="#1c1917" strokeWidth={0.8} opacity={0.94} />
-        <text x={10} y={16} fontSize={11} fontWeight={750} fill="#1c1917">Kasvillisuus</text>
-        {PLANTS.map((item, index) => (
-          <g key={item.id} transform={`translate(22 ${40 + index * 20})`}>
-            <PlantMark kind={item.id} r={7} />
-            <text x={18} y={3} fontSize={9} fill="#1c1917">{item.name}</text>
-          </g>
-        ))}
-        {BEDS.map((item, index) => (
-          <text key={item.id} x={12} y={48 + PLANTS.length * 20 + index * 14} fontSize={9} fill="#1c1917">{item.name}</text>
-        ))}
+      <g data-testid="yard-legend" transform={`translate(${legendAt?.x ?? sheet.x + 12} ${legendAt?.y ?? sheet.y + 12})`}>
+        {(() => {
+          const plantY = 26
+          const bedY = plantY + PLANTS.length * 16 + 4
+          const areaY = bedY + BEDS.length * 14 + 2
+          const height = yardLegendHeight()
+          return (
+            <>
+              <rect width={legendAt?.w ?? 158} height={height} fill="#fff" stroke="#1c1917" strokeWidth={0.8} />
+              <text x={8} y={14} fontSize={10} fontWeight={750} fill="#1c1917">Kasvillisuus</text>
+              {PLANTS.map((item, index) => (
+                <g key={item.id} transform={`translate(16 ${plantY + index * 16})`}>
+                  <PlantMark kind={item.id} r={5.5} />
+                  <text x={14} y={3} fontSize={8} fill="#1c1917">{item.name}</text>
+                </g>
+              ))}
+              {BEDS.map((item, index) => (
+                <text key={item.id} x={8} y={bedY + index * 14} fontSize={8} fill="#1c1917">{item.name}</text>
+              ))}
+              <text data-testid="yard-area" x={8} y={areaY + 10} fontSize={8} fill="#44403c">{formatSquare(metrics.area)}</text>
+            </>
+          )
+        })()}
       </g>
     </g>
   )

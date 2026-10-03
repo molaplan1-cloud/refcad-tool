@@ -13,31 +13,57 @@ const barBtn = (active) => ({
   cursor: 'pointer',
 })
 
+const iconBtn = (active) => ({
+  width: 28,
+  height: 28,
+  padding: 0,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderRadius: 6,
+  border: `1px solid ${active ? '#0f766e' : '#e7e5e4'}`,
+  background: active ? '#134e4a' : '#fff',
+  color: active ? '#f0fdfa' : '#1c1917',
+  fontSize: 11,
+  fontWeight: 750,
+  cursor: 'pointer',
+  flexShrink: 0,
+})
+
+const EXTRA = [
+  { id: 'rotate90', testid: 'cad-rotate-90', icon: '90', title: 'Käännä 90°' },
+  { id: 'delete', testid: 'cad-delete', icon: '✕', title: 'Poista (Del)' },
+  { id: 'group', testid: 'cad-group', icon: 'Grp', title: 'Ryhmitä' },
+  { id: 'ungroup', testid: 'cad-ungroup', icon: 'Ung', title: 'Pura ryhmä' },
+  { id: 'lock', testid: 'cad-lock', icon: 'Luk', title: 'Lukitse' },
+  { id: 'unlock', testid: 'cad-unlock', icon: 'Av', title: 'Avaa lukitus' },
+  { id: 'hide', testid: 'cad-hide', icon: 'Pi', title: 'Piilota' },
+  { id: 'isolate', testid: 'cad-isolate', icon: 'Er', title: 'Eristä' },
+  { id: 'show', testid: 'cad-show', icon: 'Nä', title: 'Näytä kaikki' },
+  { id: 'similar', testid: 'cad-similar', icon: 'Sa', title: 'Valitse samanlaiset' },
+  { id: 'match', testid: 'cad-match', icon: 'Ko', title: 'Kopioi ominaisuudet' },
+]
+
 export function CadToolbar({ active, onCommand, onSelectType, onLayer }) {
   return (
-    <div data-testid="cad-toolbar" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: '6px 10px', background: '#fff', borderBottom: '1px solid #e7e5e4' }}>
-      <select data-testid="select-by-type" defaultValue="" onChange={(event) => { onSelectType(event.target.value); event.target.value = '' }} style={{ height: 28, borderRadius: 7, border: '1px solid #d6d3d1', fontSize: 12, fontWeight: 650 }}>
-        <option value="">Valitse tyyppi…</option>
+    <div data-testid="cad-toolbar" style={{ display: 'flex', flexWrap: 'nowrap', gap: 4, alignItems: 'center', padding: '3px 8px', background: '#fff', borderBottom: '1px solid #e7e5e4', overflowX: 'auto' }}>
+      <select data-testid="select-by-type" defaultValue="" title="Valitse tyyppi" onChange={(event) => { onSelectType(event.target.value); event.target.value = '' }} style={{ height: 28, maxWidth: 132, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12, fontWeight: 650, flexShrink: 0 }}>
+        <option value="">Tyyppi…</option>
         {SELECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
       </select>
       {CAD_COMMANDS.map((cmd) => (
-        <button key={cmd.id} type="button" data-testid={cmd.testid} title={cmd.short} style={barBtn(active === cmd.id)} onClick={() => onCommand(cmd.id)}>
-          {cmd.label}
+        <button key={cmd.id} type="button" data-testid={cmd.testid} title={`${cmd.label} (${cmd.short})`} style={iconBtn(active === cmd.id)} onClick={() => onCommand(cmd.id)}>
+          {cmd.short}
         </button>
       ))}
-      <button type="button" data-testid="cad-rotate-90" style={barBtn(false)} onClick={() => onCommand('rotate90')}>90°</button>
-      <button type="button" data-testid="cad-delete" style={barBtn(false)} onClick={() => onCommand('delete')}>Poista</button>
-      <button type="button" data-testid="cad-group" style={barBtn(false)} onClick={() => onCommand('group')}>Ryhmitä</button>
-      <button type="button" data-testid="cad-ungroup" style={barBtn(false)} onClick={() => onCommand('ungroup')}>Pura</button>
-      <button type="button" data-testid="cad-lock" style={barBtn(false)} onClick={() => onCommand('lock')}>Lukitse</button>
-      <button type="button" data-testid="cad-unlock" style={barBtn(false)} onClick={() => onCommand('unlock')}>Avaa lukitus</button>
-      <button type="button" data-testid="cad-hide" style={barBtn(false)} onClick={() => onCommand('hide')}>Piilota</button>
-      <button type="button" data-testid="cad-isolate" style={barBtn(false)} onClick={() => onCommand('isolate')}>Eristä</button>
-      <button type="button" data-testid="cad-show" style={barBtn(false)} onClick={() => onCommand('show')}>Näytä kaikki</button>
-      <button type="button" data-testid="cad-similar" style={barBtn(false)} onClick={() => onCommand('similar')}>Samanlaiset</button>
-      <button type="button" data-testid="cad-match" style={barBtn(active === 'match')} onClick={() => onCommand('match')}>Kopioi ominaisuudet</button>
-      <select data-testid="cad-layer" defaultValue="" onChange={(event) => { if (event.target.value) onLayer(event.target.value); event.target.value = '' }} style={{ height: 28, borderRadius: 7, border: '1px solid #d6d3d1', fontSize: 12, fontWeight: 650 }}>
-        <option value="">Vaihda taso…</option>
+      <span style={{ width: 1, height: 18, background: '#e7e5e4', flexShrink: 0 }} />
+      {EXTRA.map((cmd) => (
+        <button key={cmd.id} type="button" data-testid={cmd.testid} title={cmd.title} style={iconBtn(active === cmd.id)} onClick={() => onCommand(cmd.id)}>
+          {cmd.icon}
+        </button>
+      ))}
+      <select data-testid="cad-layer" defaultValue="" title="Vaihda taso" onChange={(event) => { if (event.target.value) onLayer(event.target.value); event.target.value = '' }} style={{ height: 28, maxWidth: 120, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12, fontWeight: 650, flexShrink: 0 }}>
+        <option value="">Taso…</option>
         {CAD_LAYERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
       </select>
     </div>

@@ -369,7 +369,7 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: '#d6d3d1' }}>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', minHeight: 40, padding: '4px 10px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
         {FACADE_SIDES.map((item) => {
           const code = sideCompass(item.id, north)
           return (

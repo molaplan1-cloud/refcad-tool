@@ -46,7 +46,6 @@ import {
   updateFacadeZone,
   updateFixture,
   updateHouse,
-  updateYardItem,
   updateOpening,
   updateRoom,
   updateWall,
@@ -57,6 +56,7 @@ import { BRICK_TONES, PAINTS, PLINTHS, ROOFINGS, ROOF_COLOURS, finishesOf, roofi
 import { text } from '@/lib/i18n'
 import { COUNTRIES, climateOf, countryById, countryPatch, heatingPatchFor } from '@/lib/places'
 import { wallBearing } from '@/lib/orientation'
+import { updateYardItem } from '@/lib/yard'
 import { FRAMES, GLAZING, SHADING, coincidentPeak } from '@/lib/cooling'
 import { resolveFixture } from '@/lib/furniture'
 import { addChimneyFor, chimneyKind, defaultFlue, flueOptions, withChimneyFields } from '@/lib/chimney'
@@ -840,6 +840,8 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
       <div style={{ display: 'flex', gap: 4 }}>
         <MenuBtn testid="opening-swing-left" onClick={() => onCommit(updateOpening(plan, id, { swing: 1 }))}>{t('opening.swingLeft')}</MenuBtn>
         <MenuBtn testid="opening-swing-right" onClick={() => onCommit(updateOpening(plan, id, { swing: -1 }))}>{t('opening.swingRight')}</MenuBtn>
+        <MenuBtn testid="opening-leaf-out" onClick={() => onCommit(updateOpening(plan, id, { inward: false }))}>{t('opening.out')}</MenuBtn>
+        <MenuBtn testid="opening-leaf-in" onClick={() => onCommit(updateOpening(plan, id, { inward: true }))}>{t('opening.in')}</MenuBtn>
       </div>
     </div>
   )

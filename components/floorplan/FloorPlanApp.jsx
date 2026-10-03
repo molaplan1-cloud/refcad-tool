@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import Link from 'next/link'
 import {
   FIXTURES,
   MATERIALS,
@@ -84,19 +83,20 @@ import {
   targetsInBox,
   ungroupSelection,
 } from '@/lib/cadEdit'
-import { CadPrompt, CadToolbar } from './CadTools'
+import { CadPrompt } from './CadTools'
+import { LayerDock, PlanChrome } from './PlanChrome'
 import { buildPlanPdf } from '@/lib/roominfo'
 import { applyDisplay, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { DisplayPanel } from './DisplayPanel'
 import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
-import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
+import { ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import { ElectricPanel } from './ElectricPanel'
 import { HeatingPanel } from './HeatingPanel'
 import { COVER_TYPES } from '@/lib/covers'
 import { GROUND_TOOLS } from '@/lib/groundworks'
-import YardLayer, { YARD_DRAW_TOOLS, yardToolLabel } from './YardLayer'
+import YardLayer, { yardLegendHeight, yardToolLabel } from './YardLayer'
 import {
   BUILDINGS,
   OBJECTS,
@@ -170,23 +170,6 @@ import { wallBearing } from '@/lib/orientation'
 import { text } from '@/lib/i18n'
 
 const HouseScene = dynamic(() => import('./HouseScene'), { ssr: false })
-
-const textBtn = (active) => ({
-  height: 32,
-  padding: '0 10px',
-  display: 'inline-flex',
-  alignItems: 'center',
-  borderRadius: 8,
-  border: '1px solid transparent',
-  background: active ? '#134e4a' : 'transparent',
-  color: active ? '#ccfbf1' : '#e7e5e4',
-  fontSize: 12,
-  fontWeight: 650,
-  cursor: 'pointer',
-  flexShrink: 0,
-  transform: 'none',
-  whiteSpace: 'nowrap',
-})
 
 const sideBtn = (active) => ({
   width: '100%',
@@ -403,21 +386,36 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
         const side = wall ? faceSide(wall, edge.a, edge.b) : 'left'
         const material = wall ? resolveFaceMaterial(plan, wall, side) : (room.interiorId || 'paint')
         const color = materialOf('interior', material).color
-        const a = room.polygon?.[index]
-        const b = room.polygon?.[(index + 1) % (room.polygon?.length || 1)]
-        if (!a || !b) return null
+        const a0 = room.polygon?.[index]
+        const b0 = room.polygon?.[(index + 1) % (room.polygon?.length || 1)]
+        if (!a0 || !b0) return null
+        const midX = (a0.x + b0.x) / 2
+        const midZ = (a0.z + b0.z) / 2
+        const edx = b0.x - a0.x
+        const edz = b0.z - a0.z
+        const elen = Math.hypot(edx, edz) || 1
+        let ox = -edz / elen
+        let oz = edx / elen
+        const poly = room.polygon || []
+        const cx = poly.reduce((sum, point) => sum + point.x, 0) / (poly.length || 1)
+        const cz = poly.reduce((sum, point) => sum + point.z, 0) / (poly.length || 1)
+        if ((cx - midX) * ox + (cz - midZ) * oz < 0) { ox = -ox; oz = -oz }
+        const shift = 0.07
+        const a = { x: a0.x + ox * shift, z: a0.z + oz * shift }
+        const b = { x: b0.x + ox * shift, z: b0.z + oz * shift }
         const active = selected?.id === room.id && selected?.wallId === edge.wallId
-        const dashed = material === 'gypsum' || material === 'tile' || material === 'wallpaper' || material === 'concrete-paint'
+        const dashed = material === 'gypsum' || material === 'wallpaper'
         return (
           <line
             key={`${room.id}-${index}`}
             data-testid={`face-line-${room.id}-${index}`}
+            data-material={material}
             x1={X(a.x)}
             y1={Y(a.z)}
             x2={X(b.x)}
             y2={Y(b.z)}
             stroke={active ? '#0f766e' : color}
-            strokeWidth={active ? 5 : 3}
+            strokeWidth={active ? 5 : 4}
             strokeDasharray={dashed ? '5 3' : undefined}
             strokeLinecap="butt"
             onPointerDown={(event) => {
@@ -477,7 +475,7 @@ function HatchDefs() {
   )
 }
 
-function WallOutlines({ plan, X, Y, selectedIds = [] }) {
+function WallOutlines({ plan, X, Y, selectedIds = [], simple = false }) {
   const walls = (plan.walls || []).filter((wall) => !wall.hidden)
   const openings = (plan.openings || []).filter((opening) => !opening.hidden && walls.some((wall) => wall.id === opening.wallId))
   const figures = useMemo(
@@ -492,11 +490,11 @@ function WallOutlines({ plan, X, Y, selectedIds = [] }) {
   const pointsOf = (pts) => pts.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')
   return (
     <g data-testid="wall-outlines">
-      {paint(figures.exterior, 'url(#poche)')}
-      {paint(figures.interior, '#e7e5e4')}
-      {paint(figures.insulation, 'rgba(214,211,209,0.9)')}
-      {paint(figures.cladding, claddingOf(plan.exteriorId).color)}
-      {walls.map((wall) => {
+      {paint(figures.exterior, simple ? '#1c1917' : 'url(#poche)')}
+      {!simple && paint(figures.interior, '#e7e5e4')}
+      {!simple && paint(figures.insulation, 'rgba(214,211,209,0.9)')}
+      {!simple && paint(figures.cladding, claddingOf(plan.exteriorId).color)}
+      {!simple && walls.map((wall) => {
         const spec = resolveWallStructure(plan, wall)
         if (!spec) return null
         const faces = layerFaces(wall, walls, spec.layers)
@@ -603,6 +601,8 @@ export default function FloorPlanApp() {
   const [heatView, setHeatView] = useState(null)
   const [sheetMode, setSheetMode] = useState('plan')
   const [displayOpen, setDisplayOpen] = useState(false)
+  const [showClearances, setShowClearances] = useState(false)
+  const [layersOpen, setLayersOpen] = useState(true)
   const [yardTool, setYardTool] = useState(null)
   const [yardPoints, setYardPoints] = useState([])
   const [wallMode, setWallMode] = useState('solid')
@@ -1826,134 +1826,83 @@ export default function FloorPlanApp() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
-      <header style={{
-        display: 'flex', alignItems: 'center', gap: 8, minHeight: 48, padding: '6px 10px',
-        background: '#14181f', color: '#f5f5f4', flexShrink: 0, flexWrap: 'wrap',
-      }}>
-        <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14 }}>RefCAD</Link>
-        <Link href="/" style={{ color: '#a8a29e', textDecoration: 'none', fontSize: 12, fontWeight: 650 }}>{t('app.coldRooms')}</Link>
-        <input
-          aria-label={t('app.drawingName')}
-          value={plan.name}
-          onChange={(event) => setPlan({ ...plan, name: event.target.value })}
-          style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 13, width: 160 }}
-        />
-        <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
-          <button type="button" data-testid="tool-select" style={textBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacing(null); setDraft(null) }}>{t('tool.select')}</button>
-          <button type="button" data-testid="tool-exterior" style={textBtn(tool === 'exterior')} onClick={() => { setTool('exterior'); setPlacing(null) }}>{t('tool.exterior')}</button>
-          <button type="button" data-testid="tool-interior" style={textBtn(tool === 'interior')} onClick={() => { setTool('interior'); setPlacing(null) }}>{t('tool.interior')}</button>
-          <button type="button" data-testid="tool-door" style={textBtn(tool === 'door')} onClick={() => { setTool('door'); setPlacing(null); setDraft(null) }}>{t('tool.door')}</button>
-          <button type="button" data-testid="tool-window" style={textBtn(tool === 'window')} onClick={() => { setTool('window'); setPlacing(null); setDraft(null) }}>{t('tool.window')}</button>
-          <button type="button" data-testid="tool-room" style={textBtn(tool === 'room' && roomShape === 'rect')} onClick={() => { setTool('room'); setRoomShape('rect'); setPlacing(null); setPoly([]) }}>{t('tool.room')}</button>
-          <button type="button" data-testid="tool-room-poly" style={textBtn(tool === 'room' && roomShape === 'poly')} onClick={() => { setTool('room'); setRoomShape('poly'); setPlacing(null); setDraft(null) }}>{t('tool.polygon')}</button>
-          <button type="button" data-testid="tool-detect" style={textBtn(tool === 'detect')} onClick={() => { setTool('detect'); setPlacing(null); setDraft(null); setPoly([]) }}>{t('tool.detect')}</button>
-        </div>
-        <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
-          <button type="button" data-testid="view-floor-2d" style={textBtn(view === '2d' && sheetMode !== 'site')} onClick={() => { setView('2d'); setSheetMode('plan'); setYardTool(null); setYardPoints([]) }}>2D</button>
-          <button type="button" data-testid="view-site" style={textBtn(view === '2d' && sheetMode === 'site')} onClick={() => { setView('2d'); setSheetMode('site'); setCamera(FIT_CAMERA); setYardTool(null); setYardPoints([]) }}>{t('view.site')}</button>
-          <button type="button" data-testid="view-floor-3d" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
-          <button type="button" data-testid="view-facade" style={textBtn(view === 'facade')} onClick={() => setView('facade')}>{t('view.facade')}</button>
-        </div>
-        <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
-          <button type="button" style={textBtn(plan.paper !== 'a4')} onClick={() => setPlan({ ...plan, paper: 'a3' })}>A3</button>
-          <button type="button" style={textBtn(plan.paper === 'a4')} onClick={() => setPlan({ ...plan, paper: 'a4' })}>A4</button>
-        </div>
-        <button type="button" title={t('edit.undo')} data-testid="undo" onClick={undo} style={textBtn(false)}>{t('edit.undo')}</button>
-        <button type="button" title={t('edit.redo')} data-testid="redo" onClick={redoChange} style={textBtn(false)}>{t('edit.redo')}</button>
-        <span style={{ flex: 1 }} />
-        <LanguageSwitch value={plan.locale || locale} onChange={(next) => { setLocale(next); setPlan((current) => ({ ...current, locale: next })) }} />
-        <button type="button" data-testid="plan-new" onClick={() => { setMenu(null); setNewOpen(true) }} style={textBtn(false)}>{t('file.new')}</button>
-        <button type="button" data-testid="plan-open" onClick={() => { setMenu(null); setLibraryOpen(true) }} style={textBtn(false)}>{t('file.open')}</button>
-        <button type="button" data-testid="house-settings" onClick={() => { setPanel('house'); setMenu(null) }} style={textBtn(panel === 'house')}>{t('file.house')}</button>
-        <button type="button" data-testid="open-display" onClick={() => setDisplayOpen((open) => !open)} style={textBtn(displayOpen)}>{t('file.display')}</button>
-        <button type="button" data-testid="toolbar-preset-plain" title={`${t('preset.plain')} (Alt+1)`} onClick={() => setDisplay({ preset: 'plain' })} style={textBtn(display.preset === 'plain')}>{t('preset.plain')}</button>
-        <button type="button" data-testid="toolbar-preset-measure" title={`${t('preset.measure')} (Alt+2)`} onClick={() => setDisplay({ preset: 'measure' })} style={textBtn(display.preset === 'measure')}>{t('preset.measure')}</button>
-        <button type="button" data-testid="toolbar-preset-all" title={`${t('preset.all')} (Alt+3)`} onClick={() => setDisplay({ preset: 'all' })} style={textBtn(display.preset === 'all')}>{t('preset.all')}</button>
-        <button type="button" data-testid="example-house" onClick={loadExample} style={textBtn(false)}>{t('file.example')}</button>
-        <button type="button" data-testid="family-house" onClick={loadFamily} style={textBtn(false)}>{t('file.apartment')}</button>
-        <button type="button" data-testid="export-floor-pdf" onClick={exportPdf} style={textBtn(false)}>PDF</button>
-        <button type="button" data-testid="export-site-pdf" onClick={() => buildSitePdf(plan).save(`${(plan.name || 'site').replace(/\s+/g, '-')}-site.pdf`)} style={textBtn(false)}>{t('file.sitePdf')}</button>
-        <button type="button" data-testid="export-floor-png" onClick={exportPng} style={textBtn(false)}>PNG</button>
-      </header>
-      <div style={{ height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', background: '#1c212b', color: '#e7e5e4', flexShrink: 0 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <input data-testid="room-partitions" type="checkbox" checked={partitions} onChange={(event) => setPartitions(event.target.checked)} />
-          {t('partition.create')}
-        </label>
-        {tool === 'room' && roomShape === 'poly' && poly.length >= 3 && (
-          <button type="button" data-testid="close-room" style={textBtn(false)} onClick={() => closeRoom(poly)}>{t('room.close')}</button>
-        )}
-        {sheetMode === 'site' && YARD_DRAW_TOOLS.map(([id]) => (
-          <button key={id} type="button" data-testid={`yard-tool-${id}`} style={textBtn(yardTool === id)} onClick={() => { setYardTool(id); setTool('select'); setPlacing(null); setYardPoints([]) }}>{t(`yard.${id}`)}</button>
-        ))}
-        {sheetMode === 'site' && (
-          <>
-            <select data-testid="yard-plant-tool" value={yardTool?.startsWith('plant:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
-              <option value="">{t('yard.plant')}</option>
-              {PLANTS.map((item) => <option key={item.id} value={`plant:${item.id}`}>{item.name}</option>)}
-            </select>
-            <select data-testid="yard-object-tool" value={yardTool?.startsWith('object:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
-              <option value="">{t('yard.object')}</option>
-              {OBJECTS.map((item) => <option key={item.id} value={`object:${item.id}`}>{item.name}</option>)}
-            </select>
-            <select data-testid="yard-building-tool" value={yardTool?.startsWith('building:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
-              <option value="">{t('yard.building')}</option>
-              {BUILDINGS.map((item) => <option key={item.id} value={`building:${item.id}`}>{item.name}</option>)}
-            </select>
-            <select data-testid="yard-cover-tool" value={yardTool?.startsWith('cover:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
-              <option value="">{t('yard.cover')}</option>
-              {COVER_TYPES.map((item) => <option key={item.id} value={`cover:${item.id}`}>{t(`cover.${item.id}`)}</option>)}
-            </select>
-            <select data-testid="yard-ground-tool" value={yardTool?.startsWith('ground:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
-              <option value="">{t('yard.ground')}</option>
-              {GROUND_TOOLS.map((item) => <option key={item.id} value={`ground:${item.id}`}>{t(`ground.tool.${item.id}`)}</option>)}
-            </select>
-            </>
-        )}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-          {t('north.label')}
-          <input data-testid="north-angle" type="number" value={ensureYard(plan).north || 0} onChange={(event) => commit(updateYardItem(plan, 'north', 'north', { north: Number(event.target.value) || 0 }))} style={{ width: 52, padding: '2px 4px', borderRadius: 6, border: '1px solid #44403c', background: '#111827', color: '#fff' }} />
-          °
-        </label>
-        <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: '#a8a29e' }}>{t('snap.snap')}</span>
-        <button type="button" data-testid="snap-100" title="Ruudukko 100 mm" style={textBtn(gridStep === 0.1)} onClick={() => setGridStep(0.1)}>100</button>
-        <button type="button" data-testid="snap-50" title="Ruudukko 50 mm" style={textBtn(gridStep === 0.05)} onClick={() => setGridStep(0.05)}>50</button>
-        <button type="button" data-testid="snap-10" title="Ruudukko 10 mm" style={textBtn(gridStep === 0.01)} onClick={() => setGridStep(0.01)}>10</button>
-        <span style={{ fontSize: 11, color: '#a8a29e', marginLeft: 6 }}>{t('snap.angle')}</span>
-        <button type="button" data-testid="angle-90" data-ortho="true" title="90° (Shift)" aria-pressed={angleStep === 90} style={textBtn(angleStep === 90)} onClick={() => setAngleStep(90)}>90°</button>
-        <button type="button" data-testid="angle-45" aria-pressed={angleStep === 45} style={textBtn(angleStep === 45)} onClick={() => setAngleStep(45)}>45°</button>
-        <button type="button" data-testid="angle-15" aria-pressed={angleStep === 15} style={textBtn(angleStep === 15)} onClick={() => setAngleStep(15)}>15°</button>
-        <button type="button" data-testid="angle-free" aria-pressed={angleStep === 0} style={textBtn(angleStep === 0)} onClick={() => setAngleStep(0)}>{t('snap.free')}</button>
-        {view === '2d' && (
-          <>
-            <button type="button" data-testid="zoom-out" title={t('snap.zoomOut')} style={textBtn(false)} onClick={() => {
-              const rect = hostRef.current?.getBoundingClientRect()
-              setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 0.8))
-            }}>−</button>
-            <span data-testid="zoom-percent" style={{ minWidth: 44, textAlign: 'center', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{zoomPercent(camera)}%</span>
-            <button type="button" data-testid="zoom-in" title={t('snap.zoomIn')} style={textBtn(false)} onClick={() => {
-              const rect = hostRef.current?.getBoundingClientRect()
-              setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 1.25))
-            }}>+</button>
-            <button type="button" data-testid="zoom-fit" title={t('snap.fitTitle')} style={textBtn(false)} onClick={() => setCamera(FIT_CAMERA)}>{t('snap.fit')}</button>
-          </>
-        )}
-      </div>
-      <ServiceBar
+      <PlanChrome
+        t={t}
         plan={plan}
-        system={svcSystem}
-        kindId={svcKind}
-        tool={svcTool}
+        locale={locale}
+        setLocale={(next) => { setLocale(next); setPlan((current) => ({ ...current, locale: next })) }}
+        mode={view === '3d' ? '3d' : view === 'facade' ? 'facade' : sheetMode === 'site' ? 'site' : 'plan'}
+        tool={tool}
+        placing={placing}
+        roomShape={roomShape}
+        yardTool={yardTool}
+        partitions={partitions}
+        polyReady={poly.length >= 3}
+        gridStep={gridStep}
+        angleStep={angleStep}
+        camera={camera}
+        display={display}
+        panel={panel}
+        command={command}
+        svcSystem={svcSystem}
+        svcKind={svcKind}
+        svcTool={svcTool}
         floorHeating={floorHeating}
         drawing={svcTool === 'run' && svcPoints.length >= 2}
+        wallMode={wallMode}
+        roofMode={roofMode}
+        showClearances={showClearances}
+        onName={(name) => setPlan({ ...plan, name })}
+        onMode={(next) => {
+          if (next === '3d') setView('3d')
+          else if (next === 'facade') setView('facade')
+          else if (next === 'site') { setView('2d'); setSheetMode('site'); setCamera(FIT_CAMERA); setYardTool(null); setYardPoints([]) }
+          else { setView('2d'); setSheetMode('plan'); setYardTool(null); setYardPoints([]) }
+        }}
+        onTool={(next) => {
+          setTool(next)
+          setPlacing(null)
+          if (next === 'select' || next === 'door' || next === 'window') setDraft(null)
+          if (next === 'detect') { setDraft(null); setPoly([]) }
+        }}
+        onRoomRect={() => { setTool('room'); setRoomShape('rect'); setPlacing(null); setPoly([]) }}
+        onRoomPoly={() => { setTool('room'); setRoomShape('poly'); setPlacing(null); setDraft(null) }}
+        onUndo={undo}
+        onRedo={redoChange}
+        onNew={() => { setMenu(null); setNewOpen(true) }}
+        onOpen={() => { setMenu(null); setLibraryOpen(true) }}
+        onHouse={() => { setPanel('house'); setMenu(null) }}
+        onDisplay={() => setDisplayOpen((open) => !open)}
+        onPreset={(preset) => setDisplay({ preset })}
+        onExample={loadExample}
+        onFamily={loadFamily}
+        onPaper={(paper) => setPlan({ ...plan, paper })}
+        onPartitions={setPartitions}
+        onCloseRoom={() => closeRoom(poly)}
+        onYardTool={(id) => { setYardTool(id); setTool('select'); setPlacing(null); setYardPoints([]) }}
+        onNorth={(north) => commit(updateYardItem(plan, 'north', 'north', { north }))}
+        onGrid={setGridStep}
+        onAngle={setAngleStep}
+        onZoomOut={() => {
+          const rect = hostRef.current?.getBoundingClientRect()
+          setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 0.8))
+        }}
+        onZoomIn={() => {
+          const rect = hostRef.current?.getBoundingClientRect()
+          setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 1.25))
+        }}
+        onZoomFit={() => setCamera(FIT_CAMERA)}
+        onClearances={setShowClearances}
+        onWallMode={setWallMode}
+        onRoofMode={setRoofMode}
+        onSceneStyle={(sceneStyle) => setPlan({ ...plan, sceneStyle })}
         onSystem={(id) => {
           setSvcSystem(id)
           const next = PLACEABLES.find((item) => item.system === id && item.mode === (svcTool === 'run' ? 'run' : 'node'))
           if (next) setSvcKind(next.id)
         }}
         onKind={setSvcKind}
-        onTool={(next) => {
+        onSvcTool={(next) => {
           setSvcTool(next)
           setTool('select')
           setPlacing(null)
@@ -1965,10 +1914,8 @@ export default function FloorPlanApp() {
             if (match) setSvcKind(match.id)
           }
         }}
-        onLayer={(id, visible) => setPlan((current) => {
-          const services = ensureServices(current)
-          return { ...current, services: { ...services, layers: { ...services.layers, [id]: visible } } }
-        })}
+        onFloorHeating={setFloorHeating}
+        onFinish={finishServiceRun}
         onRoute={() => {
           commit(syncYardServices(autoRouteAll(plan, { floorHeating })))
           setSvcPoints([])
@@ -1980,52 +1927,30 @@ export default function FloorPlanApp() {
           setView('2d')
           setElectricView(null)
         }}
-        onSchedule={() => {
-          setView('2d')
-          setElectricView('list')
-        }}
-        onDiagram={() => {
-          setView('2d')
-          setElectricView('diagram')
-        }}
-        onRewireWater={() => {
-          commit(rewireWater(plan))
-          setView('2d')
-          setHeatView(null)
-        }}
-        onRewireHeat={() => {
-          commit(applyHeating(plan, {}))
-          setView('2d')
-          setSvcSystem('heat')
-          setHeatView(null)
-        }}
-        onHeatTable={() => {
-          setView('2d')
-          setHeatView('table')
-          setElectricView(null)
-        }}
-        onHeatSchematic={() => {
-          setView('2d')
-          setHeatView('schematic')
-          setElectricView(null)
-        }}
-        onFloorHeating={setFloorHeating}
-        onFinish={finishServiceRun}
-        onPdf={(id) => {
+        onSchedule={() => { setView('2d'); setElectricView('list') }}
+        onDiagram={() => { setView('2d'); setElectricView('diagram') }}
+        onRewireWater={() => { commit(rewireWater(plan)); setView('2d'); setHeatView(null) }}
+        onRewireHeat={() => { commit(applyHeating(plan, {})); setView('2d'); setSvcSystem('heat'); setHeatView(null) }}
+        onHeatTable={() => { setView('2d'); setHeatView('table'); setElectricView(null) }}
+        onHeatSchematic={() => { setView('2d'); setHeatView('schematic'); setElectricView(null) }}
+        onPdf={exportPdf}
+        onServicePdf={(id) => {
+          if (id === 'site') {
+            buildSitePdf(plan).save(`${(plan.name || 'site').replace(/\s+/g, '-')}-site.pdf`)
+            return
+          }
+          if (id === 'png') { exportPng(); return }
           const doc = id === 'electric' ? buildElectricPdf(plan) : id === 'heat' || id === 'water' ? buildHydronicPdf(plan) : buildServicePdf(plan, id)
           doc.save(`${(plan.name || 'talotekniikka').replace(/\s+/g, '-')}-${id}.pdf`)
         }}
-      />
-
-      <CadToolbar
-        active={command?.name}
         onCommand={beginCommand}
         onSelectType={(type) => remember(targetsByType(plan, type))}
-        onLayer={(layer) => beginCommand('layer', layer)}
+        onCadLayer={(layer) => beginCommand('layer', layer)}
       />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <aside style={{ width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}>
+          <LayerDock plan={plan} open={layersOpen} onToggle={() => setLayersOpen((open) => !open)} onLayer={(id, visible) => setPlan((current) => setServiceLayer(current, id, visible))} t={t} />
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '4px 4px 8px' }}>KALUSTEET</div>
           <input
             data-testid="fixture-search"
@@ -2177,7 +2102,7 @@ export default function FloorPlanApp() {
                 <g data-testid="plan-camera" transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
                 <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.4} />
                 <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
-                {visibleRooms(plan).map((item) => (
+                {sheetMode !== 'site' && visibleRooms(plan).map((item) => (
                   <polygon
                     key={item.id}
                     points={item.polygon.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
@@ -2195,11 +2120,13 @@ export default function FloorPlanApp() {
                     px={px}
                     sheet={sheet}
                     selected={pick}
+                    showClearances={showClearances}
+                    legendAt={{ x: sheet.x + layout.title.x * k, y: sheet.y + 52, w: Math.max(140, layout.title.w * k) }}
                     preview={yardPoints.length ? { points: yardPoints, cursor: snapVisual?.point || cursor } : null}
                   />
                 )}
-                <WallOutlines plan={plan} X={X} Y={Y} selectedIds={picks.filter((item) => item.kind === 'wall').map((item) => item.id)} />
-                {(plan.openings || []).filter((opening) => !opening.hidden).map((opening) => {
+                <WallOutlines plan={plan} X={X} Y={Y} simple={sheetMode === 'site'} selectedIds={picks.filter((item) => item.kind === 'wall').map((item) => item.id)} />
+                {sheetMode !== 'site' && (plan.openings || []).filter((opening) => !opening.hidden).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
                   if (!wall || wall.hidden) return null
                   const fig = openingSymbol(wall, opening, plan)
@@ -2217,7 +2144,7 @@ export default function FloorPlanApp() {
                     )
                   }
                   return (
-                    <g key={opening.id} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
+                    <g key={opening.id} data-testid="door-mark" data-swing={opening.swing >= 0 ? 'left' : 'right'} data-leaf={opening.inward ? 'in' : 'out'} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
                       <polyline points={fig.arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} />
                       <line x1={X(fig.hinge.x)} y1={Y(fig.hinge.z)} x2={X(fig.leaf.x)} y2={Y(fig.leaf.z)} />
                     </g>
@@ -2301,12 +2228,12 @@ export default function FloorPlanApp() {
                     </g>
                   )
                 })}
-                <FaceLines plan={plan} X={X} Y={Y} selected={pick?.kind === 'room' ? pick : null} onSelect={(face) => {
+                {sheetMode !== 'site' && <FaceLines plan={plan} X={X} Y={Y} selected={pick?.kind === 'room' ? pick : null} onSelect={(face) => {
                   setPick(face)
                   setSelectedRoom(face.id)
                   setPanel('object')
                   setMenu(null)
-                }} />
+                }} />}
                 {sheetMode !== 'site' && plan.walls.length > 0 && (
                   <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
                     {dimLines.map((dim, index) => (
@@ -2429,8 +2356,10 @@ export default function FloorPlanApp() {
                   }}
                 >
                   {(() => {
-                    const ax = sheet.x + sheet.w - 52
-                    const ay = sheet.y + 48
+                    const columnX = sheet.x + layout.title.x * k
+                    const columnW = layout.title.w * k
+                    const ax = sheetMode === 'site' ? columnX + columnW - 22 : sheet.x + sheet.w - 52
+                    const ay = sheetMode === 'site' ? sheet.y + 26 : sheet.y + 48
                     const north = ensureYard(plan).north || 0
                     return (
                       <g transform={`rotate(${north} ${ax} ${ay})`}>
@@ -2504,10 +2433,18 @@ export default function FloorPlanApp() {
                   X={X}
                   Y={Y}
                   sheet={sheet}
-                  legendBox={{
+                  quietLabels={sheetMode === 'site' || activeSystems.length > 1}
+                  siteMode={sheetMode === 'site'}
+                  legendBox={sheetMode === 'site' ? {
                     x: sheet.x + layout.title.x * k,
-                    y: sheet.y + 70,
+                    y: sheet.y + 52 + yardLegendHeight() + 8,
+                    w: Math.max(140, layout.title.w * k),
+                    maxBottom: sheet.y + layout.title.y * k - 6,
+                  } : {
+                    x: sheet.x + layout.title.x * k,
+                    y: sheet.y + 16,
                     w: layout.title.w * k,
+                    maxBottom: sheet.y + layout.title.y * k - 6,
                   }}
                   interactive={!svcTool}
                   selected={pick}
@@ -2515,7 +2452,7 @@ export default function FloorPlanApp() {
                   preview={svcTool === 'run' ? { points: svcPoints, cursor: cursor ? snapServicePoint(cursor, plan, { mode: 'free', system: svcSystem }) : null } : null}
                   onContext={openServiceMenu}
                 />
-                {roomLabels.map((label) => (
+                {sheetMode !== 'site' && roomLabels.map((label) => (
                   <g
                     key={`label-${label.id}`}
                     data-testid="room-label"
@@ -2573,7 +2510,7 @@ export default function FloorPlanApp() {
                   />
                 )}
                 <SnapMark snap={snapVisual} X={X} Y={Y} zoom={camera.zoom} />
-                <AngleMarks marks={cornerAngles(plan.walls)} X={X} Y={Y} zoom={camera.zoom} />
+                {sheetMode !== 'site' && <AngleMarks marks={cornerAngles(plan.walls)} X={X} Y={Y} zoom={camera.zoom} />}
                 </g>
               </svg>
               {displayOpen && (
@@ -2614,22 +2551,6 @@ export default function FloorPlanApp() {
                 onServiceDrag={onServiceDrag3d}
                 onDropFixture={onDropFixture3d}
               />
-              <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', gap: 4, background: '#14181f', padding: 4, borderRadius: 10 }}>
-                  <span style={{ color: '#a8a29e', fontSize: 11, alignSelf: 'center', padding: '0 6px' }}>{t('view3d.walls')}</span>
-                  <button type="button" data-testid="wall-solid" style={textBtn(wallMode === 'solid')} onClick={() => setWallMode('solid')}>{t('view3d.visible')}</button>
-                  <button type="button" data-testid="wall-ghost" aria-pressed={wallMode === 'ghost'} style={textBtn(wallMode === 'ghost')} onClick={() => setWallMode('ghost')}>{t('view3d.ghost')}</button>
-                  <button type="button" data-testid="wall-hidden" style={textBtn(wallMode === 'hidden')} onClick={() => setWallMode('hidden')}>{t('view3d.hidden')}</button>
-                </div>
-                <div style={{ display: 'flex', gap: 4, background: '#14181f', padding: 4, borderRadius: 10 }}>
-                  <span style={{ color: '#a8a29e', fontSize: 11, alignSelf: 'center', padding: '0 6px' }}>{t('view3d.roof')}</span>
-                  <button type="button" data-testid="roof-solid" style={textBtn(roofMode === 'solid')} onClick={() => setRoofMode('solid')}>{t('view3d.visible')}</button>
-                  <button type="button" data-testid="roof-ghost" style={textBtn(roofMode === 'ghost')} onClick={() => setRoofMode('ghost')}>{t('view3d.ghost')}</button>
-                  <button type="button" data-testid="roof-hidden" aria-pressed={roofMode === 'hidden'} style={textBtn(roofMode === 'hidden')} onClick={() => setRoofMode('hidden')}>{t('view3d.hidden')}</button>
-                  <button type="button" data-testid="scene-realistic" style={textBtn(plan.sceneStyle !== 'technical')} onClick={() => setPlan({ ...plan, sceneStyle: 'realistic' })}>{t('finish.realistic')}</button>
-                  <button type="button" data-testid="scene-technical" style={textBtn(plan.sceneStyle === 'technical')} onClick={() => setPlan({ ...plan, sceneStyle: 'technical' })}>{t('finish.technical')}</button>
-                </div>
-              </div>
             </div>
           )}
           {electricView && (
