@@ -20,6 +20,8 @@ import {
   wallCladdingPieces,
   wallPieces,
 } from '@/lib/floorplan'
+import Services3D from './Services3D'
+import { layerVisible } from '@/lib/services'
 
 const textureCache = new Map()
 
@@ -259,7 +261,7 @@ function WallMesh({ plan, mode }) {
   )
 }
 
-function FloorMesh({ room }) {
+function FloorMesh({ room, translucent }) {
   const finish = materialOf('floor', room.floorId)
   const map = finishTexture('floor', finish.id)
   const geom = useMemo(() => {
@@ -275,7 +277,14 @@ function FloorMesh({ room }) {
   if (!room.polygon || room.polygon.length < 3) return null
   return (
     <mesh geometry={geom} position={[0, 0.012, 0]} receiveShadow={false}>
-      <meshLambertMaterial color={finish.color} map={map} side={THREE.DoubleSide} />
+      <meshLambertMaterial
+        color={finish.color}
+        map={translucent ? null : map}
+        transparent={Boolean(translucent)}
+        opacity={translucent ? 0.28 : 1}
+        depthWrite={!translucent}
+        side={THREE.DoubleSide}
+      />
     </mesh>
   )
 }
@@ -587,11 +596,18 @@ export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0 }) {
       <ambientLight intensity={0.94} />
       <directionalLight position={[8, 22, 10]} intensity={0.5} />
       <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2)), '#cfcabe', '#e4e0d8']} position={[cx, 0, cz]} />
-      {visibleRooms(plan).map((room) => <FloorMesh key={room.id} room={room} />)}
+      {visibleRooms(plan).map((room) => (
+        <FloorMesh
+          key={room.id}
+          room={room}
+          translucent={layerVisible(plan, 'drain') && (plan.services?.runs || []).some((run) => run.system === 'drain')}
+        />
+      ))}
       <RoomLabels plan={plan} />
       <WallMesh plan={plan} mode={wallMode} />
       <RoofMesh plan={plan} mode={roofMode} />
       {(plan.fixtures || []).map((fixture) => <FixtureMesh key={fixture.id} fixture={fixture} />)}
+      <Services3D plan={plan} />
       <OrbitControls
         ref={controlsRef}
         makeDefault

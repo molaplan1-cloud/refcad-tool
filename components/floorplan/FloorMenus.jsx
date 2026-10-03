@@ -351,7 +351,7 @@ function FixtureFields({ plan, id, onApply, onCommit }) {
 }
 
 export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
-  if (!menu) return null
+  if (!menu || menu.kind === 'service') return null
   const left = Math.max(8, Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 276))
   const top = Math.max(8, Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 360))
   const wall = (plan.walls || []).find((item) => item.id === menu.id)

@@ -47,6 +47,17 @@ import {
 } from '@/lib/floorplan'
 import { FloorMenu, HouseSettings, SelectionPanel } from './FloorMenus'
 import FacadeView from './FacadeView'
+import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
+import {
+  PLACEABLES,
+  addServiceNode,
+  addServiceRun,
+  autoRouteAll,
+  buildServicePdf,
+  ensureServices,
+  hitService,
+  snapServicePoint,
+} from '@/lib/services'
 
 const HouseScene = dynamic(() => import('./HouseScene'), { ssr: false })
 
@@ -270,6 +281,11 @@ export default function FloorPlanApp() {
   const [partitions, setPartitions] = useState(true)
   const [view, setView] = useState('2d')
   const [facadeSideId, setFacadeSideId] = useState('north')
+  const [svcSystem, setSvcSystem] = useState('iv')
+  const [svcKind, setSvcKind] = useState('valve-tulo')
+  const [svcTool, setSvcTool] = useState(null)
+  const [svcPoints, setSvcPoints] = useState([])
+  const [floorHeating, setFloorHeating] = useState(false)
   const [wallMode, setWallMode] = useState('solid')
   const [roofMode, setRoofMode] = useState('solid')
   const [fitToken, setFitToken] = useState(1)
@@ -291,6 +307,7 @@ export default function FloorPlanApp() {
           setPlan({
             ...emptyPlan(),
             ...parsed,
+            services: ensureServices(parsed),
             rooms: detectRooms(parsed.walls, parsed.rooms || []),
           })
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
@@ -398,9 +415,32 @@ export default function FloorPlanApp() {
     setPoly([])
   }
 
+  const openServiceMenu = (event, service) => {
+    setMenu({ x: event.clientX, y: event.clientY, kind: 'service', service })
+  }
+
+  const finishServiceRun = () => {
+    if (svcPoints.length < 2) return
+    const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES.find((item) => item.mode === 'run')
+    commit(addServiceRun(plan, {
+      system: spec.system,
+      kind: spec.kind,
+      size: spec.size,
+      slope: spec.slope,
+      circuit: spec.circuit,
+      points: svcPoints,
+    }))
+    setSvcPoints([])
+  }
+
   const onContextMenu = (event) => {
     event.preventDefault()
     const world = toWorld(event)
+    const serviceHit = hitService(plan, world)
+    if (serviceHit) {
+      openServiceMenu(event, serviceHit)
+      return
+    }
     const hit = hitTest(plan, world)
     setMenu({ x: event.clientX, y: event.clientY, kind: hit.kind, id: hit.id, at: world })
     if (hit.kind !== 'canvas') choose(hit)
@@ -410,6 +450,30 @@ export default function FloorPlanApp() {
     if (view !== '2d' || event.button !== 0) return
     setMenu(null)
     const world = toWorld(event)
+    if (svcTool) {
+      const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES[0]
+      const point = snapServicePoint(world, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system })
+      if (svcTool === 'node') {
+        commit(addServiceNode(plan, {
+          system: spec.system,
+          kind: spec.kind,
+          role: spec.role,
+          flow: spec.flow,
+          size: spec.size,
+          circuit: spec.circuit,
+          name: spec.name,
+          x: point.x,
+          z: point.z,
+        }))
+        return
+      }
+      setSvcPoints((points) => {
+        const prev = points[points.length - 1]
+        if (prev && Math.hypot(prev.x - point.x, prev.z - point.z) < 0.05) return points
+        return [...points, { x: point.x, z: point.z }]
+      })
+      return
+    }
     if (tool === 'room') {
       const point = snapRoomPoint(world, plan.walls)
       if (roomShape === 'poly') {
@@ -468,6 +532,10 @@ export default function FloorPlanApp() {
         setPoly([])
         setPlacing(null)
         setMenu(null)
+        setSvcPoints([])
+        setSvcTool(null)
+      } else if (event.key === 'Enter' && svcTool === 'run' && svcPoints.length >= 2) {
+        finishServiceRun()
       } else if (event.key === 'Enter' && tool === 'room' && poly.length >= 3) {
         closeRoom(poly)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'wall') {
@@ -490,7 +558,7 @@ export default function FloorPlanApp() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions])
+  }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions, svcTool, svcPoints, svcKind])
 
   const loadHouse = (house, roomName) => {
     commit(house)
@@ -597,7 +665,12 @@ export default function FloorPlanApp() {
   const dims = dimensionChains(plan)
   const liveEnd = draft && snappedCursor ? snappedCursor : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
-  const status = liveEnd
+  const spec = PLACEABLES.find((item) => item.id === svcKind)
+  const status = svcTool === 'run'
+    ? 'Linja: napsauta pisteet. Enter tai Valmis päättää. Escape peruuttaa.'
+    : svcTool === 'node'
+      ? `${spec?.name || 'Piste'}: napsauta paikka. Piste tarttuu verkkoon ja lähellä olevaan osaan.`
+    : liveEnd
     ? `Pituus ${formatMm(liveLength)} mm`
     : placing
       ? 'Napsauta pohjaan kalusteen paikka'
@@ -669,6 +742,44 @@ export default function FloorPlanApp() {
           <button type="button" data-testid="close-room" style={textBtn(false)} onClick={() => closeRoom(poly)}>Sulje huone</button>
         )}
       </div>
+      <ServiceBar
+        plan={plan}
+        system={svcSystem}
+        kindId={svcKind}
+        tool={svcTool}
+        floorHeating={floorHeating}
+        drawing={svcTool === 'run' && svcPoints.length >= 2}
+        onSystem={(id) => {
+          setSvcSystem(id)
+          const next = PLACEABLES.find((item) => item.system === id && item.mode === (svcTool === 'run' ? 'run' : 'node'))
+          if (next) setSvcKind(next.id)
+        }}
+        onKind={setSvcKind}
+        onTool={(next) => {
+          setSvcTool(next)
+          setTool('select')
+          setPlacing(null)
+          setDraft(null)
+          setPoly([])
+          const current = PLACEABLES.find((item) => item.id === svcKind)
+          if (!current || current.system !== svcSystem || current.mode !== next) {
+            const match = PLACEABLES.find((item) => item.system === svcSystem && item.mode === next)
+            if (match) setSvcKind(match.id)
+          }
+        }}
+        onLayer={(id, visible) => setPlan((current) => {
+          const services = ensureServices(current)
+          return { ...current, services: { ...services, layers: { ...services.layers, [id]: visible } } }
+        })}
+        onRoute={() => {
+          commit(autoRouteAll(plan, { floorHeating }))
+          setSvcPoints([])
+          setView('2d')
+        }}
+        onFloorHeating={setFloorHeating}
+        onFinish={finishServiceRun}
+        onPdf={(id) => buildServicePdf(plan, id).save(`${(plan.name || 'talotekniikka').replace(/\s+/g, '-')}-${id}.pdf`)}
+      />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <aside style={{ width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}>
@@ -708,7 +819,7 @@ export default function FloorPlanApp() {
                 onPointerDown={onPointerDown}
                 onPointerUp={onPointerUp}
                 onContextMenu={onContextMenu}
-                style={{ display: 'block', cursor: tool === 'select' && !placing ? 'default' : 'crosshair', touchAction: 'none' }}
+                style={{ display: 'block', cursor: tool === 'select' && !placing && !svcTool ? 'default' : 'crosshair', touchAction: 'none' }}
               >
                 <defs>
                   <pattern id="poche" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -769,7 +880,7 @@ export default function FloorPlanApp() {
                     <g
                       key={fixture.id}
                       transform={`translate(${X(fixture.x)} ${Y(fixture.z)}) rotate(${fixture.rotation || 0})${fixture.mirror ? ' scale(-1 1)' : ''}`}
-                      style={{ pointerEvents: tool === 'select' && !placing ? 'auto' : 'none' }}
+                      style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none' }}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return
                         event.stopPropagation()
@@ -808,7 +919,7 @@ export default function FloorPlanApp() {
                         choose({ kind: 'room', id: item.id })
                         setMenu({ x: event.clientX, y: event.clientY, kind: 'room', id: item.id, at: world })
                       }}
-                      style={{ pointerEvents: tool === 'select' && !placing ? 'auto' : 'none', cursor: 'move' }}
+                      style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return
                         event.stopPropagation()
@@ -925,6 +1036,15 @@ export default function FloorPlanApp() {
                     ))}
                   </g>
                 )}
+                <ServiceDrawing
+                  plan={plan}
+                  X={X}
+                  Y={Y}
+                  sheet={sheet}
+                  interactive={!svcTool}
+                  preview={svcTool === 'run' ? { points: svcPoints, cursor: cursor ? snapServicePoint(cursor, plan, { mode: 'free', system: svcSystem }) : null } : null}
+                  onContext={openServiceMenu}
+                />
                 {plan.walls.length === 0 && (
                   <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">Piirrä ulkoseinät tai avaa esimerkkitalo</text>
                 )}
@@ -1002,6 +1122,7 @@ export default function FloorPlanApp() {
         </aside>
       </div>
       <FloorMenu menu={menu} plan={plan} onApply={setPlan} onCommit={commit} onNavigate={onMenuNavigate} />
+      <ServiceMenu menu={menu} plan={plan} onApply={setPlan} onClose={() => setMenu(null)} />
     </div>
   )
 }
