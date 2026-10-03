@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useLocale } from '@/components/i18n/Locale'
 import { PRODUCTS, ROOM_TYPES, getProduct, isRefrigerated } from '@/lib/catalog'
 import { applyType, internalDims } from '@/lib/geometry'
 import { isCustomOutline, polygonMetrics } from '@/lib/cadDraw'
@@ -53,6 +54,7 @@ const GROUP_LABELS = [
 ]
 
 function LineRow({ item, unitSystem, maxAbs, subtotal }) {
+  const { locale } = useLocale()
   const credit = item.watts < -1
   const pct = subtotal ? (item.watts / subtotal) * 100 : 0
   const width = maxAbs > 0 ? Math.min(100, (Math.abs(item.watts) / maxAbs) * 100) : 0
@@ -62,7 +64,7 @@ function LineRow({ item, unitSystem, maxAbs, subtotal }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, alignItems: 'baseline' }}>
         <span style={{ color: '#292524' }}>{item.label}</span>
         <span style={{ color: credit ? '#047857' : '#1c1917', fontWeight: 700, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-          {Math.round(item.watts).toLocaleString('fi-FI')} W
+          {Math.round(item.watts).toLocaleString(locale === 'en' ? 'en-GB' : locale === 'sv' ? 'sv-SE' : locale === 'es' ? 'es-ES' : locale === 'et' ? 'et-EE' : 'fi-FI')} W
           <span style={{ marginLeft: 6, color: '#a8a29e', fontWeight: 600, fontSize: 11 }}>{pctLabel}</span>
         </span>
       </div>
@@ -119,6 +121,7 @@ export default function HeatLoadPanel({
   onReroutePipe,
   onSplitPipe,
 }) {
+  const { t, locale } = useLocale()
   const field = { onFocus: onFocusEdit, onBlur: onBlurEdit }
   const length = (metres) => toLength(metres, unitSystem)
   const temp = (c) => toTemp(c, unitSystem)
@@ -134,7 +137,7 @@ export default function HeatLoadPanel({
 
   const maxAbs = roomResult ? Math.max(1, ...roomResult.lines.map((item) => Math.abs(item.watts))) : 1
   const grouped = roomResult
-    ? GROUP_LABELS.map(([id, label]) => ({ id, label, lines: roomResult.lines.filter((item) => item.group === id) })).filter((group) => group.lines.length)
+    ? GROUP_LABELS.map(([id]) => ({ id, label: t(`cold.${id}`), lines: roomResult.lines.filter((item) => item.group === id) })).filter((group) => group.lines.length)
     : []
 
   return (
@@ -144,7 +147,7 @@ export default function HeatLoadPanel({
         padding: '12px 14px 10px', borderBottom: '1px solid #e7e5e4',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-          <div style={{ fontSize: 10, letterSpacing: 0.8, color: '#78716c', fontWeight: 700 }}>KOKO KOHDE</div>
+          <div style={{ fontSize: 10, letterSpacing: 0.8, color: '#78716c', fontWeight: 700 }}>{t('designer.whole')}</div>
           <div style={{ fontSize: 11, color: '#0f766e' }}>{result.suggestedEvap.count} × {result.suggestedEvap.template.name}</div>
         </div>
         <div style={{ fontSize: 26, fontWeight: 750, color: '#1c1917', lineHeight: 1.05, letterSpacing: -0.4, marginTop: 2 }}>

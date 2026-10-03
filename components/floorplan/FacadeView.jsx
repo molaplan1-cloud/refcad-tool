@@ -1,6 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { usePlanLocale } from '@/components/i18n/Locale'
+import { text } from '@/lib/i18n'
+import { northAngle, sideCompass } from '@/lib/orientation'
 import {
   CLADDING,
   FACADE_SIDES,
@@ -229,6 +232,8 @@ function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd,
 }
 
 export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
+  const { t, locale } = usePlanLocale(plan)
+  const north = northAngle(plan)
   const hostRef = useRef(null)
   const [size, setSize] = useState({ w: 900, h: 640 })
   const [draft, setDraft] = useState(null)
@@ -336,14 +341,17 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: '#d6d3d1' }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
-        {FACADE_SIDES.map((item) => (
-          <button key={item.id} type="button" data-testid={`facade-side-${item.id}`} onClick={() => onSide(item.id)} style={chip(side === item.id)}>{item.name}</button>
-        ))}
-        <button type="button" data-testid="facade-preset-above" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'above'))}>Yläpuolinen vyöhyke</button>
-        <button type="button" data-testid="facade-preset-plinth" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'plinth'))}>Sokkelivyöhyke</button>
-        <button type="button" data-testid="facade-preset-band" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'band'))}>Ikkunanauha</button>
-        <button type="button" data-testid="facade-brick-wood" style={chip(false)} onClick={() => onCommit(applyBrickBelowWoodAbove(plan, side))}>Tiili alle, puu päälle</button>
-        <button type="button" data-testid="facade-rect" style={chip(tool === 'rect')} onClick={() => setTool(tool === 'rect' ? 'select' : 'rect')}>Suorakulmio</button>
+        {FACADE_SIDES.map((item) => {
+          const code = sideCompass(item.id, north)
+          return (
+            <button key={item.id} type="button" data-testid={`facade-side-${item.id}`} data-compass={code} onClick={() => onSide(item.id)} style={chip(side === item.id)}>{code} {t(`compass.${code}`)}</button>
+          )
+        })}
+        <button type="button" data-testid="facade-preset-above" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'above'))}>{t('facade.above')}</button>
+        <button type="button" data-testid="facade-preset-plinth" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'plinth'))}>{t('facade.plinth')}</button>
+        <button type="button" data-testid="facade-preset-band" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'band'))}>{t('facade.band')}</button>
+        <button type="button" data-testid="facade-brick-wood" style={chip(false)} onClick={() => onCommit(applyBrickBelowWoodAbove(plan, side))}>{t('facade.brickWood')}</button>
+        <button type="button" data-testid="facade-rect" style={chip(tool === 'rect')} onClick={() => setTool(tool === 'rect' ? 'select' : 'rect')}>{t('facade.rect')}</button>
         <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
           <span>mm</span>
           <input aria-label="Vyöhykkeen alareuna" style={{ ...inputStyle, width: 64 }} type="number" value={band.y0} onChange={(event) => setBand({ ...band, y0: Number(event.target.value) })} />
@@ -352,10 +360,10 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
           <select style={inputStyle} value={band.materialId} onChange={(event) => setBand({ ...band, materialId: event.target.value })}>
             {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <button type="button" data-testid="facade-band" style={chip(false)} onClick={() => onCommit(addFacadeBand(plan, side, band.y0 / 1000, band.y1 / 1000, band.materialId))}>Vaakavyöhyke</button>
+          <button type="button" data-testid="facade-band" style={chip(false)} onClick={() => onCommit(addFacadeBand(plan, side, band.y0 / 1000, band.y1 / 1000, band.materialId))}>{t('facade.horizontal')}</button>
         </label>
         <button type="button" data-testid="facade-pdf" style={chip(false)} onClick={() => buildElevationPdf(plan, side).save(`julkisivu-${side}.pdf`)}>PDF</button>
-        <button type="button" data-testid="facade-pdf-all" style={chip(false)} onClick={() => buildElevationPdf(plan, 'all').save('julkisivut.pdf')}>Kaikki sivut</button>
+        <button type="button" data-testid="facade-pdf-all" style={chip(false)} onClick={() => buildElevationPdf(plan, 'all').save('julkisivut.pdf')}>{t('facade.allSides')}</button>
       </div>
       <div ref={hostRef} data-testid="facade-view" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <svg
@@ -430,7 +438,7 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
                 return (
                   <>
                     <rect x={lx} y={ly} width={legendW} height={legendH} fill="#fff" stroke="#1c1917" strokeWidth={0.9} />
-                    <text x={lx + 8} y={ly + 13} fontSize="10" fontWeight="700" fill="#1c1917">Selite</text>
+                    <text x={lx + 8} y={ly + 13} fontSize="10" fontWeight="700" fill="#1c1917">{t('facade.legend')}</text>
                     {areas.map((row, index) => (
                       <g key={row.id} transform={`translate(${lx + 8} ${ly + 20 + index * 16})`}>
                         <rect width="14" height="10" fill={`url(#clad-${row.item.id})`} stroke="#44403c" strokeWidth="0.5" />
@@ -444,9 +452,9 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
           )}
           <g data-testid="facade-title">
             <rect x={sheet.x + (frame.x + frame.w - titleW - 2) * k} y={sheet.y + (frame.y + frame.h - titleH - 2) * k} width={titleW * k} height={titleH * k} fill="#fff" stroke="#1c1917" strokeWidth={1} />
-            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 14) * k} fontSize="13" fontWeight="750" fill="#1c1917">Julkisivu {layout.name}</text>
-            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 30) * k} fontSize="11" fill="#292524">Mittakaava 1:{ratio}</text>
-            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 44) * k} fontSize="11" fill="#292524">{roof.type === 'gable' ? 'Harjakatto' : roof.type === 'hip' ? 'Aumakatto' : roof.type === 'shed' ? 'Pulpettikatto' : 'Tasakatto'}</text>
+            <text data-testid="facade-orientation" data-compass={layout.compass || sideCompass(side, north)} x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 14) * k} fontSize="13" fontWeight="750" fill="#1c1917">{t('facade.title', { side: `${layout.compass || ''} ${layout.name}`.trim() })}</text>
+            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 30) * k} fontSize="11" fill="#292524">{t('sheet.scale', { ratio })}</text>
+            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 44) * k} fontSize="11" fill="#292524">{text(locale, `facade.${roof.type}`, roof.type)}</text>
           </g>
         </svg>
         {menu && (

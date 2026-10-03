@@ -43,18 +43,25 @@ import {
   updateFacadeZone,
   updateFixture,
   updateHouse,
+  updateYardItem,
   updateOpening,
   updateRoom,
   updateWall,
+  visibleRooms,
 } from '@/lib/floorplan'
+import { usePlanLocale } from '@/components/i18n/Locale'
+import { text } from '@/lib/i18n'
+import { COUNTRIES, climateOf, countryById, countryPatch, heatingPatchFor } from '@/lib/places'
+import { wallBearing } from '@/lib/orientation'
+import { FRAMES, GLAZING, SHADING, coincidentPeak } from '@/lib/cooling'
 import { resolveFixture } from '@/lib/furniture'
 import { addChimneyFor, chimneyKind, defaultFlue, flueOptions, withChimneyFields } from '@/lib/chimney'
 import { ServiceMenu } from './ServicesLayer'
 import { YardFields, YardMenuBody } from './YardPanel'
 import { yardTitle } from '@/lib/yard'
-import { applyHeating, ensureServices, refreshHeat, serviceObjectTitle, suggestFloorManifold } from '@/lib/services'
+import { addServiceNode, applyHeating, ensureServices, refreshHeat, serviceObjectTitle, suggestFloorManifold } from '@/lib/services'
 import { HEAT_SOURCES, HEATING_METHODS, LOOP_SPACINGS, normalizeHeating, normalizeRoomHeating } from '@/lib/hydronic'
-import { CLIMATE_PLACES, CLIMATE_ZONES, formatRoomInfo, roomReport, thermalOf } from '@/lib/roominfo'
+import { formatRoomInfo, roomReport, thermalOf } from '@/lib/roominfo'
 import {
   LAYER_MATERIALS,
   assignHouseStructure,
@@ -135,44 +142,45 @@ const STRUCTURES = [
 ]
 
 function HeatingSettings({ plan, onApply }) {
+  const { t, locale } = usePlanLocale(plan)
   const heating = normalizeHeating(plan)
   const set = (patch) => onApply(applyHeating(plan, patch))
   return (
     <div data-testid="heating-settings" style={{ marginTop: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>Lämmitysjärjestelmä</div>
-      <Field label="Lämmönlähde">
+      <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>{t('house.system')}</div>
+      <Field label={t('house.source')}>
         <select data-testid="heat-source" style={inputStyle} value={heating.source} onChange={(event) => set({ source: event.target.value, distribution: event.target.value === 'direct-electric' ? 'none' : (heating.distribution === 'none' ? 'floor' : heating.distribution) })}>
-          {HEAT_SOURCES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          {HEAT_SOURCES.map((item) => <option key={item.id} value={item.id}>{text(locale, `source.${item.id}`, item.name)}</option>)}
         </select>
       </Field>
-      <Field label="Jakotapa">
+      <Field label={t('house.distribution')}>
         <select data-testid="heat-distribution" style={inputStyle} value={heating.distribution} onChange={(event) => set({ distribution: event.target.value })}>
-          <option value="floor">Lattialämmitys</option>
-          <option value="radiator">Patteriverkosto</option>
-          <option value="both">Molemmat</option>
-          <option value="none">Ei vesikiertoa (suora sähkö)</option>
+          <option value="floor">{t('dist.floor')}</option>
+          <option value="radiator">{t('dist.radiator')}</option>
+          <option value="both">{t('dist.both')}</option>
+          <option value="none">{t('dist.none')}</option>
         </select>
       </Field>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
         <input data-testid="heat-buffer" type="checkbox" checked={Boolean(heating.buffer)} onChange={(event) => set({ buffer: event.target.checked })} />
-        Lämmityspiirin puskurivaraaja
+        {t('house.buffer')}
       </label>
       {heating.buffer && (
-        <Field label="Puskurin tilavuus (l)">
+        <Field label={t('house.bufferLitres')}>
           <input data-testid="heat-buffer-litres" style={inputStyle} type="number" min="50" step="50" value={heating.bufferLitres} onChange={(event) => set({ bufferLitres: Math.max(50, parseInt(event.target.value, 10) || 300) })} />
         </Field>
       )}
       {heating.source === 'ground' && (
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
           <input data-testid="heat-borehole" type="checkbox" checked={heating.borehole !== false} onChange={(event) => set({ borehole: event.target.checked })} />
-          Lämpökaivo / keruupiiri
+          {t('house.borehole')}
         </label>
       )}
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
         <input data-testid="heat-air" type="checkbox" checked={Boolean(heating.supplementAir)} onChange={(event) => set({ supplementAir: event.target.checked })} />
-        Ilmalämpöpumppu lisänä
+        {t('house.air')}
       </label>
-      <Field label="Käyttövesi">
+      <Field label={t('house.dhw')}>
         <select data-testid="heat-dhw" style={inputStyle} value={heating.dhw} onChange={(event) => set({ dhw: event.target.value })}>
           <option value="tank">Lämminvesivaraaja</option>
           <option value="exchanger">Kaukolämmön siirrin</option>
@@ -188,53 +196,86 @@ function HeatingSettings({ plan, onApply }) {
 }
 
 export function HouseSettings({ plan, onApply }) {
+  const { t, num, locale } = usePlanLocale(plan)
   const scale = STANDARD_SCALES.includes(plan.drawingScale) ? plan.drawingScale : null
+  const country = countryById(plan.country || 'FI')
+  const climate = climateOf(plan)
+  const choosePlace = (countryId, placeId) => {
+    const next = updateHouse(plan, countryPatch(plan, countryId, placeId))
+    const heat = heatingPatchFor(climateOf(next))
+    onApply(heat ? applyHeating(next, heat) : refreshHeat(next))
+  }
+  const localStructures = () => {
+    const chosen = climateOf(plan).structures
+    let next = updateHouse(plan, assignHouseStructure(plan, 'exteriorWall', chosen.exterior))
+    next = updateHouse(next, assignHouseStructure(next, 'interiorWall', chosen.interior))
+    next = updateHouse(next, assignHouseStructure(next, 'floor', chosen.floor))
+    next = updateHouse(next, assignHouseStructure(next, 'roof', chosen.roof))
+    onApply(refreshHeat(next))
+  }
+  const rooms = visibleRooms(plan).map((room) => roomReport(plan, room)).filter((item) => item?.cooling)
+  const houseCool = coincidentPeak(rooms.map((item) => item.cooling))
   return (
     <div data-testid="house-panel">
-      <Field label="Nimi" testid="house-name-field">
-        <input data-testid="house-name" style={inputStyle} value={plan.name || ''} onChange={(event) => onApply(updateHouse(plan, { name: event.target.value }))} />
-      </Field>
-      <Field label="Osoite">
-        <input data-testid="house-address" style={inputStyle} value={plan.address || ''} onChange={(event) => onApply(updateHouse(plan, { address: event.target.value }))} />
-      </Field>
-      <Field label="Rakennustyyppi">
-        <select data-testid="house-type" style={inputStyle} value={plan.buildingType || 'omakotitalo'} onChange={(event) => onApply(updateHouse(plan, { buildingType: event.target.value }))}>
-          {BUILDINGS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+      <Field label={t('climate.country')}>
+        <select data-testid="house-country" style={inputStyle} value={country.id} onChange={(event) => choosePlace(event.target.value, '')}>
+          {COUNTRIES.map((item) => <option key={item.id} value={item.id}>{t(`country.${item.id}`)}</option>)}
         </select>
       </Field>
-      <Field label="Kerroksia">
+      <Field label={t('house.name')} testid="house-name-field">
+        <input data-testid="house-name" style={inputStyle} value={plan.name || ''} onChange={(event) => onApply(updateHouse(plan, { name: event.target.value }))} />
+      </Field>
+      <Field label={t('house.address')}>
+        <input data-testid="house-address" style={inputStyle} value={plan.address || ''} onChange={(event) => onApply(updateHouse(plan, { address: event.target.value }))} />
+      </Field>
+      <Field label={t('house.type')}>
+        <select data-testid="house-type" style={inputStyle} value={plan.buildingType || 'omakotitalo'} onChange={(event) => onApply(updateHouse(plan, { buildingType: event.target.value }))}>
+          {BUILDINGS.map(([id]) => <option key={id} value={id}>{t(`building.${id}`)}</option>)}
+        </select>
+      </Field>
+      <Field label={t('house.floors')}>
         <input style={inputStyle} type="number" min="1" max="8" value={plan.floors || 1} onChange={(event) => onApply(updateHouse(plan, { floors: Math.max(1, parseInt(event.target.value, 10) || 1) }))} />
       </Field>
-      <Field label="Kerroskorkeus (mm)">
+      <Field label={t('house.floorHeight')}>
         <input style={inputStyle} type="number" min="2200" max="4000" value={mm(plan.floorHeight || 2.6)} onChange={(event) => onApply(updateHouse(plan, { floorHeight: fromMm(event.target.value) || 2.6 }))} />
       </Field>
       <ThermalFields plan={plan} onApply={onApply} />
-      <Field label="Ulkoseinän rakenne">
+      <Field label={t('house.legacyWall')}>
         <select style={inputStyle} value={plan.exteriorStructure || 'puuranka'} onChange={(event) => onApply(updateHouse(plan, { exteriorStructure: event.target.value }))}>
-          {STRUCTURES.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          {STRUCTURES.map(([id]) => <option key={id} value={id}>{t(`legacy.${id}`)}</option>)}
         </select>
       </Field>
-      <Field label="Ulkoseinän paksuus (mm)">
+      <Field label={t('house.wallThickness')}>
         <input style={inputStyle} type="number" min="80" max="600" value={mm(plan.exteriorThickness || 0.24)} onChange={(event) => onApply(updateHouse(plan, { exteriorThickness: fromMm(event.target.value) || 0.24 }))} />
       </Field>
       <HouseStructures plan={plan} onApply={onApply} />
-      <Field label="Kattomuoto">
+      <button type="button" data-testid="apply-local-structures" onClick={localStructures} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1', marginBottom: 8 }}>{t('climate.applyStructures')}</button>
+      <div data-testid="electrical-code" style={{ fontSize: 12, color: '#57534e', marginBottom: 6 }}>{t('climate.code')}: {climate.electrical === 'sfs-6000' ? 'SFS 6000' : 'IEC 60364'} · {climate.voltage?.phase || 230}/{climate.voltage?.line || 400} V</div>
+      <div data-testid="u-max" style={{ fontSize: 12, color: '#57534e', marginBottom: 8 }}>{t('climate.umax')}: {t('climate.u.wall')} {num(climate.uMax.wall, 2)} · {t('climate.u.roof')} {num(climate.uMax.roof, 2)} · {t('climate.u.window')} {num(climate.uMax.window, 2)}</div>
+      <Field label={t('house.roof')}>
         <select data-testid="house-roof" style={inputStyle} value={plan.roofType || 'gable'} onChange={(event) => onApply(updateHouse(plan, { roofType: event.target.value }))}>
-          {ROOF_TYPES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          {ROOF_TYPES.map((item) => <option key={item.id} value={item.id}>{text(locale, `roof.${item.id}`, item.name)}</option>)}
         </select>
       </Field>
-      <Field label="Kattokaltevuus (°)">
+      <Field label={t('house.pitch')}>
         <input style={inputStyle} type="number" min="0" max="60" value={plan.roofPitch ?? 25} onChange={(event) => onApply(updateHouse(plan, { roofPitch: parseFloat(event.target.value) || 0 }))} />
       </Field>
-      <Field label="Räystään ylitys (mm)">
+      <Field label={t('house.eave')}>
         <input style={inputStyle} type="number" min="0" max="1500" value={mm(plan.eaveOverhang ?? 0.5)} onChange={(event) => onApply(updateHouse(plan, { eaveOverhang: fromMm(event.target.value) }))} />
       </Field>
-      <div style={{ fontSize: 12, fontWeight: 700, margin: '4px 0 6px' }}>Julkisivu</div>
+      <div style={{ fontSize: 12, fontWeight: 700, margin: '4px 0 6px' }}>{t('house.facade')}</div>
       <SwatchRow group="exterior" value={plan.exteriorId} onPick={(id) => onApply({ ...plan, exteriorId: id })} />
-      <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>Katemateriaali</div>
+      <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>{t('house.roofing')}</div>
       <SwatchRow group="roof" value={plan.roofId} onPick={(id) => onApply({ ...plan, roofId: id })} />
       <HeatingSettings plan={plan} onApply={onApply} />
-      <div style={{ fontSize: 12, fontWeight: 700, margin: '10px 0 6px' }}>Mittakaava</div>
+      <div data-testid="house-cooling" style={{ fontSize: 12, margin: '8px 0', padding: 8, background: '#f0f9ff', borderRadius: 8 }}>
+        <div style={{ fontWeight: 750 }}>{t('cool.house')}</div>
+        <div>{Math.round(houseCool.watts)} W · {num(houseCool.wattsPerM2, 1)} W/m² · {String(houseCool.hour).padStart(2, '0')}:00</div>
+      </div>
+      <Field label={t('north.label')}>
+        <input data-testid="house-north" style={inputStyle} type="number" value={plan.yard?.north || 0} onChange={(event) => onApply(updateYardItem(plan, 'north', 'north', { north: Number(event.target.value) || 0 }))} />
+      </Field>
+      <div style={{ fontSize: 12, fontWeight: 700, margin: '10px 0 6px' }}>{t('house.scale')}</div>
       <div style={{ display: 'flex', gap: 6 }}>
         {STANDARD_SCALES.map((ratio) => (
           <button
@@ -320,23 +361,25 @@ function ZoneFields({ plan, id, onApply, onCommit }) {
 }
 
 export function selectionLabel(plan, selection) {
-  if (!selection) return 'Talon asetukset'
-  if (selection.kind === 'wall') return 'Seinä'
+  const locale = plan?.locale || 'fi'
+  const tr = (key, vars) => text(locale, key, key)
+  if (!selection) return tr('file.house')
+  if (selection.kind === 'wall') return tr('select.wall')
   if (selection.kind === 'opening') {
     const opening = (plan.openings || []).find((item) => item.id === selection.id)
-    return opening?.kind === 'window' ? 'Ikkuna' : 'Ovi'
+    return opening?.kind === 'window' ? tr('opening.window') : tr('opening.door')
   }
   if (selection.kind === 'room') {
     const room = (plan.rooms || []).find((item) => item.id === selection.id)
-    return room?.name ? `Huone: ${room.name}` : 'Huone'
+    return room?.name ? text(locale, 'select.roomNamed', `Huone: ${room.name}`).replace('{name}', room.name) : tr('select.room')
   }
   if (selection.kind === 'fixture') {
     const fixture = (plan.fixtures || []).find((item) => item.id === selection.id)
-    return `Kaluste: ${fixtureTemplate(fixture?.type).name}`
+    return text(locale, 'select.fixture', `Kaluste: ${fixtureTemplate(fixture?.type).name}`).replace('{name}', fixtureTemplate(fixture?.type).name)
   }
-  if (selection.kind === 'roof') return 'Katto'
-  if (selection.kind === 'zone') return 'Julkisivuvyöhyke'
-  if (selection.kind === 'house') return 'Talon asetukset'
+  if (selection.kind === 'roof') return tr('select.roof')
+  if (selection.kind === 'zone') return tr('select.zone')
+  if (selection.kind === 'house') return tr('file.house')
   if (selection.kind === 'yard') return yardTitle(plan, selection)
   if (selection.kind === 'service') {
     const services = ensureServices(plan)
@@ -442,28 +485,29 @@ function structureChoices(plan, walls) {
 }
 
 function HouseStructures({ plan, onApply }) {
+  const { t, locale, num } = usePlanLocale(plan)
   const applyRole = (role, id) => onApply(refreshHeat(updateHouse(plan, assignHouseStructure(plan, role, id || null))))
   const floor = resolveStructure(plan, plan.structures?.floor)
   const pipes = Boolean(floor?.layers?.some((item) => item.materialId === 'pex'))
   const select = (testid, label, role, value) => (
     <Field key={role} label={label}>
       <select data-testid={testid} style={inputStyle} value={value || ''} onChange={(event) => applyRole(role, event.target.value)}>
-        <option value="">Ei oletusta</option>
+        <option value="">{t('struct.none')}</option>
         {structuresFor(plan, role === 'exteriorWall' ? 'exterior' : role === 'interiorWall' ? 'interior' : role === 'midFloor' ? 'midfloor' : role).map((item) => (
-          <option key={item.id} value={item.id}>{item.name} · {item.thicknessMm} mm · U {Number(item.u).toFixed(2)}</option>
+          <option key={item.id} value={item.id}>{text(locale, `struct.${item.id}`, item.name)} · {item.thicknessMm} mm · U {num(item.u, 2)}</option>
         ))}
       </select>
     </Field>
   )
   return (
     <div data-testid="house-structures">
-      {select('house-exterior-structure', 'Oletusulkoseinä', 'exteriorWall', plan.exteriorStructureId || plan.structures?.exteriorWall)}
-      {select('house-interior-structure', 'Oletusväliseinä', 'interiorWall', plan.structures?.interiorWall)}
-      {select('house-floor-structure', 'Alapohja', 'floor', plan.structures?.floor)}
-      {select('house-roof-structure', 'Yläpohja', 'roof', plan.structures?.roof)}
+      {select('house-exterior-structure', t('struct.defaultExterior'), 'exteriorWall', plan.exteriorStructureId || plan.structures?.exteriorWall)}
+      {select('house-interior-structure', t('struct.defaultInterior'), 'interiorWall', plan.structures?.interiorWall)}
+      {select('house-floor-structure', t('struct.floor'), 'floor', plan.structures?.floor)}
+      {select('house-roof-structure', t('struct.roof'), 'roof', plan.structures?.roof)}
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, margin: '4px 0 8px' }}>
         <input data-testid="slab-pipes" type="checkbox" checked={pipes} onChange={(event) => onApply(refreshHeat(setSlabPipes(plan, event.target.checked)))} />
-        Lattialämmitysputket laatassa
+        {t('struct.slabPipes')}
       </label>
     </div>
   )
@@ -556,15 +600,22 @@ function StructureFields({ plan, wallIds, onCommit }) {
 }
 
 function WallFields({ plan, id, onApply, onCommit }) {
+  const { t } = usePlanLocale(plan)
   const wall = (plan.walls || []).find((item) => item.id === id)
   if (!wall) return null
+  const compass = wall.kind === 'interior' ? null : wallBearing(plan, wall)
   const thick = wallThicknessMm(plan, wall)
   const setKind = (kind) => onCommit(refreshHeat(updateWall(plan, id, { kind })))
   const setThick = (metres, custom = true) => onCommit(updateWall(plan, id, { thickness: metres, thicknessCustom: custom }))
   return (
     <div>
+      {compass && (
+        <div data-testid="wall-compass" data-compass={compass.code} style={{ fontSize: 13, fontWeight: 750, marginBottom: 8 }}>
+          {t('opening.compass')}: {compass.code} · {t(`compass.${compass.code}`)} ({compass.bearing}°)
+        </div>
+      )}
       <Segmented
-        label="Paksuus"
+        label={t('wall.thickness')}
         value={thick}
         onChange={(mmValue) => setThick(mmValue / 1000)}
         options={[
@@ -572,20 +623,20 @@ function WallFields({ plan, id, onApply, onCommit }) {
           { value: 120, label: '120', testid: 'wall-thick-120' },
         ]}
       />
-      <Field label="Oma paksuus (mm)">
+      <Field label={t('wall.custom')}>
         <input style={inputStyle} type="number" value={thick} onChange={(event) => setThick(fromMm(event.target.value) || 0.12)} />
       </Field>
-      <Field label="Tyyppi">
+      <Field label={t('wall.kind')}>
         <select data-testid="wall-type" style={inputStyle} value={wall.kind === 'bearing' ? 'bearing' : wall.kind === 'interior' ? 'interior' : 'exterior'} onChange={(event) => setKind(event.target.value)}>
-          <option value="exterior">Ulkoseinä</option>
-          <option value="bearing">Kantava</option>
-          <option value="interior">Väliseinä</option>
+          <option value="exterior">{t('tool.exterior')}</option>
+          <option value="bearing">{t('wall.bearing')}</option>
+          <option value="interior">{t('tool.interior')}</option>
         </select>
       </Field>
-      <Field label="Korkeus (mm)">
+      <Field label={t('wall.height')}>
         <input style={inputStyle} type="number" value={mm(wall.height || plan.floorHeight || 2.6)} onChange={(event) => onApply(refreshHeat(updateWall(plan, id, { height: fromMm(event.target.value) || 2.6, heightCustom: true })))} />
       </Field>
-      <Field label="Paloluokka">
+      <Field label={t('wall.fire')}>
         <select data-testid="wall-structure" style={inputStyle} value={wall.structure || 'puuranka'} onChange={(event) => onApply(updateWall(plan, id, { structure: event.target.value }))}>
           {WALL_STRUCTURES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
@@ -593,14 +644,14 @@ function WallFields({ plan, id, onApply, onCommit }) {
       <StructureFields plan={plan} wallIds={[id]} onCommit={onCommit} />
       <WallFaces plan={plan} wall={wall} onApply={onApply} />
       {wall.kind !== 'interior' && (
-        <Field label="Verhous">
+        <Field label={t('wall.cladding')}>
           <select data-testid="wall-cladding" style={inputStyle} value={wall.materialId || ''} onChange={(event) => onApply(updateWall(plan, id, { materialId: event.target.value }))}>
-            <option value="">Oletus</option>
+            <option value="">{t('wall.default')}</option>
             {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.group}: {item.name}</option>)}
           </select>
         </Field>
       )}
-      <Field label="Pituus (mm)">
+      <Field label={t('wall.length')}>
         <input
           data-testid="wall-length"
           style={inputStyle}
@@ -610,7 +661,7 @@ function WallFields({ plan, id, onApply, onCommit }) {
           onBlur={(event) => onCommit(refreshHeat(setWallLength(plan, id, fromMm(event.target.value))))}
         />
       </Field>
-      <Field label="Suunta (°)">
+      <Field label={t('wall.direction')}>
         <input
           data-testid="wall-direction"
           style={inputStyle}
@@ -627,32 +678,69 @@ function WallFields({ plan, id, onApply, onCommit }) {
 }
 
 function OpeningFields({ plan, id, onApply, onCommit }) {
+  const { t } = usePlanLocale(plan)
   const opening = (plan.openings || []).find((item) => item.id === id)
   if (!opening) return null
   const patch = (next) => onApply(refreshHeat(updateOpening(plan, id, next)))
+  const wall = (plan.walls || []).find((item) => item.id === opening.wallId)
+  const compass = wall && wall.kind !== 'interior' ? wallBearing(plan, wall) : null
   return (
     <div>
-      <Field label="Leveys (mm)">
+      {compass && (
+        <div data-testid="window-compass" data-compass={compass.code} style={{ fontSize: 13, fontWeight: 750, marginBottom: 8 }}>
+          {t('opening.compass')}: {compass.code} · {t(`compass.${compass.code}`)}
+        </div>
+      )}
+      <Field label={t('opening.width')}>
         <input style={inputStyle} type="number" value={mm(opening.width)} onChange={(event) => patch({ width: fromMm(event.target.value) || 0.6 })} />
       </Field>
-      <Field label="Korkeus (mm)">
+      <Field label={t('opening.height')}>
         <input style={inputStyle} type="number" value={mm(opening.height || (opening.kind === 'window' ? 1.2 : 2.1))} onChange={(event) => patch({ height: fromMm(event.target.value) || 1 })} />
       </Field>
-      <Field label="Alareunan korkeus (mm)">
+      <Field label={t('opening.sill')}>
         <input style={inputStyle} type="number" value={mm(opening.sill || 0)} onChange={(event) => patch({ sill: fromMm(event.target.value) })} />
       </Field>
-      <Field label="Tyyppi">
+      <Field label={t('opening.kind')}>
         <select style={inputStyle} value={opening.kind} onChange={(event) => {
           const kind = event.target.value
           patch({ kind, height: kind === 'window' ? 1.2 : 2.1, sill: kind === 'window' ? 0.9 : 0, width: kind === 'window' ? 1.2 : 0.9 })
         }}>
-          <option value="door">Ovi</option>
-          <option value="window">Ikkuna</option>
+          <option value="door">{t('opening.door')}</option>
+          <option value="window">{t('opening.window')}</option>
         </select>
       </Field>
+      {opening.kind === 'window' && (
+        <>
+          <Field label={t('glazing.label')}>
+            <select data-testid="window-glazing" style={inputStyle} value={opening.glazing || 'double-low-e'} onChange={(event) => patch({ glazing: event.target.value })}>
+              {GLAZING.map((item) => <option key={item.id} value={item.id}>{t(`glazing.${item.id}`)} · U {item.u} · g {item.g}</option>)}
+            </select>
+          </Field>
+          <Field label={t('frame.label')}>
+            <select data-testid="window-frame" style={inputStyle} value={opening.frame || 'pvc'} onChange={(event) => patch({ frame: event.target.value })}>
+              {FRAMES.map((item) => <option key={item.id} value={item.id}>{t(`frame.${item.id}`)}</option>)}
+            </select>
+          </Field>
+          <Field label={t('shade.label')}>
+            <select data-testid="window-shading" style={inputStyle} value={opening.shading || 'none'} onChange={(event) => patch({ shading: event.target.value })}>
+              {SHADING.map((item) => <option key={item.id} value={item.id}>{t(`shade.${item.id}`)}</option>)}
+            </select>
+          </Field>
+          {(opening.shading === 'overhang') && (
+            <Field label={t('shade.overhangM')}>
+              <input data-testid="window-overhang" style={inputStyle} type="number" step="0.1" min="0" value={opening.overhang ?? 0.6} onChange={(event) => patch({ overhang: Number(event.target.value) || 0 })} />
+            </Field>
+          )}
+          {opening.shading === 'neighbour' && (
+            <Field label={t('shade.neighbourAlt')}>
+              <input data-testid="window-neighbour" style={inputStyle} type="number" step="1" min="0" max="80" value={opening.neighbourAlt ?? 20} onChange={(event) => patch({ neighbourAlt: Number(event.target.value) || 0 })} />
+            </Field>
+          )}
+        </>
+      )}
       <div style={{ display: 'flex', gap: 4 }}>
-        <MenuBtn testid="opening-swing-left" onClick={() => onCommit(updateOpening(plan, id, { swing: 1 }))}>Aukeaa vasemmalle</MenuBtn>
-        <MenuBtn testid="opening-swing-right" onClick={() => onCommit(updateOpening(plan, id, { swing: -1 }))}>Aukeaa oikealle</MenuBtn>
+        <MenuBtn testid="opening-swing-left" onClick={() => onCommit(updateOpening(plan, id, { swing: 1 }))}>{t('opening.swingLeft')}</MenuBtn>
+        <MenuBtn testid="opening-swing-right" onClick={() => onCommit(updateOpening(plan, id, { swing: -1 }))}>{t('opening.swingRight')}</MenuBtn>
       </div>
     </div>
   )
@@ -682,7 +770,9 @@ function WallFaces({ plan, wall, onApply }) {
 }
 
 function ThermalFields({ plan, onApply }) {
+  const { t, num } = usePlanLocale(plan)
   const thermal = thermalOf(plan)
+  const country = countryById(plan.country || 'FI')
   const stored = plan.thermal || {}
   const setThermal = (patch, resetU = false) => onApply(refreshHeat(updateHouse(plan, {
     thermal: { ...stored, ...patch, ...(resetU ? { u: undefined } : {}) },
@@ -692,50 +782,62 @@ function ThermalFields({ plan, onApply }) {
   })))
   return (
     <div data-testid="thermal-settings">
-      <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>Lämmitys</div>
-      <Field label="Säävyöhyke">
+      <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>{t('climate.heating')}</div>
+      <Field label={t('climate.zone')}>
         <select data-testid="climate-zone" style={inputStyle} value={thermal.zone} onChange={(event) => {
           const zone = event.target.value
-          const place = CLIMATE_PLACES.find((item) => item.id === stored.place)
-          setThermal({ zone, ...(place && place.zone !== zone ? { place: '' } : {}) })
+          const place = country.places.find((item) => item.id === (plan.place || stored.place))
+          const cleared = place && place.zone !== zone
+          onApply(refreshHeat(updateHouse(plan, {
+            place: cleared ? null : plan.place,
+            thermal: { ...stored, zone, ...(cleared ? { place: '' } : {}) },
+          })))
         }}>
-          {CLIMATE_ZONES.map((zone) => <option key={zone.id} value={zone.id}>{zone.name} ({zone.outdoor} °C)</option>)}
+          {country.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name} ({zone.outdoor} °C)</option>)}
         </select>
       </Field>
-      <Field label="Paikkakunta">
-        <select data-testid="climate-place" style={inputStyle} value={thermal.place} onChange={(event) => {
-          const place = CLIMATE_PLACES.find((item) => item.id === event.target.value)
-          setThermal(place ? { place: place.id, zone: place.zone } : { place: '' })
+      <Field label={t('climate.place')}>
+        <select data-testid="climate-place" data-house-place="true" style={inputStyle} value={plan.place || thermal.place || ''} onChange={(event) => {
+          const place = country.places.find((item) => item.id === event.target.value)
+          const next = updateHouse(plan, countryPatch(plan, country.id, place?.id || ''))
+          const heat = heatingPatchFor(climateOf(next))
+          onApply(heat ? applyHeating(next, heat) : refreshHeat(next))
         }}>
-          <option value="">Vyöhykkeen mukaan</option>
-          {CLIMATE_PLACES.map((place) => <option key={place.id} value={place.id}>{place.name}</option>)}
+          <option value="">{t('climate.byZone')}</option>
+          {country.places.map((place) => <option key={place.id} value={place.id}>{place.name}</option>)}
         </select>
       </Field>
-      <div data-testid="degree-days" style={{ fontSize: 12, color: '#57534e', margin: '-2px 0 8px' }}>Lämmitystarveluku {thermal.degreeDays} Kd, mitoitusulkoilma {thermal.outdoor} °C</div>
-      <Field label="Rakennusvuosi">
+      <div data-testid="degree-days" style={{ fontSize: 12, color: '#57534e', margin: '-2px 0 8px' }}>{t('climate.summary', { winter: thermal.outdoor, summer: thermal.summer, hdd: thermal.degreeDays, cdd: thermal.coolingDegreeDays, lat: num(thermal.latitude, 1) })}</div>
+      <Field label={t('climate.lat')}>
+        <input data-testid="house-lat" style={inputStyle} type="number" step="0.01" value={plan.latitude ?? ''} placeholder={String(thermal.latitude)} onChange={(event) => onApply(updateHouse(plan, { latitude: event.target.value === '' ? null : Number(event.target.value) }))} />
+      </Field>
+      <Field label={t('climate.lon')}>
+        <input data-testid="house-lon" style={inputStyle} type="number" step="0.01" value={plan.longitude ?? ''} onChange={(event) => onApply(updateHouse(plan, { longitude: event.target.value === '' ? null : Number(event.target.value) }))} />
+      </Field>
+      <Field label={t('climate.year')}>
         <input data-testid="build-year" style={inputStyle} type="number" min="1900" max="2100" value={stored.year || thermal.year} onChange={(event) => setThermal({ year: parseInt(event.target.value, 10) || 2018 }, true)} />
       </Field>
-      <Field label="Energialuokka">
+      <Field label={t('climate.class')}>
         <select data-testid="energy-class" style={inputStyle} value={stored.energyClass || 'C'} onChange={(event) => setThermal({ energyClass: event.target.value }, true)}>
-          {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((item) => <option key={item} value={item}>{item}{item === 'C' ? ' (vuoden mukaan)' : ''}</option>)}
+          {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((item) => <option key={item} value={item}>{item}{item === 'C' ? t('climate.classNote') : ''}</option>)}
         </select>
       </Field>
       {[
-        ['wall', 'U ulkoseinä'],
-        ['roof', 'U yläpohja'],
-        ['floor', 'U lattia'],
-        ['window', 'U ikkuna'],
-        ['door', 'U ovi'],
-        ['partition', 'U väliseinä kylmään'],
+        ['wall', 'climate.u.wall'],
+        ['roof', 'climate.u.roof'],
+        ['floor', 'climate.u.floor'],
+        ['window', 'climate.u.window'],
+        ['door', 'climate.u.door'],
+        ['partition', 'climate.u.partition'],
       ].map(([key, label]) => (
-        <Field key={key} label={`${label} (W/m²K)`}>
+        <Field key={key} label={`${t(label)} (W/m²K)`}>
           <input data-testid={`u-${key}`} style={inputStyle} type="number" step="0.01" min="0.05" max="5" value={Number(thermal.u[key].toFixed(2))} onChange={(event) => setU(key, parseFloat(event.target.value) || thermal.u[key])} />
         </Field>
       ))}
-      <Field label="Ilmanvaihto (l/s·m²)">
+      <Field label={t('climate.vent')}>
         <input data-testid="ventilation" style={inputStyle} type="number" step="0.05" min="0" max="5" value={stored.ventilation ?? thermal.ventilation} onChange={(event) => setThermal({ ventilation: parseFloat(event.target.value) || 0 })} />
       </Field>
-      <Field label="Tiiviys n50 (1/h)">
+      <Field label={t('climate.n50')}>
         <input data-testid="n50" style={inputStyle} type="number" step="0.1" min="0.2" max="20" value={stored.n50 ?? thermal.n50} onChange={(event) => setThermal({ n50: parseFloat(event.target.value) || 1 })} />
       </Field>
     </div>
@@ -743,23 +845,26 @@ function ThermalFields({ plan, onApply }) {
 }
 
 function RoomFields({ plan, id, wallId, onApply }) {
+  const { t, locale } = usePlanLocale(plan)
   const room = (plan.rooms || []).find((item) => item.id === id)
   if (!room) return null
   const patch = (next) => onApply(updateRoom(plan, id, next))
   const report = roomReport(plan, room)
   return (
     <div>
-      <Field label="Nimi">
-        <input data-testid="room-name" aria-label="Huoneen nimi" style={inputStyle} value={room.name || ''} onChange={(event) => patch({ name: event.target.value })} />
+      <Field label={t('room.name')}>
+        <input data-testid="room-name" aria-label={t('room.name')} style={inputStyle} value={room.name || ''} onChange={(event) => patch({ name: event.target.value })} />
       </Field>
-      <Field label="Tyyppi">
+      <Field label={t('room.type')}>
         <select data-testid="room-type" style={inputStyle} value={room.type || 'huone'} onChange={(event) => {
           const type = ROOM_TYPES.find((item) => item.id === event.target.value)
           const previous = ROOM_TYPES.find((item) => item.id === (room.type || 'huone'))
-          const keep = room.name && room.name !== previous?.name && room.name !== 'Huone'
-          onApply(refreshHeat(applyRoomType(plan, id, event.target.value, keep ? room.name : (type?.name || room.name))))
+          const previousLabel = previous ? text(locale, `roomType.${previous.id}`, previous.name) : ''
+          const keep = room.name && room.name !== previous?.name && room.name !== previousLabel && room.name !== 'Huone'
+          const nextName = text(locale, `roomType.${type?.id}`, type?.name || room.name)
+          onApply(refreshHeat(applyRoomType(plan, id, event.target.value, keep ? room.name : nextName)))
         }}>
-          {ROOM_TYPES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          {ROOM_TYPES.map((item) => <option key={item.id} value={item.id}>{text(locale, `roomType.${item.id}`, item.name)}</option>)}
         </select>
       </Field>
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Lattia</div>
@@ -800,12 +905,13 @@ function RoomFields({ plan, id, wallId, onApply }) {
         <input type="checkbox" checked={room.showLabel !== false} onChange={(event) => patch({ showLabel: event.target.checked })} />
         Näytä pinta-ala
       </label>
-      {report && <RoomInfo report={report} />}
+      {report && <RoomInfo report={report} plan={plan} onApply={onApply} />}
     </div>
   )
 }
 
 function RoomHeatingFields({ plan, room, onApply }) {
+  const { t, locale } = usePlanLocale(plan)
   const choice = normalizeRoomHeating(room)
   const methods = choice?.methods || []
   const selected = !choice ? '' : methods.length > 1 ? 'combo' : methods[0]
@@ -822,7 +928,7 @@ function RoomHeatingFields({ plan, room, onApply }) {
   }
   return (
     <div data-testid="room-heating-fields">
-      <Field label="Lämmitys">
+      <Field label={t('room.heating')}>
         <select
           data-testid="room-heating"
           style={inputStyle}
@@ -841,9 +947,9 @@ function RoomHeatingFields({ plan, room, onApply }) {
             write([value])
           }}
         >
-          <option value="">Talon asetuksen mukaan</option>
-          {HEATING_METHODS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          <option value="combo">Yhdistelmä</option>
+          <option value="">{t('room.heatingFollow')}</option>
+          {HEATING_METHODS.map((item) => <option key={item.id} value={item.id}>{text(locale, `method.${item.id}`, item.name)}</option>)}
+          <option value="combo">{t('room.combo')}</option>
         </select>
       </Field>
       {selected === 'combo' && (
@@ -860,7 +966,7 @@ function RoomHeatingFields({ plan, room, onApply }) {
                   write(next.length ? next : ['none'])
                 }}
               />
-              {item.name}
+              {text(locale, `method.${item.id}`, item.name)}
             </label>
           ))}
         </div>
@@ -894,9 +1000,10 @@ function RoomHeatingFields({ plan, room, onApply }) {
   )
 }
 
-function RoomInfo({ report }) {
+function RoomInfo({ report, plan, onApply }) {
+  const { t, num, locale } = usePlanLocale(plan)
   const copy = async () => {
-    const text = formatRoomInfo(report)
+    const text = formatRoomInfo(report, locale)
     try {
       await navigator.clipboard.writeText(text)
     } catch (err) {
@@ -912,17 +1019,17 @@ function RoomInfo({ report }) {
   return (
     <div data-testid="room-info" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #e7e5e4' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <div style={{ fontSize: 13, fontWeight: 750 }}>Huoneen tiedot</div>
-        <button type="button" data-testid="room-info-copy" onClick={copy} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1', padding: '4px 8px' }}>Kopioi</button>
+        <div style={{ fontSize: 13, fontWeight: 750 }}>{t('room.info')}</div>
+        <button type="button" data-testid="room-info-copy" onClick={copy} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1', padding: '4px 8px' }}>{t('room.copy')}</button>
       </div>
-      {line('Lattia', `${report.floorArea.toFixed(1).replace('.', ',')} m²`)}
-      {line('Katto', `${report.ceilingArea.toFixed(1).replace('.', ',')} m²`)}
-      {line('Piiri', `${report.perimeter.toFixed(1).replace('.', ',')} m`)}
-      {line('Korkeus', `${report.height.toFixed(2).replace('.', ',')} m`)}
-      {line('Tilavuus', `${report.volume.toFixed(1).replace('.', ',')} m³`)}
-      {line('Seinät brutto', `${report.grossWall.toFixed(1).replace('.', ',')} m²`)}
-      {line('Seinät netto', `${report.netWall.toFixed(1).replace('.', ',')} m²`)}
-      <div style={{ fontSize: 11, fontWeight: 700, margin: '6px 0 3px' }}>Pinnat</div>
+      {line(t('room.floor'), `${num(report.floorArea, 1)} m²`)}
+      {line(t('room.ceiling'), `${num(report.ceilingArea, 1)} m²`)}
+      {line(t('room.perimeter'), `${num(report.perimeter, 1)} m`)}
+      {line(t('room.height'), `${num(report.height, 2)} m`)}
+      {line(t('room.volume'), `${num(report.volume, 1)} m³`)}
+      {line(t('room.gross'), `${num(report.grossWall, 1)} m²`)}
+      {line(t('room.net'), `${num(report.netWall, 1)} m²`)}
+      <div style={{ fontSize: 11, fontWeight: 700, margin: '6px 0 3px' }}>{t('room.surfaces')}</div>
       {report.walls.map((wall) => (
         <div key={`${wall.wallId}-${wall.index}`} style={{ fontSize: 11, color: '#44403c', marginBottom: 2 }}>
           Seinä {wall.index}: {wall.materialName}{wall.structureName ? ` · ${wall.structureName}` : ''} · netto {wall.net.toFixed(1).replace('.', ',')} m²
@@ -931,24 +1038,51 @@ function RoomInfo({ report }) {
       {report.byMaterial.map((row) => (
         <div key={row.id} style={{ fontSize: 11, color: '#44403c' }}>{row.name}: {row.area.toFixed(1).replace('.', ',')} m²</div>
       ))}
-      <div style={{ fontSize: 11, fontWeight: 700, margin: '6px 0 3px' }}>Ikkunat {report.windowCount} · {report.windowArea.toFixed(2).replace('.', ',')} m²</div>
+      <div style={{ fontSize: 11, fontWeight: 700, margin: '6px 0 3px' }}>{t('room.windows')} {report.windowCount} · {num(report.windowArea, 2)} m²</div>
       {report.windows.map((item) => <div key={item.id} style={{ fontSize: 11 }}>{item.size}</div>)}
-      <div style={{ fontSize: 11, fontWeight: 700, margin: '6px 0 3px' }}>Ovet {report.doorCount} · {report.doorArea.toFixed(2).replace('.', ',')} m²</div>
+      <div style={{ fontSize: 11, fontWeight: 700, margin: '6px 0 3px' }}>{t('room.doors')} {report.doorCount} · {num(report.doorArea, 2)} m²</div>
       {report.doors.map((item) => <div key={item.id} style={{ fontSize: 11 }}>{item.type} {item.size}</div>)}
       <div data-testid="room-heat" style={{ marginTop: 8, padding: 8, background: '#f5f5f4', borderRadius: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 750 }}>Lämmitystarve</div>
-        <div style={{ fontSize: 11, color: '#57534e', marginBottom: 4 }}>{report.heat.zoneName}, ulko {report.heat.outdoor} °C, sisä {report.heat.setpoint} °C</div>
-        <div style={{ fontSize: 16, fontWeight: 750 }}>{Math.round(report.heat.watts)} W · {report.heat.wattsPerM2.toFixed(1).replace('.', ',')} W/m²</div>
+        <div style={{ fontSize: 12, fontWeight: 750 }}>{t('heat.title')}</div>
+        <div style={{ fontSize: 11, color: '#57534e', marginBottom: 4 }}>{t('heat.summary', { zone: report.heat.zoneName, outdoor: report.heat.outdoor, indoor: report.heat.setpoint })}</div>
+        <div style={{ fontSize: 16, fontWeight: 750 }}>{Math.round(report.heat.watts)} W · {num(report.heat.wattsPerM2, 1)} W/m²</div>
         {report.heat.annualKwh > 0 && (
-          <div data-testid="annual-kwh" style={{ fontSize: 12, marginTop: 4 }}>{report.heat.annualKwh} kWh/a · {report.heat.degreeDays} Kd</div>
+          <div data-testid="annual-kwh" style={{ fontSize: 12, marginTop: 4 }}>{t('heat.annual', { kwh: report.heat.annualKwh, hdd: report.heat.degreeDays })}</div>
         )}
         {report.heat.parts.map((part) => (
           <div key={part.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 2 }}>
-            <span>{part.name}</span>
+            <span>{text(locale, `heat.${part.id}`, part.name)}</span>
             <span>{Math.round(part.watts)} W</span>
           </div>
         ))}
       </div>
+      {report.cooling && (
+        <div data-testid="room-cooling" style={{ marginTop: 8, padding: 8, background: '#eff6ff', borderRadius: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 750 }}>{t('cool.title')}</div>
+          <div style={{ fontSize: 11, color: '#57534e', marginBottom: 4 }}>{t('cool.hour', { hour: `${String(report.cooling.hour).padStart(2, '0')}:00` })}</div>
+          <div style={{ fontSize: 16, fontWeight: 750 }}>{Math.round(report.cooling.watts)} W · {num(report.cooling.wattsPerM2, 1)} W/m²</div>
+          {report.cooling.parts.map((part) => (
+            <div key={part.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 2 }}>
+              <span>{t(`cool.${part.id}`)}</span>
+              <span>{Math.round(part.watts)} W</span>
+            </div>
+          ))}
+          {report.cooling.overheat && <div data-testid="overheat-warning" style={{ fontSize: 11, color: '#9a3412', marginTop: 6 }}>{t('cool.overheat')}</div>}
+          {report.cooling.equipment && (
+            <div style={{ fontSize: 12, marginTop: 6 }}>
+              {t('cool.equip')}: {t(`equip.${report.cooling.equipment.kind}`)} {Math.round(report.cooling.equipment.watts / 100) / 10} kW
+              <button type="button" data-testid="add-cooling-unit" onClick={() => onApply(addServiceNode(plan, {
+                system: 'electric',
+                kind: 'air-air',
+                x: (plan.rooms || []).find((item) => item.id === report.id)?.cx,
+                z: (plan.rooms || []).find((item) => item.id === report.id)?.cz,
+                power: report.cooling.equipment.watts,
+                voltage: 230,
+              }))} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1', marginTop: 6 }}>{t('cool.add')}</button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

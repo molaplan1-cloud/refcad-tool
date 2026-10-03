@@ -161,6 +161,9 @@ import {
 } from '@/lib/projects'
 import { snapAlongWall, snapFixturePoint, snapPoint } from '@/lib/snap'
 import { FIT_CAMERA, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
+import { LanguageSwitch, usePlanLocale } from '@/components/i18n/Locale'
+import { wallBearing } from '@/lib/orientation'
+import { text } from '@/lib/i18n'
 
 const HouseScene = dynamic(() => import('./HouseScene'), { ssr: false })
 
@@ -545,6 +548,7 @@ function WallOutlines({ plan, X, Y, selectedIds = [] }) {
           data-az={wall.a.z}
           data-bx={wall.b.x}
           data-bz={wall.b.z}
+          data-compass={wall.kind === 'interior' ? '' : wallBearing(plan, wall).code}
           x1={X(wall.a.x)}
           y1={Y(wall.a.z)}
           x2={X(wall.b.x)}
@@ -560,6 +564,7 @@ function WallOutlines({ plan, X, Y, selectedIds = [] }) {
 
 export default function FloorPlanApp() {
   const [plan, setPlan] = useState(() => emptyPlan())
+  const { locale, setLocale, t, num } = usePlanLocale(plan)
   const [hydrated, setHydrated] = useState(false)
   const [ready, setReady] = useState(false)
   const [startOpen, setStartOpen] = useState(false)
@@ -622,6 +627,7 @@ export default function FloorPlanApp() {
   const dragOpen = useRef(null)
   const dragYard = useRef(null)
   const dragLabel = useRef(null)
+  const northDrag = useRef(null)
   const clip = useRef(null)
   const hostRef = useRef(null)
   const svgRef = useRef(null)
@@ -631,6 +637,10 @@ export default function FloorPlanApp() {
   const suppressMenu = useRef(false)
   const altRef = useRef(false)
   altRef.current = altDown
+
+  useEffect(() => {
+    if (hydrated && plan.locale) setLocale(plan.locale)
+  }, [hydrated, plan.locale, setLocale])
 
   useEffect(() => {
     const storedLibrary = loadLibrary(window.localStorage.getItem(LIBRARY_KEY))
@@ -1765,38 +1775,38 @@ export default function FloorPlanApp() {
     showAreas: display.areas,
   })
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
-  const sheetTitle = sheetMode === 'site' ? 'Asemapiirros' : (activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva')
+  const sheetTitle = sheetMode === 'site' ? t('sheet.site') : (activeSystems.length === 1 ? text(locale, `service.${activeSystems[0].id}`, activeSystems[0].title) : t('sheet.plan'))
   const liveEnd = draft && (tool === 'exterior' || tool === 'interior') ? (drawGuide || snapVisual?.point || null) : null
   const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
   const status = redrawId
-    ? 'Piirrä reitti uudelleen. Enter päättää, Escape peruuttaa.'
+    ? t('status.redraw')
     : svcTool === 'run'
-    ? 'Linja: napsauta pisteet. Enter tai Valmis päättää. Escape peruuttaa.'
+    ? t('status.run')
     : svcTool === 'node'
-      ? `${spec?.name || 'Piste'}: napsauta paikka. Piste tarttuu verkkoon ja lähellä olevaan osaan.`
+      ? t('status.node', { name: spec?.name || t('select.object') })
     : liveEnd
-    ? `Pituus ${formatMm(liveLength)} mm`
+    ? t('status.length', { mm: formatMm(liveLength) })
     : yardTool
       ? yardToolLabel(yardTool)
       : placing
-      ? 'Napsauta pohjaan kalusteen paikka'
+      ? t('status.fixture')
       : tool === 'room' && roomShape === 'poly'
-        ? 'Huone: napsauta kulmat. Sulje ensimmäiseen pisteeseen tai paina Enter.'
+        ? t('status.roomPoly')
         : tool === 'room'
-          ? 'Huone: vedä suorakulmio kahdella napsautuksella. Nurkat tarttuvat seiniin.'
+          ? t('status.room')
           : tool === 'detect'
-            ? 'Tunnista: napsauta seinien rajaamaa aluetta.'
+            ? t('status.detect')
             : tool === 'exterior'
-        ? 'Ulkoseinä: napsauta alkupiste ja loppupiste'
+        ? t('status.exterior')
         : tool === 'interior'
-          ? 'Väliseinä: napsauta alkupiste ja loppupiste'
+          ? t('status.interior')
           : tool === 'door'
-            ? 'Ovi: napsauta seinää'
+            ? t('status.door')
             : tool === 'window'
-              ? 'Ikkuna: napsauta seinää'
-              : 'Valitse: vedä vasemmalta oikealle ikkuna, oikealta vasemmalle ylitys. Shift tai Ctrl lisää ja poistaa. Esc tyhjentää.'
+              ? t('status.window')
+              : t('status.select')
 
   const px = (metres) => metres * layout.scale * k
 
@@ -1807,103 +1817,104 @@ export default function FloorPlanApp() {
         background: '#14181f', color: '#f5f5f4', flexShrink: 0, flexWrap: 'wrap',
       }}>
         <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14 }}>RefCAD</Link>
-        <Link href="/" style={{ color: '#a8a29e', textDecoration: 'none', fontSize: 12, fontWeight: 650 }}>Kylmätilat</Link>
+        <Link href="/" style={{ color: '#a8a29e', textDecoration: 'none', fontSize: 12, fontWeight: 650 }}>{t('app.coldRooms')}</Link>
         <input
-          aria-label="Piirustuksen nimi"
+          aria-label={t('app.drawingName')}
           value={plan.name}
           onChange={(event) => setPlan({ ...plan, name: event.target.value })}
           style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 13, width: 160 }}
         />
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
-          <button type="button" data-testid="tool-select" style={textBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacing(null); setDraft(null) }}>Valitse</button>
-          <button type="button" data-testid="tool-exterior" style={textBtn(tool === 'exterior')} onClick={() => { setTool('exterior'); setPlacing(null) }}>Ulkoseinä</button>
-          <button type="button" data-testid="tool-interior" style={textBtn(tool === 'interior')} onClick={() => { setTool('interior'); setPlacing(null) }}>Väliseinä</button>
-          <button type="button" data-testid="tool-door" style={textBtn(tool === 'door')} onClick={() => { setTool('door'); setPlacing(null); setDraft(null) }}>Ovi</button>
-          <button type="button" data-testid="tool-window" style={textBtn(tool === 'window')} onClick={() => { setTool('window'); setPlacing(null); setDraft(null) }}>Ikkuna</button>
-          <button type="button" data-testid="tool-room" style={textBtn(tool === 'room' && roomShape === 'rect')} onClick={() => { setTool('room'); setRoomShape('rect'); setPlacing(null); setPoly([]) }}>Huone</button>
-          <button type="button" data-testid="tool-room-poly" style={textBtn(tool === 'room' && roomShape === 'poly')} onClick={() => { setTool('room'); setRoomShape('poly'); setPlacing(null); setDraft(null) }}>Monikulmio</button>
-          <button type="button" data-testid="tool-detect" style={textBtn(tool === 'detect')} onClick={() => { setTool('detect'); setPlacing(null); setDraft(null); setPoly([]) }}>Tunnista</button>
+          <button type="button" data-testid="tool-select" style={textBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacing(null); setDraft(null) }}>{t('tool.select')}</button>
+          <button type="button" data-testid="tool-exterior" style={textBtn(tool === 'exterior')} onClick={() => { setTool('exterior'); setPlacing(null) }}>{t('tool.exterior')}</button>
+          <button type="button" data-testid="tool-interior" style={textBtn(tool === 'interior')} onClick={() => { setTool('interior'); setPlacing(null) }}>{t('tool.interior')}</button>
+          <button type="button" data-testid="tool-door" style={textBtn(tool === 'door')} onClick={() => { setTool('door'); setPlacing(null); setDraft(null) }}>{t('tool.door')}</button>
+          <button type="button" data-testid="tool-window" style={textBtn(tool === 'window')} onClick={() => { setTool('window'); setPlacing(null); setDraft(null) }}>{t('tool.window')}</button>
+          <button type="button" data-testid="tool-room" style={textBtn(tool === 'room' && roomShape === 'rect')} onClick={() => { setTool('room'); setRoomShape('rect'); setPlacing(null); setPoly([]) }}>{t('tool.room')}</button>
+          <button type="button" data-testid="tool-room-poly" style={textBtn(tool === 'room' && roomShape === 'poly')} onClick={() => { setTool('room'); setRoomShape('poly'); setPlacing(null); setDraft(null) }}>{t('tool.polygon')}</button>
+          <button type="button" data-testid="tool-detect" style={textBtn(tool === 'detect')} onClick={() => { setTool('detect'); setPlacing(null); setDraft(null); setPoly([]) }}>{t('tool.detect')}</button>
         </div>
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
           <button type="button" data-testid="view-floor-2d" style={textBtn(view === '2d' && sheetMode !== 'site')} onClick={() => { setView('2d'); setSheetMode('plan'); setYardTool(null); setYardPoints([]) }}>2D</button>
-          <button type="button" data-testid="view-site" style={textBtn(view === '2d' && sheetMode === 'site')} onClick={() => { setView('2d'); setSheetMode('site'); setCamera(FIT_CAMERA); setYardTool(null); setYardPoints([]) }}>Piha</button>
+          <button type="button" data-testid="view-site" style={textBtn(view === '2d' && sheetMode === 'site')} onClick={() => { setView('2d'); setSheetMode('site'); setCamera(FIT_CAMERA); setYardTool(null); setYardPoints([]) }}>{t('view.site')}</button>
           <button type="button" data-testid="view-floor-3d" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
-          <button type="button" data-testid="view-facade" style={textBtn(view === 'facade')} onClick={() => setView('facade')}>Julkisivu</button>
+          <button type="button" data-testid="view-facade" style={textBtn(view === 'facade')} onClick={() => setView('facade')}>{t('view.facade')}</button>
         </div>
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
           <button type="button" style={textBtn(plan.paper !== 'a4')} onClick={() => setPlan({ ...plan, paper: 'a3' })}>A3</button>
           <button type="button" style={textBtn(plan.paper === 'a4')} onClick={() => setPlan({ ...plan, paper: 'a4' })}>A4</button>
         </div>
-        <button type="button" title="Kumoa" data-testid="undo" onClick={undo} style={textBtn(false)}>Kumoa</button>
-        <button type="button" title="Tee uudelleen" data-testid="redo" onClick={redoChange} style={textBtn(false)}>Tee uudelleen</button>
+        <button type="button" title={t('edit.undo')} data-testid="undo" onClick={undo} style={textBtn(false)}>{t('edit.undo')}</button>
+        <button type="button" title={t('edit.redo')} data-testid="redo" onClick={redoChange} style={textBtn(false)}>{t('edit.redo')}</button>
         <span style={{ flex: 1 }} />
-        <button type="button" data-testid="plan-new" onClick={() => { setMenu(null); setNewOpen(true) }} style={textBtn(false)}>Uusi</button>
-        <button type="button" data-testid="plan-open" onClick={() => { setMenu(null); setLibraryOpen(true) }} style={textBtn(false)}>Avaa/Tallenna</button>
-        <button type="button" data-testid="house-settings" onClick={() => { setPanel('house'); setMenu(null) }} style={textBtn(panel === 'house')}>Talon asetukset</button>
-        <button type="button" data-testid="open-display" onClick={() => setDisplayOpen((open) => !open)} style={textBtn(displayOpen)}>Näytä</button>
-        <button type="button" data-testid="toolbar-preset-plain" title="Pelkistetty (Alt+1)" onClick={() => setDisplay({ preset: 'plain' })} style={textBtn(display.preset === 'plain')}>Pelkistetty</button>
-        <button type="button" data-testid="toolbar-preset-measure" title="Mitoitus (Alt+2)" onClick={() => setDisplay({ preset: 'measure' })} style={textBtn(display.preset === 'measure')}>Mitoitus</button>
-        <button type="button" data-testid="toolbar-preset-all" title="Kaikki (Alt+3)" onClick={() => setDisplay({ preset: 'all' })} style={textBtn(display.preset === 'all')}>Kaikki</button>
-        <button type="button" data-testid="example-house" onClick={loadExample} style={textBtn(false)}>Esimerkkitalo</button>
-        <button type="button" data-testid="family-house" onClick={loadFamily} style={textBtn(false)}>Huoneisto</button>
+        <LanguageSwitch value={plan.locale || locale} onChange={(next) => { setLocale(next); setPlan((current) => ({ ...current, locale: next })) }} />
+        <button type="button" data-testid="plan-new" onClick={() => { setMenu(null); setNewOpen(true) }} style={textBtn(false)}>{t('file.new')}</button>
+        <button type="button" data-testid="plan-open" onClick={() => { setMenu(null); setLibraryOpen(true) }} style={textBtn(false)}>{t('file.open')}</button>
+        <button type="button" data-testid="house-settings" onClick={() => { setPanel('house'); setMenu(null) }} style={textBtn(panel === 'house')}>{t('file.house')}</button>
+        <button type="button" data-testid="open-display" onClick={() => setDisplayOpen((open) => !open)} style={textBtn(displayOpen)}>{t('file.display')}</button>
+        <button type="button" data-testid="toolbar-preset-plain" title={`${t('preset.plain')} (Alt+1)`} onClick={() => setDisplay({ preset: 'plain' })} style={textBtn(display.preset === 'plain')}>{t('preset.plain')}</button>
+        <button type="button" data-testid="toolbar-preset-measure" title={`${t('preset.measure')} (Alt+2)`} onClick={() => setDisplay({ preset: 'measure' })} style={textBtn(display.preset === 'measure')}>{t('preset.measure')}</button>
+        <button type="button" data-testid="toolbar-preset-all" title={`${t('preset.all')} (Alt+3)`} onClick={() => setDisplay({ preset: 'all' })} style={textBtn(display.preset === 'all')}>{t('preset.all')}</button>
+        <button type="button" data-testid="example-house" onClick={loadExample} style={textBtn(false)}>{t('file.example')}</button>
+        <button type="button" data-testid="family-house" onClick={loadFamily} style={textBtn(false)}>{t('file.apartment')}</button>
         <button type="button" data-testid="export-floor-pdf" onClick={exportPdf} style={textBtn(false)}>PDF</button>
-        <button type="button" data-testid="export-site-pdf" onClick={() => buildSitePdf(plan).save(`${(plan.name || 'asemapiirros').replace(/\s+/g, '-')}-asemapiirros.pdf`)} style={textBtn(false)}>Asemapiirros</button>
+        <button type="button" data-testid="export-site-pdf" onClick={() => buildSitePdf(plan).save(`${(plan.name || 'site').replace(/\s+/g, '-')}-site.pdf`)} style={textBtn(false)}>{t('file.sitePdf')}</button>
         <button type="button" data-testid="export-floor-png" onClick={exportPng} style={textBtn(false)}>PNG</button>
       </header>
       <div style={{ height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', background: '#1c212b', color: '#e7e5e4', flexShrink: 0 }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <input data-testid="room-partitions" type="checkbox" checked={partitions} onChange={(event) => setPartitions(event.target.checked)} />
-          Luo väliseinät (120 mm)
+          {t('partition.create')}
         </label>
         {tool === 'room' && roomShape === 'poly' && poly.length >= 3 && (
-          <button type="button" data-testid="close-room" style={textBtn(false)} onClick={() => closeRoom(poly)}>Sulje huone</button>
+          <button type="button" data-testid="close-room" style={textBtn(false)} onClick={() => closeRoom(poly)}>{t('room.close')}</button>
         )}
-        {sheetMode === 'site' && YARD_DRAW_TOOLS.map(([id, label]) => (
-          <button key={id} type="button" data-testid={`yard-tool-${id}`} style={textBtn(yardTool === id)} onClick={() => { setYardTool(id); setTool('select'); setPlacing(null); setYardPoints([]) }}>{label}</button>
+        {sheetMode === 'site' && YARD_DRAW_TOOLS.map(([id]) => (
+          <button key={id} type="button" data-testid={`yard-tool-${id}`} style={textBtn(yardTool === id)} onClick={() => { setYardTool(id); setTool('select'); setPlacing(null); setYardPoints([]) }}>{t(`yard.${id}`)}</button>
         ))}
         {sheetMode === 'site' && (
           <>
             <select data-testid="yard-plant-tool" value={yardTool?.startsWith('plant:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
-              <option value="">Kasvi</option>
+              <option value="">{t('yard.plant')}</option>
               {PLANTS.map((item) => <option key={item.id} value={`plant:${item.id}`}>{item.name}</option>)}
             </select>
             <select data-testid="yard-object-tool" value={yardTool?.startsWith('object:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
-              <option value="">Pihaesine</option>
+              <option value="">{t('yard.object')}</option>
               {OBJECTS.map((item) => <option key={item.id} value={`object:${item.id}`}>{item.name}</option>)}
             </select>
             <select data-testid="yard-building-tool" value={yardTool?.startsWith('building:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
-              <option value="">Ulkorakennus</option>
+              <option value="">{t('yard.building')}</option>
               {BUILDINGS.map((item) => <option key={item.id} value={`building:${item.id}`}>{item.name}</option>)}
             </select>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-              Pohjoinen
-              <input data-testid="north-angle" type="number" value={ensureYard(plan).north} onChange={(event) => commit(updateYardItem(plan, 'north', 'north', { north: Number(event.target.value) || 0 }))} style={{ width: 52, padding: '2px 4px', borderRadius: 6, border: '1px solid #44403c', background: '#111827', color: '#fff' }} />
-              °
-            </label>
-          </>
+            </>
         )}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+          {t('north.label')}
+          <input data-testid="north-angle" type="number" value={ensureYard(plan).north || 0} onChange={(event) => commit(updateYardItem(plan, 'north', 'north', { north: Number(event.target.value) || 0 }))} style={{ width: 52, padding: '2px 4px', borderRadius: 6, border: '1px solid #44403c', background: '#111827', color: '#fff' }} />
+          °
+        </label>
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: '#a8a29e' }}>Tartunta</span>
+        <span style={{ fontSize: 11, color: '#a8a29e' }}>{t('snap.snap')}</span>
         <button type="button" data-testid="snap-100" title="Ruudukko 100 mm" style={textBtn(gridStep === 0.1)} onClick={() => setGridStep(0.1)}>100</button>
         <button type="button" data-testid="snap-50" title="Ruudukko 50 mm" style={textBtn(gridStep === 0.05)} onClick={() => setGridStep(0.05)}>50</button>
         <button type="button" data-testid="snap-10" title="Ruudukko 10 mm" style={textBtn(gridStep === 0.01)} onClick={() => setGridStep(0.01)}>10</button>
-        <span style={{ fontSize: 11, color: '#a8a29e', marginLeft: 6 }}>Kulma</span>
+        <span style={{ fontSize: 11, color: '#a8a29e', marginLeft: 6 }}>{t('snap.angle')}</span>
         <button type="button" data-testid="angle-90" data-ortho="true" title="90° (Shift)" aria-pressed={angleStep === 90} style={textBtn(angleStep === 90)} onClick={() => setAngleStep(90)}>90°</button>
         <button type="button" data-testid="angle-45" aria-pressed={angleStep === 45} style={textBtn(angleStep === 45)} onClick={() => setAngleStep(45)}>45°</button>
         <button type="button" data-testid="angle-15" aria-pressed={angleStep === 15} style={textBtn(angleStep === 15)} onClick={() => setAngleStep(15)}>15°</button>
-        <button type="button" data-testid="angle-free" aria-pressed={angleStep === 0} style={textBtn(angleStep === 0)} onClick={() => setAngleStep(0)}>Vapaa</button>
+        <button type="button" data-testid="angle-free" aria-pressed={angleStep === 0} style={textBtn(angleStep === 0)} onClick={() => setAngleStep(0)}>{t('snap.free')}</button>
         {view === '2d' && (
           <>
-            <button type="button" data-testid="zoom-out" title="Loitonna (−)" style={textBtn(false)} onClick={() => {
+            <button type="button" data-testid="zoom-out" title={t('snap.zoomOut')} style={textBtn(false)} onClick={() => {
               const rect = hostRef.current?.getBoundingClientRect()
               setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 0.8))
             }}>−</button>
             <span data-testid="zoom-percent" style={{ minWidth: 44, textAlign: 'center', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{zoomPercent(camera)}%</span>
-            <button type="button" data-testid="zoom-in" title="Lähennä (+)" style={textBtn(false)} onClick={() => {
+            <button type="button" data-testid="zoom-in" title={t('snap.zoomIn')} style={textBtn(false)} onClick={() => {
               const rect = hostRef.current?.getBoundingClientRect()
               setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 1.25))
             }}>+</button>
-            <button type="button" data-testid="zoom-fit" title="Sovita arkki (0)" style={textBtn(false)} onClick={() => setCamera(FIT_CAMERA)}>Sovita</button>
+            <button type="button" data-testid="zoom-fit" title={t('snap.fitTitle')} style={textBtn(false)} onClick={() => setCamera(FIT_CAMERA)}>{t('snap.fit')}</button>
           </>
         )}
       </div>
@@ -2172,8 +2183,9 @@ export default function FloorPlanApp() {
                   const fig = openingSymbol(wall, opening, plan)
                   const selectedOpening = picks.some((item) => item.kind === 'opening' && item.id === opening.id)
                   if (fig.kind === 'window') {
+                    const compass = wallBearing(plan, wall).code
                     return (
-                      <g key={opening.id} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
+                      <g key={opening.id} data-testid="window-mark" data-compass={compass} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
                         {fig.glass.map((line, index) => (
                           <line key={index} x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} />
                         ))}
@@ -2328,10 +2340,10 @@ export default function FloorPlanApp() {
                       return (
                         <>
                           <rect x={x} y={y} width={boxW} height={boxH} fill="#fbfaf7" stroke="#1c1917" strokeWidth={0.6} />
-                          <text x={x + 6} y={y + rowH} fontSize={font} fontWeight={700} fill="#1c1917">Rakennetyypit</text>
+                          <text x={x + 6} y={y + rowH} fontSize={font} fontWeight={700} fill="#1c1917">{t('sheet.structures')}</text>
                           {rows.map((row, index) => (
                             <text key={row.key} data-testid="legend-row" data-code={row.code} x={x + 6} y={y + rowH * (index + 2)} fontSize={font} fill="#1c1917">
-                              {row.code}  {row.name}  U {Number(row.u).toFixed(2).replace('.', ',')}
+                              {row.code}  {text(locale, `struct.${row.id}`, row.name)}  U {num(row.u, 2)}
                             </text>
                           ))}
                         </>
@@ -2368,11 +2380,36 @@ export default function FloorPlanApp() {
                     style={{ pointerEvents: 'none' }}
                   />
                 )}
-                <g style={{ pointerEvents: 'none' }} data-testid="north-arrow" data-north={ensureYard(plan).north || 0}>
+                <g
+                  data-testid="north-arrow"
+                  data-north={ensureYard(plan).north || 0}
+                  style={{ cursor: 'grab' }}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    event.currentTarget.setPointerCapture(event.pointerId)
+                    northDrag.current = { x: event.clientX, north: ensureYard(plan).north || 0, plan }
+                  }}
+                  onPointerMove={(event) => {
+                    if (!northDrag.current || !event.currentTarget.hasPointerCapture?.(event.pointerId)) return
+                    const next = Math.round(northDrag.current.north + (event.clientX - northDrag.current.x))
+                    const north = ((next % 360) + 360) % 360
+                    setPlan(updateYardItem(northDrag.current.plan, 'north', 'north', { north }))
+                  }}
+                  onPointerUp={(event) => {
+                    if (!northDrag.current) return
+                    const next = Math.round(northDrag.current.north + (event.clientX - northDrag.current.x))
+                    const north = ((next % 360) + 360) % 360
+                    const base = northDrag.current.plan
+                    northDrag.current = null
+                    history.current = [...history.current, base].slice(-40)
+                    redo.current = []
+                    setPlan(updateYardItem(base, 'north', 'north', { north }))
+                  }}
+                >
                   {(() => {
                     const ax = sheet.x + sheet.w - 52
                     const ay = sheet.y + 48
-                    const north = sheetMode === 'site' ? (ensureYard(plan).north || 0) : 0
+                    const north = ensureYard(plan).north || 0
                     return (
                       <g transform={`rotate(${north} ${ax} ${ay})`}>
                         <circle cx={ax} cy={ay} r={15} fill="#fff" stroke="#1c1917" strokeWidth={0.8} />
@@ -2388,22 +2425,23 @@ export default function FloorPlanApp() {
                     const ty = sheet.y + (layout.title.y * k)
                     const tw = layout.title.w * k
                     const th = layout.title.h * k
-                    const roofName = (ROOF_TYPES.find((item) => item.id === plan.roofType) || ROOF_TYPES[0]).name
+                    const roofItem = ROOF_TYPES.find((item) => item.id === plan.roofType) || ROOF_TYPES[0]
+                    const roofName = text(locale, `roof.${roofItem.id}`, roofItem.name)
                     const yard = ensureYard(plan)
                     const lines = sheetMode === 'site' ? [
-                      plan.name || 'Omakotitalo',
-                      `Mittakaava 1:${layout.ratio}`,
-                      plan.paper === 'a4' ? 'A4 vaaka' : 'A3 vaaka',
-                      `Tontti ${formatSquare(plotMetrics(plan).area)}`,
-                      `Pohjoinen ${Math.round(yard.north || 0)}°`,
-                      `Ulkorakennukset ${yard.buildings.length}`,
+                      plan.name || t('sheet.defaultName'),
+                      t('sheet.scale', { ratio: layout.ratio }),
+                      plan.paper === 'a4' ? t('sheet.a4') : t('sheet.a3'),
+                      t('sheet.plot', { area: formatSquare(plotMetrics(plan).area) }),
+                      t('sheet.north', { deg: Math.round(yard.north || 0) }),
+                      t('sheet.buildings', { count: yard.buildings.length }),
                     ] : [
-                      plan.name || 'Omakotitalo',
-                      `Mittakaava 1:${layout.ratio}`,
-                      plan.paper === 'a4' ? 'A4 vaaka' : 'A3 vaaka',
+                      plan.name || t('sheet.defaultName'),
+                      t('sheet.scale', { ratio: layout.ratio }),
+                      plan.paper === 'a4' ? t('sheet.a4') : t('sheet.a3'),
                       roofName,
-                      `Huoneita ${visibleRooms(plan).length}`,
-                      `Pinta-ala ${formatArea(totalArea)}`,
+                      t('sheet.rooms', { count: visibleRooms(plan).length }),
+                      t('sheet.area', { area: formatArea(totalArea) }),
                     ]
                     const header = Math.min(22, th * 0.28)
                     const top = ty + header + 12
@@ -2484,7 +2522,7 @@ export default function FloorPlanApp() {
                   </g>
                 ))}
                 {plan.walls.length === 0 && (
-                  <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">Piirrä ulkoseinät tai avaa esimerkkitalo</text>
+                  <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">{t('sheet.empty')}</text>
                 )}
                 {marquee && (
                   <rect
@@ -2556,16 +2594,16 @@ export default function FloorPlanApp() {
               />
               <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', gap: 4, background: '#14181f', padding: 4, borderRadius: 10 }}>
-                  <span style={{ color: '#a8a29e', fontSize: 11, alignSelf: 'center', padding: '0 6px' }}>Seinät</span>
-                  <button type="button" data-testid="wall-solid" style={textBtn(wallMode === 'solid')} onClick={() => setWallMode('solid')}>Näkyvissä</button>
-                  <button type="button" data-testid="wall-ghost" aria-pressed={wallMode === 'ghost'} style={textBtn(wallMode === 'ghost')} onClick={() => setWallMode('ghost')}>Läpinäkyvä</button>
-                  <button type="button" data-testid="wall-hidden" style={textBtn(wallMode === 'hidden')} onClick={() => setWallMode('hidden')}>Piilossa</button>
+                  <span style={{ color: '#a8a29e', fontSize: 11, alignSelf: 'center', padding: '0 6px' }}>{t('view3d.walls')}</span>
+                  <button type="button" data-testid="wall-solid" style={textBtn(wallMode === 'solid')} onClick={() => setWallMode('solid')}>{t('view3d.visible')}</button>
+                  <button type="button" data-testid="wall-ghost" aria-pressed={wallMode === 'ghost'} style={textBtn(wallMode === 'ghost')} onClick={() => setWallMode('ghost')}>{t('view3d.ghost')}</button>
+                  <button type="button" data-testid="wall-hidden" style={textBtn(wallMode === 'hidden')} onClick={() => setWallMode('hidden')}>{t('view3d.hidden')}</button>
                 </div>
                 <div style={{ display: 'flex', gap: 4, background: '#14181f', padding: 4, borderRadius: 10 }}>
-                  <span style={{ color: '#a8a29e', fontSize: 11, alignSelf: 'center', padding: '0 6px' }}>Katto</span>
-                  <button type="button" data-testid="roof-solid" style={textBtn(roofMode === 'solid')} onClick={() => setRoofMode('solid')}>Näkyvissä</button>
-                  <button type="button" data-testid="roof-ghost" style={textBtn(roofMode === 'ghost')} onClick={() => setRoofMode('ghost')}>Läpinäkyvä</button>
-                  <button type="button" data-testid="roof-hidden" aria-pressed={roofMode === 'hidden'} style={textBtn(roofMode === 'hidden')} onClick={() => setRoofMode('hidden')}>Piilossa</button>
+                  <span style={{ color: '#a8a29e', fontSize: 11, alignSelf: 'center', padding: '0 6px' }}>{t('view3d.roof')}</span>
+                  <button type="button" data-testid="roof-solid" style={textBtn(roofMode === 'solid')} onClick={() => setRoofMode('solid')}>{t('view3d.visible')}</button>
+                  <button type="button" data-testid="roof-ghost" style={textBtn(roofMode === 'ghost')} onClick={() => setRoofMode('ghost')}>{t('view3d.ghost')}</button>
+                  <button type="button" data-testid="roof-hidden" aria-pressed={roofMode === 'hidden'} style={textBtn(roofMode === 'hidden')} onClick={() => setRoofMode('hidden')}>{t('view3d.hidden')}</button>
                 </div>
               </div>
             </div>
@@ -2594,11 +2632,11 @@ export default function FloorPlanApp() {
         <aside data-testid="materials-panel" style={{ width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}>
           {pick && panel !== 'house' ? (
             <div data-testid="panel-heading" style={{ marginBottom: 10 }}>
-              <button type="button" data-testid="panel-back-house" onClick={() => setPanel('house')} style={{ display: 'block', padding: 0, border: 'none', background: 'transparent', color: '#0f766e', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 4 }}>← Talon asetukset</button>
-              <div data-testid="selection-title" style={{ fontSize: 15, fontWeight: 750 }}>{picks.length > 1 ? `${picks.length} kohdetta` : selectionLabel(plan, pick)}</div>
+              <button type="button" data-testid="panel-back-house" onClick={() => setPanel('house')} style={{ display: 'block', padding: 0, border: 'none', background: 'transparent', color: '#0f766e', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 4 }}>{t('select.back')}</button>
+              <div data-testid="selection-title" style={{ fontSize: 15, fontWeight: 750 }}>{picks.length > 1 ? t('select.many', { count: picks.length }) : selectionLabel(plan, pick)}</div>
             </div>
           ) : (
-            <button type="button" data-testid="open-house-panel" style={{ ...sideBtn(panel === 'house'), marginBottom: 10 }} onClick={() => setPanel(panel === 'house' ? 'object' : 'house')}>Talon asetukset</button>
+            <button type="button" data-testid="open-house-panel" style={{ ...sideBtn(panel === 'house'), marginBottom: 10 }} onClick={() => setPanel(panel === 'house' ? 'object' : 'house')}>{t('file.house')}</button>
           )}
           {panel === 'house' ? (
             <HouseSettings plan={plan} onApply={setPlan} />
@@ -2608,36 +2646,30 @@ export default function FloorPlanApp() {
           {pick?.kind === 'room' && room && (
             <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>
           )}
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>MATERIAALILUETTELO</div>
-          {rows.length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>Ei pintoja vielä.</div>}
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>{t('bom.title')}</div>
+          {rows.length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>{t('bom.empty')}</div>}
           {rows.map((row) => (
             <div key={row.key} data-testid={row.group === 'structure' ? 'structure-bom' : undefined} data-code={row.code || undefined} data-unit={row.unit || undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
               <span style={{ width: 14, height: 14, borderRadius: 3, background: row.color, border: '1px solid #a8a29e', flexShrink: 0 }} />
-              <span style={{ flex: 1 }}>{row.group === 'structure' ? `${row.code} ${row.structureName}: ${row.name}` : `${row.roomName ? `${row.roomName}: ` : ''}${row.groupLabel}: ${row.name}`}</span>
-              <span style={{ color: '#78716c' }}>{row.unit ? formatQuantity(row.area || 0, row.unit) : formatArea(row.area || 0)}</span>
+              <span style={{ flex: 1 }}>{row.group === 'structure' ? `${row.code} ${text(locale, `struct.${row.structureId}`, row.structureName)}: ${text(locale, `layer.${row.materialId}`, row.name)}` : `${row.roomName ? `${row.roomName}: ` : ''}${text(locale, `group.${row.group}`, row.groupLabel)}: ${text(locale, `mat.${row.group}.${row.id}`, row.name)}`}</span>
+              <span style={{ color: '#78716c' }}>{row.unit ? `${num(row.area || 0, row.unit === 'm³' ? 2 : 1)} ${row.unit}` : `${num(row.area || 0, 1)} m²`}</span>
             </div>
           ))}
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '14px 0 8px' }}>SELITE</div>
-          {[
-            ['Lattia', 'floor'],
-            ['Sisäseinä', 'interior'],
-            ['Sisäkatto', 'ceiling'],
-            ['Ulkoseinä', 'exterior'],
-            ['Katto', 'roof'],
-          ].map(([label, group]) => (
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '14px 0 8px' }}>{t('bom.legend')}</div>
+          {['floor', 'interior', 'ceiling', 'exterior', 'roof'].map((group) => (
             <div key={group} style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{label}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{t(`group.${group}`)}</div>
               {MATERIALS[group].map((item) => (
                 <div key={`${group}-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
                   <span style={{ width: 12, height: 12, background: item.color, border: '1px solid #d6d3d1' }} />
-                  <span>{item.name}</span>
+                  <span>{text(locale, `mat.${group}.${item.id}`, item.name)}</span>
                 </div>
               ))}
             </div>
           ))}
           {claddingAreas(plan).length > 0 && (
             <div data-testid="facade-area-legend" style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>Julkisivu</div>
+              <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{t('house.facade')}</div>
               {claddingAreas(plan).map((item) => (
                 <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
                   <span style={{ width: 12, height: 12, background: item.color, border: '1px solid #d6d3d1' }} />
@@ -2659,7 +2691,7 @@ export default function FloorPlanApp() {
       )}
       {newOpen && (
         <ShellDialog
-          title="Uusi pohja"
+          title={t('start.newTitle')}
           onCancel={() => { setNewOpen(false); if (!ready) setStartOpen(true) }}
           onCreate={createShell}
           onExample={loadExample}

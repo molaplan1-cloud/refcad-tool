@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
+import { LanguageSwitch, useLocale } from '@/components/i18n/Locale'
 import PlanView from './PlanView'
 import HeatLoadPanel from './HeatLoadPanel'
 import { ROOM_TYPES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
@@ -228,6 +229,7 @@ export default function DesignerApp({
   user = null,
   persistLabel = 'selaimeen',
 }) {
+  const { t, locale, setLocale } = useLocale()
   const [name, setName] = useState(initialName || 'Uusi projekti')
   const [rooms, setRooms] = useState(() => normalizeRooms(initialRooms))
   const [pipes, setPipes] = useState(initialPipes || [])
@@ -1083,9 +1085,10 @@ export default function DesignerApp({
         background: '#14181f', borderBottom: '1px solid #0c0f14', color: '#f5f5f4',
       }}>
         <Link href="/projects" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, letterSpacing: -0.2, flexShrink: 0 }}>RefCAD</Link>
-        <Link href="/pohjakuva" data-testid="open-floorplan" title="Talon pohjakuva" style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>Pohjakuva</Link>
+        <LanguageSwitch value={locale} onChange={setLocale} />
+        <Link href="/pohjakuva" data-testid="open-floorplan" title={t('designer.floorplanTitle')} style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>{t('designer.floorplan')}</Link>
         <input
-          aria-label="Projektin nimi"
+          aria-label={t('designer.projectName')}
           value={name}
           onChange={(e) => setName(e.target.value)}
           style={{
@@ -1095,7 +1098,7 @@ export default function DesignerApp({
           }}
         />
         <span title={saveText} style={{ fontSize: 11, color: saveState === 'error' ? '#fca5a5' : '#86efac', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          {saveState === 'error' ? 'Virhe' : saveState === 'saving' ? 'Tallentaa' : 'Tallennettu'}
+          {saveState === 'error' ? t('designer.error') : saveState === 'saving' ? t('designer.saving') : t('designer.saved')}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
           <button type="button" data-testid="tool-select" title="Valitse (V)" style={iconBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
