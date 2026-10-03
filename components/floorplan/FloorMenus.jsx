@@ -25,6 +25,7 @@ import {
   deleteFacadeZone,
   deleteOpening,
   deleteRoom,
+  applyFixtureVariant,
   deleteWall,
   duplicateFixture,
   fixtureTemplate,
@@ -45,6 +46,7 @@ import {
   updateRoom,
   updateWall,
 } from '@/lib/floorplan'
+import { resolveFixture } from '@/lib/furniture'
 import { ServiceMenu } from './ServicesLayer'
 import { YardFields, YardMenuBody } from './YardPanel'
 import { yardTitle } from '@/lib/yard'
@@ -750,15 +752,33 @@ export function ColorSwatches({ value, onChange, testid = 'fixture-color', custo
 function FixtureFields({ plan, id, onApply, onCommit }) {
   const fixture = (plan.fixtures || []).find((item) => item.id === id)
   if (!fixture) return null
-  const tplW = fixture.w || 0.6
-  const tplD = fixture.d || 0.6
+  const spec = resolveFixture(fixture)
+  const variants = spec.template.variants || []
+  const tplW = spec.w || 0.6
+  const tplD = spec.d || 0.6
+  const tplH = spec.h || 0.85
   return (
     <div>
+      {variants.length > 0 && (
+        <Field label="Malli">
+          <select
+            data-testid="fixture-variant"
+            style={inputStyle}
+            value={fixture.variant || variants[0].id}
+            onChange={(event) => onCommit(applyFixtureVariant(plan, id, event.target.value))}
+          >
+            {variants.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        </Field>
+      )}
       <Field label="Leveys (mm)">
         <input style={inputStyle} type="number" value={mm(fixture.w || tplW)} onChange={(event) => onApply(updateFixture(plan, id, { w: fromMm(event.target.value) || 0.3 }))} />
       </Field>
       <Field label="Syvyys (mm)">
         <input style={inputStyle} type="number" value={mm(fixture.d || tplD)} onChange={(event) => onApply(updateFixture(plan, id, { d: fromMm(event.target.value) || 0.3 }))} />
+      </Field>
+      <Field label="Korkeus (mm)">
+        <input data-testid="fixture-height" style={inputStyle} type="number" value={mm(fixture.h || tplH)} onChange={(event) => onApply(updateFixture(plan, id, { h: fromMm(event.target.value) || 0.3 }))} />
       </Field>
       <ColorSwatches value={fixture.color} onChange={(color) => onApply(updateFixture(plan, id, { color }))} />
       <MenuBtn testid="panel-rotate" onClick={() => onCommit(rotateFixture(plan, id))}>Kierrä 90°</MenuBtn>
@@ -906,9 +926,24 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
       </>
     )
   } else if (menu.kind === 'fixture' && fixture) {
-    title = `Kaluste: ${fixtureTemplate(fixture.type).name}`
+    const spec = resolveFixture(fixture)
+    const variants = spec.template.variants || []
+    title = `Kaluste: ${spec.name}`
     body = (
       <>
+        {variants.length > 0 && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
+            Malli
+            <select
+              data-testid="ctx-fixture-variant"
+              value={fixture.variant || variants[0].id}
+              onChange={(event) => act(applyFixtureVariant(plan, fixture.id, event.target.value))}
+              style={{ flex: 1, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
+            >
+              {variants.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+        )}
         <ColorSwatches value={fixture.color} onChange={(color) => onApply(updateFixture(plan, fixture.id, { color }))} testid="ctx-fixture-color" customTestid="ctx-color-custom" />
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
         <CadEditItems onNavigate={onNavigate} />
