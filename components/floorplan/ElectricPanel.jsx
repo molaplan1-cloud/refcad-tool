@@ -32,14 +32,14 @@ function fmtLength(metres) {
 
 export function SingleLine({ report }) {
   const circuits = report?.circuits || []
-  const width = Math.max(720, 120 + circuits.length * 110)
+  const width = Math.max(860, 140 + circuits.length * 168)
   const height = 460
   const left = 56
   const right = width - 56
   const busY = 150
   const count = Math.max(circuits.length, 1)
   return (
-    <svg data-testid="single-line" viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', background: '#fff', border: '1px solid #1c1917' }}>
+    <svg data-testid="single-line" viewBox={`0 0 ${width} ${height}`} width={width} height={height} style={{ display: 'block', background: '#fff', border: '1px solid #1c1917' }}>
       <text x={width / 2} y={32} textAnchor="middle" fontSize="18" fontWeight="700" fill="#1c1917">Pääkaavio</text>
       <text x={width / 2} y={54} textAnchor="middle" fontSize="12" fill="#44403c">Sähkökeskus</text>
       <line x1={width / 2} y1={64} x2={width / 2} y2={96} stroke="#1c1917" strokeWidth="2" />
@@ -53,7 +53,7 @@ export function SingleLine({ report }) {
         const rcd = Boolean(circuit.rcd)
         const fuseY = busY + 28
         const rcdY = fuseY + 36
-        const textY = rcd ? rcdY + 28 : fuseY + 28
+        const textY = rcd ? rcdY + 48 : fuseY + 28
         return (
           <g key={circuit.id} data-testid={`diagram-group-${circuit.id}`}>
             <line x1={x} y1={busY} x2={x} y2={fuseY} stroke="#1c1917" strokeWidth="1.4" />
@@ -63,14 +63,15 @@ export function SingleLine({ report }) {
               <g>
                 <line x1={x} y1={fuseY + 18} x2={x} y2={rcdY - 11} stroke="#1c1917" strokeWidth="1.4" />
                 <circle cx={x} cy={rcdY} r="11" fill="#fff" stroke="#1c1917" />
-                <text x={x} y={rcdY + 3} textAnchor="middle" fontSize="8" fill="#1c1917">30 mA</text>
+                <text x={x} y={rcdY + 3} textAnchor="middle" fontSize="8" fill="#1c1917">30</text>
+                <text x={x + 16} y={rcdY + 4} textAnchor="start" fontSize="10" fill="#1c1917">mA</text>
               </g>
             )}
             <line x1={x} y1={rcd ? rcdY + 11 : fuseY + 18} x2={x} y2={textY} stroke="#1c1917" strokeWidth="1.4" />
-            <text x={x} y={textY + 16} textAnchor="middle" fontSize="13" fontWeight="750" fill="#1c1917">R{circuit.id}</text>
-            <text x={x} y={textY + 32} textAnchor="middle" fontSize="11" fill="#1c1917">{circuit.description}</text>
-            <text x={x} y={textY + 46} textAnchor="middle" fontSize="10" fill="#44403c">{circuit.cable}</text>
-            <text x={x} y={textY + 60} textAnchor="middle" fontSize="10" fill="#44403c">{circuit.phase} · {fmtPower(circuit.power)}</text>
+            <text x={x} y={textY + 18} textAnchor="middle" fontSize="14" fontWeight="750" fill="#1c1917">R{circuit.id}</text>
+            <text x={x} y={textY + 36} textAnchor="middle" fontSize="11" fill="#1c1917">{circuit.description}</text>
+            <text x={x} y={textY + 52} textAnchor="middle" fontSize="11" fill="#44403c">{circuit.cable}</text>
+            <text x={x} y={textY + 68} textAnchor="middle" fontSize="11" fill="#44403c">{circuit.phase} · {fmtPower(circuit.power)}</text>
           </g>
         )
       })}
@@ -97,7 +98,7 @@ export function ScheduleTable({ report }) {
     <div data-testid="electric-schedule">
       <div style={{ fontSize: 18, fontWeight: 750, marginBottom: 8 }}>Ryhmäluettelo</div>
       <Summary report={report} />
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, background: '#fff' }}>
+      <table style={{ width: '100%', minWidth: 1080, borderCollapse: 'collapse', fontSize: 13, background: '#fff' }}>
         <thead>
           <tr>
             {['Ryhmä', 'Kuvaus', 'Laitteet', 'Jännite', 'Vaihe', 'Teho', 'Virta', 'Sulake', 'RCD', 'Kaapeli', 'Pituus'].map((title) => (
@@ -142,7 +143,7 @@ export function ElectricPanel({ plan, mode, onMode, onClose, onPrint }) {
   return (
     <div
       data-testid="electric-panel"
-      style={{ position: 'absolute', inset: 0, zIndex: 4, background: '#fbfaf7', overflow: 'auto', padding: '14px 16px 24px' }}
+      style={{ position: 'fixed', left: 16, right: 16, top: 108, bottom: 16, zIndex: 30, background: '#fbfaf7', overflow: 'auto', padding: '16px 18px 28px', border: '1px solid #1c1917', boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}
     >
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
         <button type="button" data-testid="tab-schedule" style={btn(mode === 'list')} onClick={() => onMode('list')}>Ryhmäluettelo</button>

@@ -333,13 +333,18 @@ function CableMark({ points, text, X, Y }) {
     if (!best || len > best.len) best = { len, a: points[i - 1], b: points[i] }
   }
   if (!best || best.len < 0.35) return null
+  const dx = best.b.x - best.a.x
+  const dz = best.b.z - best.a.z
+  const len = Math.hypot(dx, dz) || 1
+  const ox = (-dz / len) * 0.28
+  const oz = (dx / len) * 0.28
   return (
     <text
       data-testid="cable-mark"
-      x={X((best.a.x + best.b.x) / 2)}
-      y={Y((best.a.z + best.b.z) / 2) - 7}
+      x={X((best.a.x + best.b.x) / 2 + ox)}
+      y={Y((best.a.z + best.b.z) / 2 + oz)}
       textAnchor="middle"
-      fontSize="8"
+      fontSize="10"
       fontWeight="650"
       fill="#1c1917"
       stroke="#fbfaf7"
