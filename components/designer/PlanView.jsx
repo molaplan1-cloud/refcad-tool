@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
@@ -32,6 +32,7 @@ import {
   snapWorld,
   translateOutline,
 } from '@/lib/cadDraw'
+import { panelPolygon, sharedWallPanels } from '@/lib/sharedWalls'
 
 const PAPER = '#f4f1ea'
 const INK = '#292524'
@@ -937,6 +938,7 @@ export default function PlanView({
     }
   }
   const bar = scaleBarMetres(view.scale)
+  const wallPanels = useMemo(() => sharedWallPanels(rooms), [rooms])
   const selected = new Set(selectedIds)
   const drawing = tool === 'draw' || tool === 'partition' || isRouteTool(tool)
   const hint = tool === 'pipe'
@@ -988,6 +990,19 @@ export default function PlanView({
               strokeWidth={(line.major ? 1.1 : 0.7) / view.scale}
             />
           ))}
+          {wallPanels.map((panel) => {
+            const points = panelPolygon(panel)
+            return (
+              <polygon
+                key={panel.id}
+                points={points.map((point) => `${point.x},${point.z}`).join(' ')}
+                fill={panel.shared ? '#e7e5e4' : 'url(#panel-hatch)'}
+                stroke="#44403c"
+                strokeWidth={0.7 / view.scale}
+                style={{ pointerEvents: 'none' }}
+              />
+            )
+          })}
           {rooms.map((room) => {
             const outer = outlineOf(room)
             const inner = insetOrthogonal(outer, room.wallThickness) || outer
@@ -1003,30 +1018,20 @@ export default function PlanView({
               <g key={room.id}>
                 <path
                   data-room={room.id}
-                  d={isRefrigerated(room.type) ? `${pathOf(outer)} ${pathOf(inner)}` : pathOf(outer)}
-                  fillRule="evenodd"
-                  fill={isRefrigerated(room.type) ? 'url(#panel-hatch)' : (room.type === 'yard' ? '#d9e7c4' : '#f5f5f4')}
-                  stroke={active ? TEAL : isRefrigerated(room.type) ? '#44403c' : '#78716c'}
-                  strokeWidth={(active ? 1.8 : 1.15) / view.scale}
-                  strokeDasharray={isRefrigerated(room.type) ? undefined : `${0.18} ${0.12}`}
+                  d={pathOf(room.type === 'yard' ? outer : inner)}
+                  fill={room.type === 'yard' ? '#d9e7c4' : isRefrigerated(room.type) ? (room.color || '#3b82f6') : '#f5f5f4'}
+                  fillOpacity={room.type === 'yard' ? 0.85 : isRefrigerated(room.type) ? (active || hot ? 0.22 : 0.14) : 1}
+                  stroke={active ? TEAL : 'none'}
+                  strokeWidth={(active ? 1.6 : 0) / view.scale}
                 />
-                {isRefrigerated(room.type) && (
-                  <path
-                    data-room={room.id}
-                    d={pathOf(inner)}
-                    fill={room.color || '#3b82f6'}
-                    fillOpacity={active || hot ? 0.22 : 0.12}
-                    stroke="none"
-                  />
-                )}
                 {(room.equipment || []).map((eq) => {
                   if (eq.category === 'door') {
                     const symbol = doorSymbol(room, eq)
-                    const thickness = Math.max(room.wallThickness, 0.08)
+                    const thickness = Math.max(room.wallThickness, 0.08) * 2.2
                     const gapW = symbol.iz !== 0 ? symbol.width : thickness
                     const gapD = symbol.ix !== 0 ? symbol.width : thickness
-                    const gx = (symbol.x1 + symbol.x2) / 2 + symbol.ix * thickness / 2
-                    const gz = (symbol.z1 + symbol.z2) / 2 + symbol.iz * thickness / 2
+                    const gx = (symbol.x1 + symbol.x2) / 2
+                    const gz = (symbol.z1 + symbol.z2) / 2
                     return (
                       <g key={eq.id} data-eq={eq.id}>
                         <rect x={gx - gapW / 2} y={gz - gapD / 2} width={gapW} height={gapD} fill={PAPER} />

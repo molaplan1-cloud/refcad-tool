@@ -9,14 +9,15 @@ import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
 import { condenserFanSpec } from '@/lib/fanGuard'
 import { pipeSupports } from '@/lib/pipeTopology'
 import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
-import { dimensionCentroid, roomDimensionSpec, technicalTagPosition } from '@/lib/sceneDims'
+import { sharedWallPanels } from '@/lib/sharedWalls'
+import { buildingDimensionSpec, dimensionStyle, layoutRoomTags } from '@/lib/sceneDims'
 
 const SceneTheme = createContext(null)
 
 const PALETTES = {
   technical: {
     id: 'technical', flat: true, bg: '#f3f5f7', gridCell: '#e7ebf0', gridSection: '#d5dbe3',
-    wall: '#b7bec6', wallOpacity: 0.12, edge: '#1a1d21', floor: '#b7bec6', floorOpacity: 0.12,
+    wall: '#b7bec6', wallOpacity: 0.16, edge: '#1a1d21', floor: '#f7f8fa', floorOpacity: 1,
     ceilingOpacity: 0.1, equip: '#f4f7fb', hintBg: 'rgba(255,255,255,0.94)', hintFg: '#1f2937', hintBorder: '#cfd4dc',
     tick: '#1a1d21',
   },
@@ -28,7 +29,7 @@ const PALETTES = {
   },
   light: {
     id: 'light', bg: '#e7ebf0', gridCell: '#c5ccd6', gridSection: '#8b95a3',
-    wall: '#f7f9fb', wallOpacity: 0.4, edge: '#64748b', floor: '#d5d8dc', floorOpacity: 1,
+    wall: '#f7f9fb', wallOpacity: 0.4, edge: '#64748b', floor: '#f8fafc', floorOpacity: 1,
     ceilingOpacity: 0.2, equip: '#f8fafc', hintBg: 'rgba(255,255,255,0.92)', hintFg: '#44403c', hintBorder: '#e7e5e4',
     tick: '#64748b',
   },
@@ -55,145 +56,81 @@ function footprintGeometry(points, height) {
   return geom
 }
 
-function loopArea(points) {
-  let sum = 0
-  for (let i = 0; i < points.length; i += 1) {
-    const current = points[i]
-    const next = points[(i + 1) % points.length]
-    sum += current.x * next.y - next.x * current.y
-  }
-  return sum
+function doorBasis(room, eq) {
+  const wall = eq.wall || 's'
+  const w = Math.max(0.6, eq.width || 0.9)
+  const h = Math.max(1.8, eq.height || 2.1)
+  const cx = room.x + (eq.x || 0)
+  const cz = room.z + (eq.z || 0)
+  const alongX = wall === 'n' || wall === 's'
+  const flip = eq.hinge === 'right' || eq.swing === -1
+  const hinge = alongX
+    ? { x: cx + (flip ? w / 2 : -w / 2), z: cz }
+    : { x: cx, z: cz + (flip ? w / 2 : -w / 2) }
+  const tangent = alongX ? { x: flip ? -1 : 1, z: 0 } : { x: 0, z: flip ? -1 : 1 }
+  const inward = wall === 's' ? { x: 0, z: -1 } : wall === 'n' ? { x: 0, z: 1 } : wall === 'e' ? { x: -1, z: 0 } : { x: 1, z: 0 }
+  const basis = new THREE.Matrix4().makeBasis(
+    new THREE.Vector3(tangent.x, 0, tangent.z),
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(-inward.x, 0, -inward.z),
+  )
+  const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
+  const sliding = eq.slide === true || /liuku/i.test(eq.name || '') || w >= 1.15
+  const curtain = !!(eq.curtain || eq.stripCurtain || /lamelli|verho|liuska/i.test(eq.name || ''))
+  return { w, h, hinge, quaternion, sliding, curtain }
 }
 
-function shellGeometry(room) {
-  const outer = outlineOf(room).map((point) => ({ x: point.x, y: -point.z }))
-  const shape = new THREE.Shape()
-  shape.moveTo(outer[0].x, outer[0].y)
-  for (let i = 1; i < outer.length; i += 1) shape.lineTo(outer[i].x, outer[i].y)
-  shape.closePath()
-  const rawInner = insetOrthogonal(outlineOf(room), Math.max(0.04, room.wallThickness))
-  if (rawInner && rawInner.length >= 3) {
-    let inner = rawInner.map((point) => ({ x: point.x, y: -point.z }))
-    if (Math.sign(loopArea(inner)) === Math.sign(loopArea(outer))) inner = [...inner].reverse()
-    const hole = new THREE.Path()
-    hole.moveTo(inner[0].x, inner[0].y)
-    for (let i = 1; i < inner.length; i += 1) hole.lineTo(inner[i].x, inner[i].y)
-    hole.closePath()
-    shape.holes.push(hole)
-  }
-  const geom = new THREE.ExtrudeGeometry(shape, { depth: room.height, bevelEnabled: false })
-  geom.rotateX(-Math.PI / 2)
-  geom.computeVertexNormals()
-  return geom
-}
-
-function seamList(room) {
-  const pts = outlineOf(room)
-  const thick = Math.max(0.08, room.wallThickness || 0.1)
-  const seams = []
-  const pitch = 1.15
-  pts.forEach((a, index) => {
-    const b = pts[(index + 1) % pts.length]
-    const dx = b.x - a.x
-    const dz = b.z - a.z
-    const len = Math.hypot(dx, dz)
-    if (len < 0.5) return
-    const count = Math.max(1, Math.round(len / pitch))
-    let px = -dz / len
-    let pz = dx / len
-    const mx = (a.x + b.x) / 2
-    const mz = (a.z + b.z) / 2
-    const away = (mx + px - room.x) * (mx - room.x) + (mz + pz - room.z) * (mz - room.z)
-    if (away < 0) {
-      px = -px
-      pz = -pz
-    }
-    for (let step = 1; step < count; step += 1) {
-      const t = step / count
-      seams.push({
-        x: a.x + dx * t + px * (thick / 2 + 0.008),
-        z: a.z + dz * t + pz * (thick / 2 + 0.008),
-        yaw: Math.atan2(px, pz),
-        depth: Math.max(0.05, thick * 0.55),
-      })
-    }
-  })
-  return seams
+function DoorPart({ part, args, position, rotation, children }) {
+  return (
+    <mesh position={position} rotation={rotation} userData={{ part }} castShadow>
+      {children || <boxGeometry args={args} />}
+      <meshStandardMaterial color={part === 'frame' ? '#3a3f46' : part === 'handle' ? '#1c1917' : part === 'track' ? '#2a2e33' : part === 'curtain' ? '#d9d4cc' : '#f7f4ee'} roughness={0.45} metalness={part === 'handle' ? 0.6 : 0.08} />
+    </mesh>
+  )
 }
 
 function DoorMesh({ room, eq, onSelect, onContext }) {
-  const wall = eq.wall || 's'
-  const yaw = { s: 0, n: Math.PI, e: Math.PI / 2, w: -Math.PI / 2 }[wall] ?? 0
-  const w = Math.max(0.6, eq.width || 0.9)
-  const h = Math.max(1.8, eq.height || 2.1)
+  const { w, h, hinge, quaternion, sliding, curtain } = useMemo(() => doorBasis(room, eq), [room, eq])
   const doors = (room.equipment || []).filter((item) => item.category === 'door')
   const number = Math.max(1, doors.findIndex((item) => item.id === eq.id) + 1)
-  const sliding = (eq.name || '').toLowerCase().includes('liuku') || w >= 1.15
-  const jamb = 0.055
-  const frameColor = '#3f3f46'
-  const leaf = '#f7f7f4'
+  const jamb = 0.05
+  const strips = Math.max(6, Math.round(w / 0.12))
   return (
     <group
-      position={[room.x + eq.x, 0, room.z + eq.z]}
-      rotation={[0, yaw, 0]}
+      position={[hinge.x, 0, hinge.z]}
+      quaternion={quaternion}
+      userData={{ role: 'door' }}
       onClick={(event) => {
         event.stopPropagation()
         onSelect(eq.id)
       }}
       onContextMenu={(event) => openMenu(event, onContext, eq.id, 'equipment')}
     >
-      {[-1, 1].map((side) => (
-        <mesh key={`jamb-${side}`} position={[side * (w / 2 + jamb / 2), h / 2, 0]} castShadow>
-          <boxGeometry args={[jamb, h + 0.08, 0.12]} />
-          <meshStandardMaterial color={frameColor} roughness={0.42} metalness={0.5} />
+      <DoorPart part="frame" args={[jamb, h + 0.06, 0.1]} position={[-jamb / 2, h / 2, 0]} />
+      <DoorPart part="frame" args={[jamb, h + 0.06, 0.1]} position={[w + jamb / 2, h / 2, 0]} />
+      <DoorPart part="frame" args={[w + jamb * 2, 0.06, 0.1]} position={[w / 2, h + 0.02, 0]} />
+      {sliding ? (
+        <DoorPart part="track" args={[w * 1.7, 0.04, 0.06]} position={[w * 0.72, h + 0.08, 0]} />
+      ) : [0.18, 0.5, 0.82].map((t) => (
+        <mesh key={`hinge-${t}`} position={[0.01, h * t, 0]} rotation={[Math.PI / 2, 0, 0]} userData={{ part: 'handle' }} castShadow>
+          <cylinderGeometry args={[0.016, 0.016, 0.1, 8]} />
+          <meshStandardMaterial color="#1c1917" metalness={0.6} roughness={0.3} />
         </mesh>
       ))}
-      <mesh position={[0, h + 0.025, 0]} castShadow>
-        <boxGeometry args={[w + jamb * 2, 0.07, 0.12]} />
-        <meshStandardMaterial color={frameColor} roughness={0.42} metalness={0.5} />
-      </mesh>
-      {sliding && (
-        <mesh position={[0, h + 0.09, 0]} castShadow>
-          <boxGeometry args={[w + 0.42, 0.045, 0.07]} />
-          <meshStandardMaterial color="#27272a" roughness={0.35} metalness={0.62} />
-        </mesh>
-      )}
-      <mesh position={[0, h / 2, 0]} castShadow>
-        <boxGeometry args={[w - 0.02, h - 0.02, 0.08]} />
-        <meshStandardMaterial color={leaf} roughness={0.4} metalness={0.06} />
-      </mesh>
-      <mesh position={[0, h / 2, 0]}>
-        <boxGeometry args={[w - 0.1, h - 0.12, 0.086]} />
-        <meshStandardMaterial color="#e7e5e4" roughness={0.62} metalness={0.02} />
-      </mesh>
-      {(sliding ? [] : [0.16, 0.5, 0.84]).map((t) => (
-        <mesh key={`hinge-${t}`} position={[-w / 2 + 0.01, h * t, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-          <cylinderGeometry args={[0.018, 0.018, 0.11, 10]} />
-          <meshStandardMaterial color="#18181b" metalness={0.62} roughness={0.28} />
-        </mesh>
+      <group rotation={[0, sliding ? 0 : -0.42, 0]} position={sliding ? [w * 0.62, 0, 0.03] : [0, 0, 0]}>
+        <DoorPart part="leaf" args={[w - 0.04, h - 0.08, 0.04]} position={[w / 2, h / 2, 0.02]} />
+        <DoorPart part="handle" args={[0.025, 0.22, 0.035]} position={[w * 0.78, h * 0.48, 0.055]} />
+        <DoorPart part="handle" args={[0.1, 0.022, 0.03]} position={[w * 0.78, h * 0.58, 0.05]} />
+      </group>
+      {curtain && Array.from({ length: strips }, (_, index) => (
+        <DoorPart key={`strip-${index}`} part="curtain" args={[w / strips * 0.72, h - 0.12, 0.008]} position={[(index + 0.5) * (w / strips), h / 2, 0.012]} />
       ))}
-      <mesh position={[sliding ? w * 0.28 : w * 0.34, h * 0.48, 0.07]} castShadow>
-        <boxGeometry args={[0.028, 0.26, 0.04]} />
-        <meshStandardMaterial color="#18181b" roughness={0.28} metalness={0.66} />
-      </mesh>
-      <mesh position={[sliding ? w * 0.28 : w * 0.34, h * 0.59, 0.065]}>
-        <boxGeometry args={[0.09, 0.026, 0.028]} />
-        <meshStandardMaterial color="#18181b" roughness={0.28} metalness={0.66} />
-      </mesh>
-      <mesh position={[0, 0.028, 0]} castShadow>
-        <boxGeometry args={[w + 0.18, 0.04, 0.16]} />
-        <meshStandardMaterial color="#d6d3d1" metalness={0.42} roughness={0.34} />
-      </mesh>
-      <mesh position={[0, 0.052, 0]}>
-        <boxGeometry args={[w - 0.04, 0.012, 0.045]} />
-        <meshStandardMaterial color="#c2410c" emissive="#9a3412" emissiveIntensity={0.4} roughness={0.42} />
-      </mesh>
-      <DoorNumber room={room} number={number} h={h} />
+      <DoorNumber room={room} number={number} h={h} w={w} />
     </group>
   )
 }
 
-function DoorNumber({ room, number, h }) {
+function DoorNumber({ room, number, h, w = 0 }) {
   const palette = usePalette()
   const camera = useThree((state) => state.camera)
   const outline = useMemo(() => outlineOf(room), [room])
@@ -204,7 +141,7 @@ function DoorNumber({ room, number, h }) {
   })
   if (!inside) return null
   return (
-    <Html position={[0, h * 0.58, 0.1]} center sprite zIndexRange={[12, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
+    <Html position={[w / 2, h * 0.58, 0.12]} center sprite zIndexRange={[12, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
       <div style={palette.flat
         ? { color: '#1a1d21', fontWeight: 700, fontSize: 15, fontFamily: '"Liberation Sans", Arial, sans-serif' }
         : { color: palette.id === 'dark' ? '#f8fafc' : '#1c1917', fontWeight: 700, fontSize: 16, textShadow: '0 1px 2px rgba(0,0,0,0.45)' }}>{number}</div>
@@ -835,16 +772,6 @@ function BoxEquipment({ room, eq, onSelect, onContext, color }) {
   )
 }
 
-function tagPosition(room, technical, centroid) {
-  if (technical) return technicalTagPosition(room, centroid)
-  const pts = outlineOf(room)
-  let best = pts[0]
-  pts.forEach((point) => {
-    if (point.x + point.z < best.x + best.z) best = point
-  })
-  return [best.x, (room.height || 3) + 0.35, best.z]
-}
-
 function FloorTicks({ room, color }) {
   const geom = useMemo(() => {
     const pts = outlineOf(room)
@@ -884,24 +811,6 @@ function FloorTicks({ room, color }) {
   )
 }
 
-function PanelJoints({ room, color }) {
-  const geom = useMemo(() => {
-    const positions = []
-    seamList(room).forEach((seam) => {
-      positions.push(seam.x, 0.04, seam.z, seam.x, (room.height || 3) - 0.04, seam.z)
-    })
-    const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    return geometry
-  }, [room])
-  if (!geom.getAttribute('position')?.count) return null
-  return (
-    <lineSegments geometry={geom} userData={{ role: 'skip' }}>
-      <lineBasicMaterial color={color} />
-    </lineSegments>
-  )
-}
-
 function PerimeterTrim({ room, y, size, color, inset }) {
   const bars = useMemo(() => {
     const pts = insetOrthogonal(outlineOf(room), Math.max(0.04, room.wallThickness || 0.1) + (inset || 0)) || []
@@ -922,64 +831,143 @@ function PerimeterTrim({ room, y, size, color, inset }) {
   ))
 }
 
-function RoomMesh({ room, selected, onSelect, onContext, centroid }) {
+function RoomTag({ room, tag }) {
   const palette = usePalette()
-  const shell = useMemo(() => shellGeometry(room), [room])
+  const leader = useMemo(() => {
+    if (!tag?.leader) return null
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+      tag.ax, (room.height || 3) + 0.05, tag.az,
+      tag.x, tag.y - 0.02, tag.z,
+    ], 3))
+    return geometry
+  }, [tag, room.height])
+  useEffect(() => () => leader?.dispose(), [leader])
+  if (!tag) return null
+  return (
+    <group>
+      {leader && (
+        <lineSegments geometry={leader} userData={{ role: 'skip' }}>
+          <lineBasicMaterial color={palette.edge} toneMapped={false} />
+        </lineSegments>
+      )}
+      <Html position={[tag.x, tag.y, tag.z]} center zIndexRange={[20, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
+        {palette.flat ? (
+          <div style={{ background: '#ffffff', color: '#1a1d21', border: '1px solid #1a1d21', fontSize: 12, fontWeight: 650, fontFamily: '"Liberation Sans", Arial, sans-serif', letterSpacing: '0.01em', padding: '2px 7px', lineHeight: 1.3 }}>{tag.name}</div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'stretch', background: palette.id === 'dark' ? '#14161a' : '#1b1e22', color: '#f4f6f8', border: palette.id === 'dark' ? '1px solid #f4f7fb' : 'none', borderRadius: 8, overflow: 'hidden', fontSize: 12, fontWeight: 650, boxShadow: '0 6px 16px rgba(0,0,0,0.28)' }}>
+            <span style={{ width: 4, background: '#3b82f6' }} />
+            <span style={{ padding: '4px 10px' }}>{tag.name}</span>
+          </div>
+        )}
+      </Html>
+    </group>
+  )
+}
+
+function WallAssembly({ rooms, onSelect, onContext }) {
+  const palette = usePalette()
+  const panels = useMemo(() => sharedWallPanels(rooms), [rooms])
+  const seams = useMemo(() => {
+    const positions = []
+    panels.forEach((panel) => {
+      const faces = panel.shared ? [panel.c0, panel.c1] : [Math.abs(panel.c0 - panel.plane) < Math.abs(panel.c1 - panel.plane) ? panel.c0 : panel.c1]
+      panel.pieces.forEach((piece) => {
+        if (piece.y1 - piece.y0 < 0.35) return
+        const length = piece.b - piece.a
+        const count = Math.max(1, Math.round(length / 1.15))
+        for (let step = 1; step < count; step += 1) {
+          const along = piece.a + (length * step) / count
+          faces.forEach((face) => {
+            const x = panel.axis === 'x' ? along : face
+            const z = panel.axis === 'x' ? face : along
+            const lift = panel.shared ? 0.012 : 0.008
+            const ox = panel.axis === 'x' ? 0 : (face === panel.c0 ? -lift : lift)
+            const oz = panel.axis === 'x' ? (face === panel.c0 ? -lift : lift) : 0
+            positions.push(x + ox, piece.y0 + 0.05, z + oz, x + ox, piece.y1 - 0.05, z + oz)
+          })
+        }
+      })
+    })
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    return geometry
+  }, [panels])
+  useEffect(() => () => seams.dispose(), [seams])
+  return (
+    <group>
+      {panels.flatMap((panel) => panel.pieces.map((piece, index) => {
+        const length = piece.b - piece.a
+        const height = piece.y1 - piece.y0
+        const thick = Math.max(0.04, panel.c1 - panel.c0)
+        const x = panel.axis === 'x' ? (piece.a + piece.b) / 2 : (panel.c0 + panel.c1) / 2
+        const z = panel.axis === 'x' ? (panel.c0 + panel.c1) / 2 : (piece.a + piece.b) / 2
+        const y = (piece.y0 + piece.y1) / 2
+        const args = panel.axis === 'x' ? [length, height, thick] : [thick, height, length]
+        return (
+          <mesh
+            key={`${panel.id}-${index}`}
+            position={[x, y, z]}
+            userData={{ role: 'panel' }}
+            castShadow
+            receiveShadow
+            onClick={(event) => {
+              event.stopPropagation()
+              onSelect(panel.roomIds[0])
+            }}
+            onContextMenu={(event) => openMenu(event, onContext, panel.roomIds[0], 'room')}
+          >
+            <boxGeometry args={args} />
+            <meshStandardMaterial color={palette.wall} roughness={0.78} metalness={0.02} />
+          </mesh>
+        )
+      }))}
+      {seams.getAttribute('position')?.count ? (
+        <lineSegments geometry={seams} userData={{ role: 'skip' }}>
+          <lineBasicMaterial color={palette.flat ? '#aeb6c0' : palette.edge} transparent opacity={palette.flat ? 0.45 : 0.35} toneMapped={false} />
+        </lineSegments>
+      ) : null}
+    </group>
+  )
+}
+
+function RoomMesh({ room, onSelect, onContext, tag }) {
+  const palette = usePalette()
   const floor = useMemo(() => {
     const inner = insetOrthogonal(outlineOf(room), Math.max(0.04, room.wallThickness)) || outlineOf(room)
-    return footprintGeometry(inner, 0.05)
+    return footprintGeometry(inner, 0.04)
   }, [room])
   const ceiling = useMemo(() => {
     const inner = insetOrthogonal(outlineOf(room), Math.max(0.04, room.wallThickness)) || outlineOf(room)
-    return footprintGeometry(inner, 0.025)
+    return footprintGeometry(inner, 0.02)
   }, [room])
   return (
     <group>
       <mesh
-        geometry={shell}
-        userData={{ role: 'panel' }}
-        castShadow
+        geometry={floor}
+        position={[0, 0.02, 0]}
         receiveShadow
+        userData={{ role: 'floor' }}
         onClick={(event) => {
           event.stopPropagation()
           onSelect(room.id)
         }}
         onContextMenu={(event) => openMenu(event, onContext, room.id, 'room')}
       >
-        <meshStandardMaterial color={palette.wall} roughness={0.78} metalness={0.02} side={THREE.FrontSide} />
-        {palette.flat ? null : <Edges threshold={12} color={selected ? '#ffffff' : palette.edge} />}
+        <meshStandardMaterial color={palette.floor} roughness={0.94} metalness={0} />
       </mesh>
-      <mesh geometry={floor} position={[0, 0.02, 0]} receiveShadow userData={{ role: 'panel' }}>
-        <meshStandardMaterial color={palette.floor} roughness={0.94} metalness={0.02} />
-      </mesh>
-      {palette.flat ? <PanelJoints room={room} color={palette.edge} /> : (
+      {palette.flat ? null : (
         <>
-          <PerimeterTrim room={room} y={0.055} size={0.018} color={isRefrigerated(room.type) ? (room.color || '#64748b') : '#94a3b8'} inset={0.015} />
-          <PerimeterTrim room={room} y={0.09} size={0.045} color={palette.id === 'dark' ? '#8b95a1' : '#cbd5e1'} inset={0.0} />
-          <PerimeterTrim room={room} y={room.height - 0.06} size={0.04} color={palette.id === 'dark' ? '#8b95a1' : '#cbd5e1'} inset={0.0} />
-          {seamList(room).map((seam, index) => (
-            <mesh key={`seam-${index}`} position={[seam.x, room.height / 2, seam.z]} rotation={[0, seam.yaw, 0]}>
-              <boxGeometry args={[0.012, room.height * 0.96, 0.01]} />
-              <meshStandardMaterial color={palette.id === 'dark' ? '#d5dde6' : '#64748b'} roughness={0.5} />
-            </mesh>
-          ))}
+          <PerimeterTrim room={room} y={0.055} size={0.016} color={isRefrigerated(room.type) ? (room.color || '#64748b') : '#94a3b8'} inset={0.015} />
+          <PerimeterTrim room={room} y={room.height - 0.05} size={0.028} color={palette.id === 'dark' ? '#8b95a1' : '#cbd5e1'} inset={0.0} />
           <FloorTicks room={room} color={palette.tick} />
         </>
       )}
-      <mesh geometry={ceiling} position={[0, room.height - 0.04, 0]} userData={{ role: 'panel' }}>
+      <mesh geometry={ceiling} position={[0, room.height - 0.03, 0]} userData={{ role: 'panel' }}>
         <meshStandardMaterial color={palette.wall} transparent opacity={palette.flat ? palette.wallOpacity : palette.ceilingOpacity} roughness={0.08} depthWrite={false} side={THREE.DoubleSide} />
         {palette.flat ? null : <Edges threshold={20} color={palette.edge} />}
       </mesh>
-      <Html position={tagPosition(room, palette.flat, centroid)} center zIndexRange={[20, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
-        {palette.flat ? (
-          <div style={{ background: '#ffffff', color: '#1a1d21', border: '1px solid #1a1d21', fontSize: 12, fontWeight: 650, fontFamily: '"Liberation Sans", Arial, sans-serif', letterSpacing: '0.01em', padding: '2px 7px', lineHeight: 1.3 }}>{room.name || room.label || 'Huone'}</div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'stretch', background: '#1b1e22', color: '#f4f6f8', borderRadius: 8, overflow: 'hidden', fontSize: 12, fontWeight: 650, boxShadow: '0 6px 16px rgba(0,0,0,0.28)' }}>
-            <span style={{ width: 4, background: '#3b82f6' }} />
-            <span style={{ padding: '4px 10px' }}>{room.name || room.label || 'Huone'}</span>
-          </div>
-        )}
-      </Html>
+      <RoomTag room={room} tag={tag} />
       {(room.equipment || []).map((eq) => {
         if (eq.category === 'door') return <DoorMesh key={eq.id} room={room} eq={eq} onSelect={onSelect} onContext={onContext} />
         if (eq.category === 'evaporator') return <EvaporatorMesh key={eq.id} room={room} eq={eq} onSelect={onSelect} onContext={onContext} />
@@ -1403,22 +1391,30 @@ function roleOf(obj) {
   return 'equip'
 }
 
-function technicalMaterial(role, source, palette) {
+function technicalMaterial(role, mesh, palette) {
   if (role === 'pipe') {
-    const color = source?.color ? source.color.clone() : new THREE.Color('#64748b')
-    return new THREE.MeshLambertMaterial({ color, flatShading: true })
+    const color = mesh.material?.color ? mesh.material.color.clone() : new THREE.Color('#64748b')
+    return new THREE.MeshLambertMaterial({ color })
+  }
+  if (role === 'floor') {
+    return new THREE.MeshLambertMaterial({ color: palette.floor })
   }
   if (role === 'panel') {
     return new THREE.MeshLambertMaterial({
       color: palette.wall,
-      flatShading: true,
       transparent: true,
       opacity: palette.wallOpacity,
       depthWrite: false,
       side: THREE.DoubleSide,
     })
   }
-  return new THREE.MeshLambertMaterial({ color: palette.equip, flatShading: true })
+  if (role === 'door') {
+    const part = mesh.userData?.part || 'leaf'
+    const colors = { frame: '#3a3f46', leaf: '#f7f4ee', handle: '#1c1917', curtain: '#d9d4cc', track: '#2a2e33' }
+    return new THREE.MeshLambertMaterial({ color: colors[part] || colors.leaf, side: THREE.DoubleSide })
+  }
+  const color = mesh.material?.color ? mesh.material.color.clone() : new THREE.Color(palette.equip)
+  return new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide })
 }
 
 function StylePass() {
@@ -1428,8 +1424,8 @@ function StylePass() {
   const edgeMat = useRef(null)
   useEffect(() => () => {
     mounted.current.forEach((rec) => {
-      rec.lines.removeFromParent()
-      rec.lines.geometry.dispose()
+      rec.lines?.removeFromParent()
+      rec.lines?.geometry.dispose()
       rec.mat.dispose()
     })
     mounted.current.clear()
@@ -1438,9 +1434,10 @@ function StylePass() {
   }, [])
   useEffect(() => {
     if (!palette.flat) {
-      mounted.current.forEach((rec) => {
-        rec.lines.removeFromParent()
-        rec.lines.geometry.dispose()
+      mounted.current.forEach((rec, obj) => {
+        if (rec.original && obj.material === rec.mat) obj.material = rec.original
+        rec.lines?.removeFromParent()
+        rec.lines?.geometry.dispose()
         rec.mat.dispose()
       })
       mounted.current.clear()
@@ -1449,7 +1446,7 @@ function StylePass() {
   }, [palette.flat, palette.edge])
   useFrame(() => {
     if (!palette.flat) return
-    if (!edgeMat.current) edgeMat.current = new THREE.LineBasicMaterial({ color: palette.edge })
+    if (!edgeMat.current) edgeMat.current = new THREE.LineBasicMaterial({ color: palette.edge, toneMapped: false })
     const seen = new Set()
     scene.traverse((obj) => {
       if (!obj.isMesh || obj.isInstancedMesh) return
@@ -1459,11 +1456,11 @@ function StylePass() {
       let rec = mounted.current.get(obj)
       if (!rec || rec.role !== role) {
         if (rec) {
-          rec.lines.removeFromParent()
-          rec.lines.geometry.dispose()
+          rec.lines?.removeFromParent()
+          rec.lines?.geometry.dispose()
           rec.mat.dispose()
         }
-        rec = { role, mat: technicalMaterial(role, obj.material, palette), lines: null, geom: null }
+        rec = { role, mat: technicalMaterial(role, obj, palette), original: obj.material, lines: null, geom: null }
         mounted.current.set(obj, rec)
       }
       if (obj.material !== rec.mat) {
@@ -1472,8 +1469,16 @@ function StylePass() {
       }
       obj.castShadow = false
       obj.receiveShadow = false
+      if (role === 'floor') {
+        if (rec.lines) {
+          rec.lines.removeFromParent()
+          rec.lines.geometry.dispose()
+          rec.lines = null
+        }
+        return
+      }
       if (role === 'panel') obj.renderOrder = 2
-      const threshold = role === 'pipe' ? 26 : role === 'panel' ? 18 : 24
+      const threshold = role === 'pipe' ? 28 : role === 'panel' ? 24 : role === 'door' ? 14 : 20
       if (!rec.lines || rec.geom !== obj.geometry || rec.threshold !== threshold) {
         if (rec.lines) {
           rec.lines.removeFromParent()
@@ -1498,8 +1503,8 @@ function StylePass() {
     })
     mounted.current.forEach((rec, obj) => {
       if (seen.has(obj)) return
-      rec.lines.removeFromParent()
-      rec.lines.geometry.dispose()
+      rec.lines?.removeFromParent()
+      rec.lines?.geometry.dispose()
       rec.mat.dispose()
       mounted.current.delete(obj)
     })
@@ -1507,46 +1512,37 @@ function StylePass() {
   return null
 }
 
-function cadTagStyle(color) {
-  return {
-    background: '#ffffff',
-    color,
-    border: `1px solid ${color}`,
-    fontSize: 11,
-    fontWeight: 650,
-    fontFamily: '"Liberation Sans", Arial, sans-serif',
-    padding: '1px 5px',
-    lineHeight: 1.25,
-    letterSpacing: '0.02em',
-    whiteSpace: 'nowrap',
-  }
-}
-
-function RoomDimensions({ rooms, color }) {
-  const specs = useMemo(() => {
-    const centroid = dimensionCentroid(rooms)
-    const list = (rooms || []).filter((room) => room && room.type !== 'yard')
-    if (!list.length) return []
-    return list.map((room) => roomDimensionSpec(room, centroid))
-  }, [rooms])
+function RoomDimensions({ rooms, theme }) {
+  const ink = dimensionStyle(theme)
+  const spec = useMemo(() => buildingDimensionSpec(rooms), [rooms])
   const geom = useMemo(() => {
-    const positions = specs.flatMap((spec) => spec.segments)
     const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(spec.segments, 3))
     return geometry
-  }, [specs])
+  }, [spec])
   useEffect(() => () => geom.dispose(), [geom])
-  if (!specs.length) return null
+  if (!spec.labels.length) return null
   return (
     <group userData={{ role: 'skip' }}>
-      <lineSegments geometry={geom}>
-        <lineBasicMaterial color={color} />
+      <lineSegments geometry={geom} renderOrder={8}>
+        <lineBasicMaterial color={ink.line} toneMapped={false} depthTest={false} />
       </lineSegments>
-      {specs.flatMap((spec) => spec.labels.map((label) => (
+      {spec.labels.map((label) => (
         <Html key={label.key} position={[label.x, label.y, label.z]} center sprite zIndexRange={[18, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
-          <span style={cadTagStyle(color)}>{label.text}</span>
+          <span style={{
+            background: ink.chipBg,
+            color: ink.chipFg,
+            border: `1px solid ${ink.chipBorder}`,
+            fontSize: 11,
+            fontWeight: 650,
+            fontFamily: '"Liberation Sans", Arial, sans-serif',
+            padding: '1px 5px',
+            lineHeight: 1.25,
+            letterSpacing: '0.02em',
+            whiteSpace: 'nowrap',
+          }}>{label.text}</span>
         </Html>
-      )))}
+      ))}
     </group>
   )
 }
@@ -1609,6 +1605,7 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
   const rigRef = useRef(null)
   const palette = PALETTES[theme] || PALETTES.technical
   const technical = palette.flat === true
+  const tags = useMemo(() => layoutRoomTags(rooms), [rooms])
   const roundBtn = {
     width: 28, height: 28, borderRadius: 14, border: `1px solid ${palette.hintBorder}`,
     background: palette.hintBg, color: palette.hintFg, cursor: 'pointer',
@@ -1659,24 +1656,29 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
               side={THREE.DoubleSide}
             />
           </group>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} userData={{ role: 'skip' }}>
+            <planeGeometry args={[120, 120]} />
+            <meshBasicMaterial color={technical ? '#e8eef3' : theme === 'dark' ? '#23262c' : '#d9e0e8'} />
+          </mesh>
+          <WallAssembly rooms={rooms} onSelect={onSelect} onContext={onContext} />
           {rooms.map((room) => (
             room.type === 'yard' ? (
               <mesh
                 key={room.id}
-                userData={{ role: 'panel' }}
-                position={[room.x, 0.03, room.z]}
+                userData={{ role: 'floor' }}
+                position={[room.x, 0.015, room.z]}
                 onClick={(event) => { event.stopPropagation(); onSelect(room.id) }}
                 onContextMenu={(event) => openMenu(event, onContext, room.id, 'room')}
               >
-                <boxGeometry args={[room.width, 0.04, room.depth]} />
-                <meshStandardMaterial color={technical ? palette.wall : theme === 'dark' ? '#2a3328' : '#d9e7c4'} transparent opacity={technical ? palette.wallOpacity : 0.45} />
+                <boxGeometry args={[room.width, 0.03, room.depth]} />
+                <meshStandardMaterial color={technical ? '#e7efe0' : theme === 'dark' ? '#2a3328' : '#d9e7c4'} />
               </mesh>
             ) : (
-              <RoomMesh key={room.id} room={room} centroid={dimensionCentroid(rooms)} selected={room.id === selectedId} onSelect={onSelect} onContext={onContext} />
+              <RoomMesh key={room.id} room={room} tag={tags.find((item) => item.id === room.id)} selected={room.id === selectedId} onSelect={onSelect} onContext={onContext} />
             )
           ))}
           <PipeRuns rooms={rooms} pipes={pipes} />
-          {dims ? <RoomDimensions rooms={rooms} color={palette.edge} /> : null}
+          {dims ? <RoomDimensions rooms={rooms} theme={palette.id} /> : null}
           <OrbitControls
             makeDefault
             enableDamping

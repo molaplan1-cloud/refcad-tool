@@ -29,6 +29,7 @@ import {
 } from '@/lib/placement'
 import { applyOutline, bboxOf, clampGroupTranslation, cleanOrthogonal, isRectangleOutline, scaleOutline, selfIntersects, translateOutline } from '@/lib/cadDraw'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
+import { panelSchedule } from '@/lib/sharedWalls'
 import { buildDxf, dxfFilename } from '@/lib/dxf'
 import { buildPdf, pdfFilename } from '@/lib/pdfExport'
 import SchematicView from './SchematicView'
@@ -266,6 +267,7 @@ export default function DesignerApp({
   const snapFlags = { grid: snapOn, endpoint: true, midpoint: true, wall: true, ortho: true }
 
   const result = useMemo(() => calculateProject(rooms), [rooms])
+  const panels = useMemo(() => panelSchedule(rooms), [rooms])
   const placing = placingId ? getTemplate(placingId) : null
 
   const selectedRoom = rooms.find((room) => room.id === selectedId)
@@ -990,6 +992,13 @@ export default function DesignerApp({
           {roomsOpen && (
             <div style={{ padding: '4px 8px 8px' }}>
               {rooms.length === 0 && <div style={{ fontSize: 12, color: '#78716c', margin: '4px 4px 8px', lineHeight: 1.4 }}>Piirrä huone tai avaa esimerkki.</div>}
+              {panels.count > 0 && (
+                <div data-testid="panel-schedule" style={{ fontSize: 11, color: '#44403c', margin: '4px 4px 8px', lineHeight: 1.45 }}>
+                  <strong>Paneelit</strong>
+                  <div>{panels.count} kpl · {panels.net.toFixed(1)} m²</div>
+                  <div>{panels.shared} yhteistä seinää, laskettu kerran</div>
+                </div>
+              )}
               {rooms.map((room) => (
                 <button
                   key={room.id}
