@@ -343,6 +343,12 @@ function NodeSymbol({ node }) {
     boiler: ['V', 18],
     washer: ['PK', 24],
     dishwasher: ['AP', 24],
+    fridge: ['JK', 22],
+    dryer: ['KR', 22],
+    microwave: ['M', 18],
+    tv: ['TV', 22],
+    towel: ['PK', 22],
+    spa: ['PA', 22],
   }[node.kind]
   if (badge) {
     const [label, width] = badge
