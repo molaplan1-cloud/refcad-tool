@@ -252,7 +252,19 @@ function selected(selectedHit, collection, id) {
 }
 
 export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit, preview }) {
-  const yard = ensureYard(plan)
+  const source = ensureYard(plan)
+  const keep = (list) => (list || []).filter((item) => !item.hidden)
+  const yard = {
+    ...source,
+    terraces: keep(source.terraces),
+    paths: keep(source.paths),
+    fences: keep(source.fences),
+    plants: keep(source.plants),
+    beds: keep(source.beds),
+    objects: keep(source.objects),
+    buildings: keep(source.buildings),
+    plot: source.plot?.hidden ? null : source.plot,
+  }
   const metrics = plotMetrics(plan)
   const setbacks = setbackList(plan)
   const sw = 1.15

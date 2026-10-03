@@ -509,14 +509,34 @@ function RoofMesh({ plan, mode, selected, hovered }) {
   )
 }
 
-function FixtureBody({ type, w, d }) {
-  const box = (size, position, color) => (
+function FixtureBody({ body, w, d, h = 0.8 }) {
+  const box = (size, position, color, opacity = 1) => (
     <mesh position={position}>
       <boxGeometry args={size} />
-      <meshLambertMaterial color={color} />
-      <Edges threshold={18} color="#334155" />
+      <meshLambertMaterial color={color} transparent={opacity < 1} opacity={opacity} depthWrite={opacity >= 1} />
+      {opacity >= 1 && <Edges threshold={18} color="#334155" />}
     </mesh>
   )
+  const cyl = (r, height, position, color) => (
+    <mesh position={position}>
+      <cylinderGeometry args={[r, r, height, 20]} />
+      <meshLambertMaterial color={color} />
+    </mesh>
+  )
+  const alias = {
+    hob: 'stove',
+    'base-cab': 'cabinet',
+    appliance: 'dishwasher',
+    vanity: 'basin',
+    desk: 'table',
+    coffee: 'table',
+    night: 'cabinet',
+    dresser: 'cabinet',
+    low: 'cabinet',
+    freezer: 'fridge',
+    washer: 'dishwasher',
+  }
+  const type = alias[body] || body || 'box'
   if (type === 'bed') {
     return (
       <group>
@@ -590,8 +610,7 @@ function FixtureBody({ type, w, d }) {
       </group>
     )
   }
-  if (type === 'fridge') return box([w, 1.8, d], [0, 0.9, 0], '#f8fafc')
-  if (type === 'wardrobe') return box([w, 2.1, d], [0, 1.05, 0], '#e7e5e4')
+  if (type === 'fridge') return box([w, Math.max(h, 1.7), d], [0, Math.max(h, 1.7) / 2, 0], '#f8fafc')
   if (type === 'dishwasher') return box([w, 0.86, d], [0, 0.43, 0], '#e2e8f0')
   if (type === 'cabinet' || type === 'island') {
     return (
@@ -631,29 +650,133 @@ function FixtureBody({ type, w, d }) {
       </group>
     )
   }
-  if (type === 'shower') {
+  if (type === 'shower' || type === 'shower-cabin' || type === 'shower-corner' || type === 'shower-walk' || type === 'shower-screen') {
     return (
       <group>
         {box([w, 0.08, d], [0, 0.04, 0], '#e2e8f0')}
-        <mesh position={[0, 1.05, 0]}>
-          <boxGeometry args={[w, 1.9, d]} />
-          <meshLambertMaterial color="#bae6fd" transparent opacity={0.28} depthWrite={false} />
-        </mesh>
+        {box([w * 0.92, h || 1.9, 0.02], [0, (h || 1.9) / 2, -d * 0.46], '#e0f2fe', 0.35)}
+        {type !== 'shower-screen' && box([0.02, h || 1.9, d * 0.9], [-w * 0.46, (h || 1.9) / 2, 0], '#e0f2fe', 0.35)}
+        {cyl(0.03, 0.16, [w * 0.2, 1.85, -d * 0.15], '#94a3b8')}
       </group>
     )
   }
-  return box([w, 0.8, d], [0, 0.4, 0], '#f5f5f4')
+  if (type === 'sauna-bench' || type === 'sauna-bench-3') {
+    return (
+      <group>
+        {box([w, 0.04, d * 0.42], [0, 0.45, d * 0.2], '#d6c4a8')}
+        {box([w, 0.04, d * 0.42], [0, 0.9, -d * 0.18], '#c4a882')}
+        {type === 'sauna-bench-3' && box([w, 0.04, d * 0.28], [0, 1.15, -d * 0.32], '#b08968')}
+        {box([0.06, 0.9, 0.06], [-w * 0.42, 0.45, 0], '#a89070')}
+        {box([0.06, 0.9, 0.06], [w * 0.42, 0.45, 0], '#a89070')}
+      </group>
+    )
+  }
+  if (type === 'wardrobe' || type === 'tall' || type === 'slider') {
+    return (
+      <group>
+        {box([w, h || 2.1, d], [0, (h || 2.1) / 2, 0], '#e7e5e4')}
+        {box([0.02, (h || 2.1) * 0.92, 0.015], [0, (h || 2.1) / 2, d * 0.5], '#a8a29e')}
+      </group>
+    )
+  }
+  if (type === 'wall-cab') return box([w, h || 0.7, d], [0, 1.55, 0], '#f5f5f4')
+  if (type === 'tv') return box([w, h || 0.65, Math.max(d, 0.04)], [0, 1.15, 0], '#1c1917')
+  if (type === 'rug') return box([w, 0.02, d], [0, 0.01, 0], '#b08968')
+  if (type === 'car') {
+    return (
+      <group>
+        {box([w * 0.92, 0.45, d * 0.55], [0, 0.55, 0], '#334155')}
+        {box([w * 0.96, 0.35, d * 0.92], [0, 0.28, 0], '#1e293b')}
+        {[[-1, 1], [1, 1], [-1, -1], [1, -1]].map(([sx, sz]) => (
+          <mesh key={`${sx}${sz}`} position={[sx * w * 0.42, 0.18, sz * d * 0.28]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.18, 0.18, 0.14, 16]} />
+            <meshLambertMaterial color="#0f172a" />
+          </mesh>
+        ))}
+      </group>
+    )
+  }
+  if (type === 'fireplace') {
+    return (
+      <group>
+        {box([w, h || 1.2, d], [0, (h || 1.2) / 2, 0], '#57534e')}
+        {box([w * 0.46, 0.42, 0.08], [0, 0.38, d * 0.42], '#292524')}
+      </group>
+    )
+  }
+  if (type === 'armchair' || type === 'sofa-corner' || type === 'divan') {
+    return (
+      <group>
+        {box([w * 0.9, 0.28, d * 0.72], [0, 0.32, d * 0.06], '#d6d3d1')}
+        {box([w * 0.9, 0.36, d * 0.22], [0, 0.55, -d * 0.34], '#a8a29e')}
+      </group>
+    )
+  }
+  if (type === 'bunk') {
+    return (
+      <group>
+        {box([w, 0.12, d], [0, 0.4, 0], '#f8fafc')}
+        {box([w, 0.12, d], [0, 1.15, 0], '#f8fafc')}
+        {box([0.05, 1.4, 0.05], [-w * 0.46, 0.7, -d * 0.46], '#a8a29e')}
+        {box([0.05, 1.4, 0.05], [w * 0.46, 0.7, -d * 0.46], '#a8a29e')}
+        {box([0.05, 1.4, 0.05], [-w * 0.46, 0.7, d * 0.46], '#a8a29e')}
+        {box([0.05, 1.4, 0.05], [w * 0.46, 0.7, d * 0.46], '#a8a29e')}
+      </group>
+    )
+  }
+  if (type === 'lamp') {
+    return (
+      <group>
+        {cyl(0.025, 1.35, [0, 0.68, 0], '#a8a29e')}
+        {cyl(0.16, 0.18, [0, 1.42, 0], '#f8fafc')}
+      </group>
+    )
+  }
+  if (type === 'hood') return box([w, 0.12, Math.min(d, 0.45)], [0, 1.55, -d * 0.05], '#e7e5e4')
+  if (type === 'towel-rad') {
+    return (
+      <group>
+        {box([0.03, h || 1.1, 0.03], [-w * 0.4, 0.9, 0], '#cbd5e1')}
+        {box([0.03, h || 1.1, 0.03], [w * 0.4, 0.9, 0], '#cbd5e1')}
+        {[0, 1, 2, 3, 4].map((index) => (
+          <group key={index}>{box([w * 0.8, 0.02, 0.02], [0, 0.55 + index * 0.16, 0], '#e2e8f0')}</group>
+        ))}
+      </group>
+    )
+  }
+  if (type === 'heater-wood') {
+    return (
+      <group>
+        {box([w, 0.7, d], [0, 0.35, 0], '#44403c')}
+        {box([w * 0.7, 0.08, d * 0.15], [0, 0.78, d * 0.1], '#292524')}
+      </group>
+    )
+  }
+  if (type === 'mirror' || type === 'mirror-cab') return box([w, h || 0.7, Math.max(d, 0.04)], [0, 1.45, 0], '#e2e8f0')
+  if (type === 'office-chair') {
+    return (
+      <group>
+        {cyl(Math.min(w, d) * 0.32, 0.06, [0, 0.48, 0], '#1c1917')}
+        {box([w * 0.7, 0.4, 0.06], [0, 0.78, -d * 0.28], '#334155')}
+        {cyl(0.04, 0.4, [0, 0.24, 0], '#64748b')}
+      </group>
+    )
+  }
+  return box([w, h || 0.8, d], [0, (h || 0.8) / 2, 0], '#f5f5f4')
 }
 
 function FixtureMesh({ fixture, selected, hovered }) {
   const tpl = fixtureTemplate(fixture.type)
-  const w = fixture.w || tpl.w
-  const d = fixture.d || tpl.d
+  const variant = (tpl.variants || []).find((entry) => entry.id === fixture.variant) || tpl.variants?.[0]
+  const w = fixture.w || variant?.w || tpl.w
+  const d = fixture.d || variant?.d || tpl.d
+  const h = fixture.h || variant?.h || tpl.h || 0.8
+  const body = variant?.body || tpl.body || variant?.symbol || tpl.symbol || fixture.type
   const pick = { kind: 'fixture', id: fixture.id }
   const mark = markOf(selected, hovered, pick)
   return (
     <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]} userData={{ pick }}>
-      <FixtureBody type={fixture.type} w={w} d={d} />
+      <FixtureBody body={body} w={w} d={d} h={h} />
       {mark && (
         <mesh position={[0, 0.45, 0]}>
           <boxGeometry args={[w + (mark === 'selected' ? 0.14 : 0.07), 0.95, d + (mark === 'selected' ? 0.14 : 0.07)]} />
