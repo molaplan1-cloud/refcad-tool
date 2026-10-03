@@ -47,6 +47,7 @@ import {
   updateWall,
 } from '@/lib/floorplan'
 import { resolveFixture } from '@/lib/furniture'
+import { addChimneyFor, chimneyKind, defaultFlue, flueOptions, withChimneyFields } from '@/lib/chimney'
 import { ServiceMenu } from './ServicesLayer'
 import { YardFields, YardMenuBody } from './YardPanel'
 import { yardTitle } from '@/lib/yard'
@@ -757,6 +758,8 @@ function FixtureFields({ plan, id, onApply, onCommit }) {
   const tplW = spec.w || 0.6
   const tplD = spec.d || 0.6
   const tplH = spec.h || 0.85
+  const chimney = fixture.type === 'chimney'
+  const kind = chimney ? chimneyKind(fixture) : ''
   return (
     <div>
       {variants.length > 0 && (
@@ -765,11 +768,66 @@ function FixtureFields({ plan, id, onApply, onCommit }) {
             data-testid="fixture-variant"
             style={inputStyle}
             value={fixture.variant || variants[0].id}
-            onChange={(event) => onCommit(applyFixtureVariant(plan, id, event.target.value))}
+            onChange={(event) => {
+              if (chimney) onCommit(updateFixture(plan, id, withChimneyFields(fixture, { variant: event.target.value, flue: defaultFlue(event.target.value) })))
+              else onCommit(applyFixtureVariant(plan, id, event.target.value))
+            }}
           >
             {variants.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
         </Field>
+      )}
+      {chimney && (
+        <>
+          <Field label="Hormikoko">
+            <select
+              data-testid="chimney-flue"
+              style={inputStyle}
+              value={fixture.flue || defaultFlue(kind)}
+              onChange={(event) => onCommit(updateFixture(plan, id, withChimneyFields(fixture, { flue: event.target.value })))}
+            >
+              {flueOptions(kind).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Hormien määrä">
+            <select
+              data-testid="chimney-flues"
+              style={inputStyle}
+              value={Number(fixture.flues) >= 2 ? '2' : '1'}
+              onChange={(event) => onCommit(updateFixture(plan, id, withChimneyFields(fixture, { flues: Number(event.target.value) })))}
+            >
+              <option value="1">1 hormi</option>
+              <option value="2">2 hormia</option>
+            </select>
+          </Field>
+          <Field label="Piipun korkeus (mm)">
+            <input
+              data-testid="chimney-stack"
+              style={inputStyle}
+              type="number"
+              placeholder="katon mukaan"
+              value={Number.isFinite(fixture.stack) ? mm(fixture.stack) : ''}
+              onChange={(event) => {
+                const raw = event.target.value
+                onApply(updateFixture(plan, id, { stack: raw === '' ? undefined : fromMm(raw) }))
+              }}
+            />
+          </Field>
+        </>
+      )}
+      {spec.shieldClearance && (
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+          <input
+            data-testid="heat-shield"
+            type="checkbox"
+            checked={fixture.shield !== false}
+            onChange={(event) => onApply(updateFixture(plan, id, { shield: event.target.checked }))}
+          />
+          Lämpösuoja
+        </label>
+      )}
+      {spec.chimney && (
+        <MenuBtn testid="add-chimney" onClick={() => onCommit(addChimneyFor(plan, id))}>Lisää hormi</MenuBtn>
       )}
       <Field label="Leveys (mm)">
         <input style={inputStyle} type="number" value={mm(fixture.w || tplW)} onChange={(event) => onApply(updateFixture(plan, id, { w: fromMm(event.target.value) || 0.3 }))} />
@@ -937,7 +995,10 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
             <select
               data-testid="ctx-fixture-variant"
               value={fixture.variant || variants[0].id}
-              onChange={(event) => act(applyFixtureVariant(plan, fixture.id, event.target.value))}
+              onChange={(event) => {
+                if (fixture.type === 'chimney') act(updateFixture(plan, fixture.id, withChimneyFields(fixture, { variant: event.target.value, flue: defaultFlue(event.target.value) })))
+                else act(applyFixtureVariant(plan, fixture.id, event.target.value))
+              }}
               style={{ flex: 1, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
             >
               {variants.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -948,6 +1009,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
         <CadEditItems onNavigate={onNavigate} />
         <CadSep />
+        {spec.chimney && <CadItem testid="ctx-add-chimney" onClick={() => act(addChimneyFor(plan, fixture.id))}>Lisää hormi</CadItem>}
         <CadItem testid="ctx-rotate" shortcut="R" onClick={() => onCommit(rotateFixture(plan, fixture.id))}>Kierrä</CadItem>
         <CadItem testid="ctx-mirror" onClick={() => onCommit(mirrorFixture(plan, fixture.id))}>Peilaa</CadItem>
         <CadItem testid="ctx-duplicate" shortcut="Ctrl+D" onClick={() => act(duplicateFixture(plan, fixture.id))}>Monista</CadItem>
