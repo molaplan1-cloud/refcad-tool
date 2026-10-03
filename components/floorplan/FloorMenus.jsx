@@ -1,11 +1,14 @@
 'use client'
 
+import { useState } from 'react'
 import {
+  CLADDING,
   MATERIALS,
   ROOM_TYPES,
   ROOF_TYPES,
   STANDARD_SCALES,
   addOpening,
+  splitWallAt,
   deleteOpening,
   deleteRoom,
   deleteWall,
@@ -193,6 +196,18 @@ export function SelectionPanel({ plan, selection, onApply, onCommit }) {
   return null
 }
 
+function SplitField({ plan, wall, onCommit }) {
+  const [value, setValue] = useState(() => Math.round(segmentLength(wall.a, wall.b) * 500))
+  return (
+    <Field label="Jaa kohdasta (mm)">
+      <span style={{ display: 'flex', gap: 4 }}>
+        <input data-testid="wall-split-mm" style={{ ...inputStyle, flex: 1 }} type="number" value={value} onChange={(event) => setValue(event.target.value)} />
+        <button type="button" data-testid="wall-split-at" onClick={() => onCommit(splitWallAt(plan, wall.id, fromMm(value)))} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1' }}>Jaa</button>
+      </span>
+    </Field>
+  )
+}
+
 function WallFields({ plan, id, onApply, onCommit, compact }) {
   const wall = (plan.walls || []).find((item) => item.id === id)
   if (!wall) return null
@@ -221,10 +236,10 @@ function WallFields({ plan, id, onApply, onCommit, compact }) {
       <Field label="Korkeus (mm)">
         <input style={inputStyle} type="number" value={mm(wall.height || plan.floorHeight || 2.6)} onChange={(event) => onApply(updateWall(plan, id, { height: fromMm(event.target.value) || 2.6, heightCustom: true }))} />
       </Field>
-      <Field label="Materiaali">
-        <select style={inputStyle} value={wall.materialId || ''} onChange={(event) => onApply(updateWall(plan, id, { materialId: event.target.value }))}>
+      <Field label="Verhous">
+        <select data-testid="wall-cladding" style={inputStyle} value={wall.materialId || ''} onChange={(event) => onApply(updateWall(plan, id, { materialId: event.target.value }))}>
           <option value="">Oletus</option>
-          {MATERIALS[group].map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          {(wall.kind === 'interior' ? MATERIALS[group] : CLADDING).map((item) => <option key={item.id} value={item.id}>{item.group ? `${item.group}: ${item.name}` : item.name}</option>)}
         </select>
       </Field>
       <Field label="Pituus (mm)">
@@ -237,6 +252,7 @@ function WallFields({ plan, id, onApply, onCommit, compact }) {
           onBlur={(event) => onCommit(setWallLength(plan, id, fromMm(event.target.value)))}
         />
       </Field>
+      <SplitField plan={plan} wall={wall} onCommit={onCommit} />
     </div>
   )
 }
@@ -358,6 +374,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
         <>
           <WallFields compact plan={plan} id={wall.id} onApply={onApply} onCommit={onCommit} />
           <MenuBtn testid="ctx-split" onClick={() => act(splitWall(plan, wall.id, menu.at || { x: (wall.a.x + wall.b.x) / 2, z: (wall.a.z + wall.b.z) / 2 }))}>Jaa seinä</MenuBtn>
+          <MenuBtn testid="ctx-facade" onClick={() => onNavigate('facade')}>Julkisivu</MenuBtn>
           <MenuBtn testid="ctx-door" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'door'))}>Lisää ovi tähän</MenuBtn>
           <MenuBtn testid="ctx-window" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'window'))}>Lisää ikkuna tähän</MenuBtn>
           <MenuBtn testid="ctx-delete" onClick={() => act(deleteWall(plan, wall.id))}>Poista</MenuBtn>

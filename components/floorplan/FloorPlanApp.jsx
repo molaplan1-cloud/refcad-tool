@@ -10,7 +10,9 @@ import {
   addFixture,
   addOpening,
   addWall,
+  claddingAreas,
   deleteOpening,
+  facadeSide,
   deleteRoom,
   deleteWall,
   detectRoomAt,
@@ -30,6 +32,7 @@ import {
   moveRoomLabel,
   nearestWall,
   openingSymbol,
+  planBounds,
   pointInPolygon,
   removeFixture,
   roomLabelPoint,
@@ -43,6 +46,7 @@ import {
   buildFloorPlanPdf,
 } from '@/lib/floorplan'
 import { FloorMenu, HouseSettings, SelectionPanel } from './FloorMenus'
+import FacadeView from './FacadeView'
 
 const HouseScene = dynamic(() => import('./HouseScene'), { ssr: false })
 
@@ -265,6 +269,7 @@ export default function FloorPlanApp() {
   const [poly, setPoly] = useState([])
   const [partitions, setPartitions] = useState(true)
   const [view, setView] = useState('2d')
+  const [facadeSideId, setFacadeSideId] = useState('north')
   const [wallMode, setWallMode] = useState('solid')
   const [roofMode, setRoofMode] = useState('solid')
   const [fitToken, setFitToken] = useState(1)
@@ -527,6 +532,12 @@ export default function FloorPlanApp() {
       setMenu(null)
       return
     }
+    if (action === 'facade') {
+      const wall = (plan.walls || []).find((item) => item.id === menu?.id)
+      if (wall) setFacadeSideId(facadeSide(wall, planBounds(plan)))
+      setView('facade')
+      setMenu(null)
+    }
     if (action === 'paste' && clip.current && menu?.at) {
       const next = addFixture(plan, clip.current.type, menu.at.x, menu.at.z)
       const fixture = next.fixtures[next.fixtures.length - 1]
@@ -635,6 +646,7 @@ export default function FloorPlanApp() {
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
           <button type="button" data-testid="view-floor-2d" style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
           <button type="button" data-testid="view-floor-3d" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
+          <button type="button" data-testid="view-facade" style={textBtn(view === 'facade')} onClick={() => setView('facade')}>Julkisivu</button>
         </div>
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
           <button type="button" style={textBtn(plan.paper !== 'a4')} onClick={() => setPlan({ ...plan, paper: 'a3' })}>A3</button>
@@ -682,7 +694,9 @@ export default function FloorPlanApp() {
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ height: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>{status}</div>
-          {view === '2d' ? (
+          {view === 'facade' ? (
+            <FacadeView plan={plan} side={facadeSideId} onSide={setFacadeSideId} onApply={setPlan} onCommit={commit} />
+          ) : view === '2d' ? (
             <div ref={hostRef} style={{ flex: 1, minHeight: 0, background: '#d6d3d1' }}>
               <svg
                 ref={svgRef}
@@ -901,6 +915,16 @@ export default function FloorPlanApp() {
                     )
                   })()}
                 </g>
+                {claddingAreas(plan).length > 0 && (
+                  <g data-testid="plan-facade-legend" style={{ pointerEvents: 'none' }}>
+                    {claddingAreas(plan).map((item, index) => (
+                      <g key={item.id} transform={`translate(${sheet.x + 16} ${sheet.y + 22 + index * 16})`}>
+                        <rect width="12" height="10" fill={item.color} stroke="#44403c" strokeWidth="0.6" />
+                        <text x="16" y="9" fontSize="11" fill="#1c1917">{item.name} {formatArea(item.area)}</text>
+                      </g>
+                    ))}
+                  </g>
+                )}
                 {plan.walls.length === 0 && (
                   <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">Piirrä ulkoseinät tai avaa esimerkkitalo</text>
                 )}
@@ -943,7 +967,7 @@ export default function FloorPlanApp() {
             <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
               <span style={{ width: 14, height: 14, borderRadius: 3, background: row.color, border: '1px solid #a8a29e', flexShrink: 0 }} />
               <span style={{ flex: 1 }}>{row.groupLabel}: {row.name}</span>
-              <span style={{ color: '#78716c' }}>{row.count}</span>
+              <span style={{ color: '#78716c' }}>{row.area ? formatArea(row.area) : row.count}</span>
             </div>
           ))}
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '14px 0 8px' }}>SELITE</div>
@@ -963,6 +987,18 @@ export default function FloorPlanApp() {
               ))}
             </div>
           ))}
+          {claddingAreas(plan).length > 0 && (
+            <div data-testid="facade-area-legend" style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>Julkisivu</div>
+              {claddingAreas(plan).map((item) => (
+                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
+                  <span style={{ width: 12, height: 12, background: item.color, border: '1px solid #d6d3d1' }} />
+                  <span style={{ flex: 1 }}>{item.group}: {item.name}</span>
+                  <span>{formatArea(item.area)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </aside>
       </div>
       <FloorMenu menu={menu} plan={plan} onApply={setPlan} onCommit={commit} onNavigate={onMenuNavigate} />

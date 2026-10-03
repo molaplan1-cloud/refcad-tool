@@ -5,6 +5,7 @@ import { Canvas, useThree } from '@react-three/fiber'
 import { Edges, Html, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import {
+  claddingOf,
   fixtureTemplate,
   formatArea,
   materialOf,
@@ -16,6 +17,7 @@ import {
   segmentLength,
   thicknessOf,
   visibleRooms,
+  wallCladdingPieces,
   wallPieces,
 } from '@/lib/floorplan'
 
@@ -92,6 +94,92 @@ function finishTexture(group, id) {
   return tex
 }
 
+function claddingTexture(id) {
+  const item = claddingOf(id)
+  const key = `clad:${item.id}`
+  if (textureCache.has(key)) return textureCache.get(key)
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = item.color
+  ctx.fillRect(0, 0, 128, 128)
+  ctx.strokeStyle = 'rgba(40,24,16,0.45)'
+  ctx.lineWidth = 2
+  if (item.pattern === 'brick') {
+    const course = 16
+    for (let y = 0; y <= 128; y += course) {
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(128, y)
+      ctx.stroke()
+      const shift = Math.round(y / course) % 2 ? 16 : 0
+      for (let x = -32 + shift; x < 128; x += 32) {
+        ctx.beginPath()
+        ctx.moveTo(x, y)
+        ctx.lineTo(x, y + course)
+        ctx.stroke()
+      }
+    }
+  } else if (item.pattern === 'boards-h') {
+    for (let y = 10; y < 128; y += 10) {
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(128, y)
+      ctx.stroke()
+    }
+  } else if (item.pattern === 'boards-v' || item.pattern === 'batten') {
+    const step = item.pattern === 'batten' ? 28 : 12
+    for (let x = step; x < 128; x += step) {
+      ctx.lineWidth = item.pattern === 'batten' && Math.round(x / step) % 2 === 0 ? 4 : 2
+      ctx.beginPath()
+      ctx.moveTo(x, 0)
+      ctx.lineTo(x, 128)
+      ctx.stroke()
+    }
+  } else if (item.pattern === 'stone') {
+    ctx.strokeRect(4, 4, 36, 24)
+    ctx.strokeRect(44, 6, 40, 22)
+    ctx.strokeRect(88, 4, 32, 26)
+    ctx.strokeRect(8, 36, 48, 28)
+    ctx.strokeRect(60, 38, 56, 24)
+    ctx.strokeRect(6, 72, 40, 30)
+    ctx.strokeRect(52, 74, 34, 28)
+    ctx.strokeRect(92, 70, 28, 34)
+  } else if (item.pattern === 'board') {
+    ctx.strokeRect(2, 2, 60, 60)
+    ctx.strokeRect(66, 2, 60, 60)
+    ctx.strokeRect(2, 66, 60, 60)
+    ctx.strokeRect(66, 66, 60, 60)
+  } else {
+    ctx.fillStyle = 'rgba(80,60,40,0.16)'
+    for (let i = 0; i < 40; i += 1) ctx.fillRect((i * 37) % 128, (i * 19) % 128, 2, 2)
+  }
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  tex.colorSpace = THREE.SRGBColorSpace
+  textureCache.set(key, tex)
+  return tex
+}
+
+function repeatedCladding(id, span, height) {
+  const item = claddingOf(id)
+  const unitX = item.pattern === 'brick' ? 0.48 : item.pattern === 'boards-v' || item.pattern === 'batten' ? 0.24 : 0.6
+  const unitY = item.pattern === 'brick' ? 0.26 : item.pattern === 'boards-h' ? 0.16 : 0.4
+  const rx = Math.max(1, Math.round((span / unitX) * 2) / 2)
+  const ry = Math.max(1, Math.round((height / unitY) * 2) / 2)
+  const key = `clad-repeat:${item.id}:${rx}:${ry}`
+  if (textureCache.has(key)) return textureCache.get(key)
+  const tex = claddingTexture(item.id).clone()
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  tex.repeat.set(rx, ry)
+  tex.needsUpdate = true
+  textureCache.set(key, tex)
+  return tex
+}
+
 function pointAt(wall, distance) {
   const len = segmentLength(wall.a, wall.b) || 1
   const t = distance / len
@@ -135,8 +223,6 @@ function Solid({ args, position, rotation, color, map, opacity = 1, edges = true
 function WallMesh({ plan, mode }) {
   if (mode === 'hidden') return null
   const opacity = mode === 'ghost' ? 0.14 : 1
-  const exterior = materialOf('exterior', plan.exteriorId)
-  const exteriorMap = mode === 'solid' ? finishTexture('exterior', exterior.id) : null
   return (
     <group>
       {(plan.walls || []).flatMap((wall) => {
@@ -145,16 +231,20 @@ function WallMesh({ plan, mode }) {
         const dz = (wall.b.z - wall.a.z) / len
         const yaw = Math.atan2(-dz, dx)
         const thick = thicknessOf(wall, plan)
-        return wallPieces(wall, plan.openings, plan.floorHeight, plan.walls).map((piece) => {
+        const pieces = wall.kind === 'exterior'
+          ? wallCladdingPieces(wall, plan)
+          : wallPieces(wall, plan.openings, plan.floorHeight, plan.walls)
+        return pieces.map((piece) => {
           const span = piece.to - piece.from
           const mid = pointAt(wall, (piece.from + piece.to) / 2)
           const y = (piece.y0 + piece.y1) / 2
           const height = piece.y1 - piece.y0
-          const finish = wall.kind === 'exterior' ? exterior : adjacentInterior(plan, wall, piece)
-          const map = wall.kind === 'exterior' ? exteriorMap : (mode === 'solid' ? finishTexture('interior', finish.id) : null)
+          const cladding = wall.kind === 'exterior' ? claddingOf(piece.materialId || plan.exteriorId) : null
+          const finish = cladding || adjacentInterior(plan, wall, piece)
+          const map = mode !== 'solid' ? null : cladding ? repeatedCladding(cladding.id, span, height) : finishTexture('interior', finish.id)
           return (
             <Solid
-              key={`${wall.id}-${piece.from}-${piece.y0}`}
+              key={`${wall.id}-${piece.from}-${piece.to}-${piece.y0}-${piece.y1}-${piece.materialId || 'base'}`}
               args={[span, height, thick]}
               position={[mid.x, y, mid.z]}
               rotation={[0, yaw, 0]}
