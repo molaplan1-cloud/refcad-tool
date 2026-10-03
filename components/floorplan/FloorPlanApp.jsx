@@ -29,8 +29,8 @@ import {
   materialOf,
   materialsList,
   moveFixture,
+  moveOpening,
   moveRoomLabel,
-  nearestWall,
   openingSymbol,
   planBounds,
   pointInPolygon,
@@ -39,8 +39,6 @@ import {
   roomLabelPoint,
   rotateFixture,
   segmentLength,
-  snapDrawPoint,
-  snapRoomPoint,
   viewLayout,
   visibleRooms,
   wallQuads,
@@ -76,6 +74,8 @@ import {
   saveProject,
   shellPlan,
 } from '@/lib/projects'
+import { snapAlongWall, snapFixturePoint, snapPoint } from '@/lib/snap'
+import { FIT_CAMERA, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 
 const HouseScene = dynamic(() => import('./HouseScene'), { ssr: false })
 
@@ -109,6 +109,35 @@ const sideBtn = (active) => ({
   cursor: 'pointer',
   transform: 'none',
 })
+
+function SnapMark({ snap, X, Y, zoom }) {
+  if (!snap?.point || !snap.kind || snap.kind === 'grid') return null
+  const s = 1 / (zoom || 1)
+  return (
+    <g data-testid="snap-indicator" data-kind={snap.kind} style={{ pointerEvents: 'none' }}>
+      {(snap.guides || []).map((guide, index) => (
+        <line
+          key={`${guide.x1}-${guide.z1}-${index}`}
+          x1={X(guide.x1)}
+          y1={Y(guide.z1)}
+          x2={X(guide.x2)}
+          y2={Y(guide.z2)}
+          stroke="#0f766e"
+          strokeWidth={1.15 * s}
+          strokeDasharray={`${6 * s} ${4 * s}`}
+        />
+      ))}
+      <g transform={`translate(${X(snap.point.x)} ${Y(snap.point.z)}) scale(${s})`}>
+        {snap.kind === 'corner' && <rect data-testid="snap-corner" x={-6} y={-6} width={12} height={12} fill="#f0fdfa" stroke="#0f766e" strokeWidth={2} />}
+        {snap.kind === 'midpoint' && <polygon data-testid="snap-midpoint" points="0,-8 7,6 -7,6" fill="#f0fdfa" stroke="#0f766e" strokeWidth={1.7} />}
+        {snap.kind === 'perpendicular' && <path data-testid="snap-perpendicular" d="M-8 0 V-8 H0" fill="none" stroke="#0f766e" strokeWidth={2} />}
+        {snap.kind !== 'corner' && snap.kind !== 'midpoint' && snap.kind !== 'perpendicular' && (
+          <circle r={6} fill="none" stroke="#0f766e" strokeWidth={2} />
+        )}
+      </g>
+    </g>
+  )
+}
 
 function sheetPixels(size, plan) {
   const layout = viewLayout(plan)
@@ -352,13 +381,25 @@ export default function FloorPlanApp() {
   const [roofMode, setRoofMode] = useState('solid')
   const [fitToken, setFitToken] = useState(1)
   const [size, setSize] = useState({ w: 960, h: 680 })
+  const [camera, setCamera] = useState(FIT_CAMERA)
+  const [gridStep, setGridStep] = useState(0.1)
+  const [ortho, setOrtho] = useState(false)
+  const [altDown, setAltDown] = useState(false)
+  const [snapVisual, setSnapVisual] = useState(null)
+  const [cursorPpm, setCursorPpm] = useState(40)
   const history = useRef([])
   const dragBefore = useRef(null)
   const dragId = useRef(null)
+  const dragOpen = useRef(null)
   const dragLabel = useRef(null)
   const clip = useRef(null)
   const hostRef = useRef(null)
   const svgRef = useRef(null)
+  const panRef = useRef(null)
+  const spaceRef = useRef(false)
+  const suppressMenu = useRef(false)
+  const altRef = useRef(false)
+  altRef.current = altDown
 
   useEffect(() => {
     const storedLibrary = loadLibrary(window.localStorage.getItem(LIBRARY_KEY))
@@ -430,18 +471,58 @@ export default function FloorPlanApp() {
 
   const toWorld = useCallback((event) => {
     const rect = svgRef.current.getBoundingClientRect()
-    const px = event.clientX - rect.left
-    const py = event.clientY - rect.top
+    const zoom = camera.zoom || 1
+    const px = (event.clientX - rect.left - camera.x) / zoom
+    const py = (event.clientY - rect.top - camera.y) / zoom
     const mx = (px - sheet.x) / sheet.k
     const my = (py - sheet.y) / sheet.k
     return {
       x: (mx - layout.ox) / layout.scale + layout.box.minX,
       z: (my - layout.oy) / layout.scale + layout.box.minZ,
     }
-  }, [sheet, layout])
+  }, [sheet, layout, camera])
 
-  const snappedCursor = cursor && (tool === 'exterior' || tool === 'interior') ? snapDrawPoint(cursor, draft, plan.walls) : null
-  const roomCursor = cursor && tool === 'room' ? snapRoomPoint(cursor, plan.walls) : null
+  const ppm2d = layout.scale * k * (camera.zoom || 1)
+
+  const describeSnap = useCallback((world, ppm) => {
+    const radius = 12 / Math.max(ppm || ppm2d, 0.001)
+    const enabled = !altRef.current
+    const walls = plan.walls || []
+    if (svcTool) return null
+    if (tool === 'exterior' || tool === 'interior') {
+      return snapPoint(world, { walls, grid: gridStep, radius, origin: draft, ortho, enabled })
+    }
+    if (tool === 'room') {
+      const origin = roomShape === 'poly' ? poly[poly.length - 1] : draft
+      return snapPoint(world, { walls, grid: gridStep, radius, origin: origin || null, ortho, enabled })
+    }
+    if (tool === 'door' || tool === 'window') {
+      const along = snapAlongWall(world, walls, Math.max(radius, 0.35), enabled)
+      return along.wall ? { point: along.point, kind: 'edge', guides: [], wall: along.wall } : { point: world, kind: null, guides: [] }
+    }
+    if (placing) {
+      const tpl = FIXTURES.find((item) => item.id === placing)
+      const placed = snapFixturePoint(world, walls, { radius: Math.max(radius, 0.45), enabled, grid: gridStep, depth: tpl?.d || 0.6 })
+      return { point: { x: placed.x, z: placed.z }, kind: placed.kind, guides: [], rotation: placed.rotation }
+    }
+    return null
+  }, [ppm2d, plan.walls, tool, draft, ortho, gridStep, roomShape, poly, placing, svcTool])
+
+  useEffect(() => {
+    if (view !== '2d') return undefined
+    const node = hostRef.current
+    if (!node) return undefined
+    const onWheel = (event) => {
+      event.preventDefault()
+      const rect = node.getBoundingClientRect()
+      const px = event.clientX - rect.left
+      const py = event.clientY - rect.top
+      const factor = wheelZoomFactor(event.deltaY, event.ctrlKey || event.metaKey)
+      setCamera((current) => zoomAt(current, px, py, factor))
+    }
+    node.addEventListener('wheel', onWheel, { passive: false })
+    return () => node.removeEventListener('wheel', onWheel)
+  }, [view])
 
   const choose = (hit) => {
     if (!hit || hit.kind === 'canvas') {
@@ -488,15 +569,31 @@ export default function FloorPlanApp() {
 
   const onPointerMove = (event) => {
     if (view !== '2d' || !svgRef.current) return
+    if (panRef.current) {
+      const dx = event.clientX - panRef.current.x
+      const dy = event.clientY - panRef.current.y
+      panRef.current.x = event.clientX
+      panRef.current.y = event.clientY
+      if (Math.hypot(dx, dy) > 0) panRef.current.moved = true
+      setCamera((current) => panBy(current, dx, dy))
+      return
+    }
     const world = toWorld(event)
+    const visual = describeSnap(world, ppm2d)
+    setSnapVisual(visual)
     setCursor(world)
-    if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z))
+    const radius = Math.max(12 / Math.max(ppm2d, 0.001), 0.45)
+    if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z, radius))
+    if (dragOpen.current) setPlan((current) => moveOpening(current, dragOpen.current, world))
     if (dragLabel.current) setPlan((current) => moveRoomLabel(current, dragLabel.current, world.x, world.z))
   }
 
   const onPointerUp = () => {
-    if ((dragId.current || dragLabel.current) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+    if (panRef.current?.button === 2 && panRef.current.moved) suppressMenu.current = true
+    panRef.current = null
+    if ((dragId.current || dragLabel.current || dragOpen.current) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
     dragId.current = null
+    dragOpen.current = null
     dragLabel.current = null
     dragBefore.current = null
   }
@@ -533,6 +630,11 @@ export default function FloorPlanApp() {
   }
 
   const onContextMenu = (event) => {
+    if (suppressMenu.current) {
+      event.preventDefault()
+      suppressMenu.current = false
+      return
+    }
     event.preventDefault()
     const world = toWorld(event)
     const serviceHit = hitService(plan, world)
@@ -545,13 +647,12 @@ export default function FloorPlanApp() {
     if (hit.kind !== 'canvas') choose(hit)
   }
 
-  const onPointerDown = (event) => {
-    if (view !== '2d' || event.button !== 0) return
-    setMenu(null)
-    const world = toWorld(event)
+  const placeAt = (world, ppm) => {
+    const visual = describeSnap(world, ppm)
+    const point = visual?.point || world
     if (svcTool) {
       const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES[0]
-      const point = snapServicePoint(world, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system })
+      const snapped = snapServicePoint(world, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system })
       if (svcTool === 'node') {
         commit(addServiceNode(plan, {
           system: spec.system,
@@ -561,20 +662,19 @@ export default function FloorPlanApp() {
           size: spec.size,
           circuit: spec.circuit,
           name: spec.name,
-          x: point.x,
-          z: point.z,
+          x: snapped.x,
+          z: snapped.z,
         }))
         return
       }
       setSvcPoints((points) => {
         const prev = points[points.length - 1]
-        if (prev && Math.hypot(prev.x - point.x, prev.z - point.z) < 0.05) return points
-        return [...points, { x: point.x, z: point.z }]
+        if (prev && Math.hypot(prev.x - snapped.x, prev.z - snapped.z) < 0.05) return points
+        return [...points, { x: snapped.x, z: snapped.z }]
       })
       return
     }
     if (tool === 'room') {
-      const point = snapRoomPoint(world, plan.walls)
       if (roomShape === 'poly') {
         if (poly.length >= 3 && segmentLength(point, poly[0]) < 0.35) closeRoom(poly)
         else setPoly((points) => [...points, point])
@@ -590,15 +690,14 @@ export default function FloorPlanApp() {
       return
     }
     if (tool === 'detect') {
-      const room = (plan.rooms || []).find((item) => pointInPolygon(world.x, world.z, item.polygon || []))
-      if (room) {
+      const roomHit = (plan.rooms || []).find((item) => pointInPolygon(world.x, world.z, item.polygon || []))
+      if (roomHit) {
         commit(detectRoomAt(plan, world))
-        choose({ kind: 'room', id: room.id })
+        choose({ kind: 'room', id: roomHit.id })
       }
       return
     }
     if (tool === 'exterior' || tool === 'interior') {
-      const point = snapDrawPoint(world, draft, plan.walls)
       if (!draft) setDraft(point)
       else {
         commit(addWall(plan, draft, point, tool))
@@ -607,18 +706,53 @@ export default function FloorPlanApp() {
       return
     }
     if (tool === 'door' || tool === 'window') {
-      const hit = nearestWall(plan.walls, world, 0.55)
-      if (hit) commit(addOpening(plan, hit.wall.id, world, tool))
+      const along = visual?.wall ? visual : snapAlongWall(world, plan.walls, Math.max(12 / Math.max(ppm, 0.001), 0.35), !altRef.current)
+      if (along?.wall) commit(addOpening(plan, along.wall.id, along.point || point, tool))
       return
     }
     if (placing) {
-      const next = addFixture(plan, placing, world.x, world.z)
+      const radius = Math.max(12 / Math.max(ppm, 0.001), 0.45)
+      const next = addFixture(plan, placing, point.x, point.z, radius)
       commit(next)
-      setSelectedFixture(next.fixtures[next.fixtures.length - 1]?.id || null)
+      const created = next.fixtures[next.fixtures.length - 1]
+      setSelectedFixture(created?.id || null)
+      setPick(created ? { kind: 'fixture', id: created.id } : null)
       setPlacing(null)
+    }
+  }
+
+  const beginPan = (event) => {
+    panRef.current = { x: event.clientX, y: event.clientY, moved: false, button: event.button }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+
+  const onPointerDown = (event) => {
+    if (view !== '2d') return
+    if (event.button === 1 || (event.button === 0 && spaceRef.current)) {
+      beginPan(event)
+      return
+    }
+    if (event.button === 2) {
+      const world = toWorld(event)
+      const hit = hitTest(plan, world)
+      const serviceHit = hitService(plan, world)
+      if ((!hit || hit.kind === 'canvas') && !serviceHit) beginPan(event)
+      return
+    }
+    if (event.button !== 0) return
+    setMenu(null)
+    const world = toWorld(event)
+    if (svcTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing) {
+      placeAt(world, ppm2d)
       return
     }
     const hit = hitTest(plan, world)
+    if (hit.kind === 'opening') {
+      dragOpen.current = hit.id
+      dragBefore.current = plan
+      choose(hit)
+      return
+    }
     choose(hit.kind === 'canvas' ? null : hit)
   }
 
@@ -626,6 +760,31 @@ export default function FloorPlanApp() {
     const onKey = (event) => {
       const tag = event.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (event.key === 'Shift' && !event.repeat) {
+        setOrtho((value) => !value)
+        return
+      }
+      if (event.key === ' ' && !event.repeat) {
+        event.preventDefault()
+        spaceRef.current = true
+        return
+      }
+      if (view === '2d' && (event.key === '+' || event.key === '=')) {
+        event.preventDefault()
+        const rect = hostRef.current?.getBoundingClientRect()
+        setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 1.25))
+        return
+      }
+      if (view === '2d' && (event.key === '-' || event.key === '_')) {
+        event.preventDefault()
+        const rect = hostRef.current?.getBoundingClientRect()
+        setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 0.8))
+        return
+      }
+      if (view === '2d' && event.key === '0') {
+        setCamera(FIT_CAMERA)
+        return
+      }
       if (event.key === 'Escape') {
         setDraft(null)
         setPoly([])
@@ -664,9 +823,24 @@ export default function FloorPlanApp() {
         undo()
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions, svcTool, svcPoints, svcKind])
+    const onKeyUp = (event) => {
+      if (event.key === ' ') spaceRef.current = false
+      if (event.key === 'Alt') setAltDown(false)
+    }
+    const onKeyDown = (event) => {
+      if (event.key === 'Alt') {
+        event.preventDefault()
+        setAltDown(true)
+      }
+      onKey(event)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions, svcTool, svcPoints, svcKind, view])
 
   const loadHouse = (house, roomName, panel) => {
     const next = { ...house, services: ensureServices(house) }
@@ -684,6 +858,7 @@ export default function FloorPlanApp() {
     setStartOpen(false)
     setNewOpen(false)
     setLibraryOpen(false)
+    setCamera(FIT_CAMERA)
     setFitToken((token) => token + 1)
   }
 
@@ -721,6 +896,53 @@ export default function FloorPlanApp() {
       }
     }
     reader.readAsText(file)
+  }
+
+  const onPreview3d = (spot) => {
+    const world = { x: spot.x, z: spot.z }
+    const visual = describeSnap(world, spot.ppm)
+    setSnapVisual(visual)
+    setCursor(world)
+    setCursorPpm(spot.ppm || 40)
+  }
+
+  const onPlace3d = (spot) => {
+    setMenu(null)
+    placeAt({ x: spot.x, z: spot.z }, spot.ppm)
+  }
+
+  const onFixtureDrag3d = (id, spot, phase) => {
+    if (!dragBefore.current) dragBefore.current = plan
+    const radius = Math.max(12 / Math.max(spot.ppm, 0.001), 0.45)
+    setPlan((current) => moveFixture(current, id, spot.x, spot.z, radius))
+    setSelectedFixture(id)
+    setPick({ kind: 'fixture', id })
+    if (phase === 'end') {
+      history.current = [...history.current, dragBefore.current].slice(-40)
+      dragBefore.current = null
+    }
+  }
+
+  const onOpeningDrag3d = (id, spot, phase) => {
+    if (!dragBefore.current) dragBefore.current = plan
+    setPlan((current) => moveOpening(current, id, { x: spot.x, z: spot.z }))
+    setPick({ kind: 'opening', id })
+    if (phase === 'end') {
+      history.current = [...history.current, dragBefore.current].slice(-40)
+      dragBefore.current = null
+    }
+  }
+
+  const onDropFixture3d = (type, spot) => {
+    const radius = Math.max(12 / Math.max(spot.ppm, 0.001), 0.45)
+    const next = addFixture(plan, type, spot.x, spot.z, radius)
+    commit(next)
+    const created = next.fixtures[next.fixtures.length - 1]
+    if (created) {
+      setSelectedFixture(created.id)
+      setPick({ kind: 'fixture', id: created.id })
+    }
+    setPlacing(null)
   }
 
   const onHover3d = (hit) => {
@@ -829,7 +1051,8 @@ export default function FloorPlanApp() {
   const dims = dimensionChains(plan)
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva'
-  const liveEnd = draft && snappedCursor ? snappedCursor : null
+  const liveEnd = draft && (tool === 'exterior' || tool === 'interior') && snapVisual?.point ? snapVisual.point : null
+  const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
   const status = svcTool === 'run'
@@ -909,6 +1132,26 @@ export default function FloorPlanApp() {
         {tool === 'room' && roomShape === 'poly' && poly.length >= 3 && (
           <button type="button" data-testid="close-room" style={textBtn(false)} onClick={() => closeRoom(poly)}>Sulje huone</button>
         )}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: '#a8a29e' }}>Tartunta</span>
+        <button type="button" data-testid="snap-100" title="Ruudukko 100 mm" style={textBtn(gridStep === 0.1)} onClick={() => setGridStep(0.1)}>100</button>
+        <button type="button" data-testid="snap-50" title="Ruudukko 50 mm" style={textBtn(gridStep === 0.05)} onClick={() => setGridStep(0.05)}>50</button>
+        <button type="button" data-testid="snap-10" title="Ruudukko 10 mm" style={textBtn(gridStep === 0.01)} onClick={() => setGridStep(0.01)}>10</button>
+        <button type="button" data-testid="snap-ortho" title="Suorakulma (Shift)" aria-pressed={ortho} style={textBtn(ortho)} onClick={() => setOrtho((value) => !value)}>Suora</button>
+        {view === '2d' && (
+          <>
+            <button type="button" data-testid="zoom-out" title="Loitonna (−)" style={textBtn(false)} onClick={() => {
+              const rect = hostRef.current?.getBoundingClientRect()
+              setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 0.8))
+            }}>−</button>
+            <span data-testid="zoom-percent" style={{ minWidth: 44, textAlign: 'center', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{zoomPercent(camera)}%</span>
+            <button type="button" data-testid="zoom-in" title="Lähennä (+)" style={textBtn(false)} onClick={() => {
+              const rect = hostRef.current?.getBoundingClientRect()
+              setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 1.25))
+            }}>+</button>
+            <button type="button" data-testid="zoom-fit" title="Sovita arkki (0)" style={textBtn(false)} onClick={() => setCamera(FIT_CAMERA)}>Sovita</button>
+          </>
+        )}
       </div>
       <ServiceBar
         plan={plan}
@@ -961,6 +1204,12 @@ export default function FloorPlanApp() {
                   type="button"
                   data-testid={`fixture-${item.id}`}
                   style={sideBtn(placing === item.id)}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('application/x-fixture', item.id)
+                    event.dataTransfer.setData('text/plain', item.id)
+                    event.dataTransfer.effectAllowed = 'copy'
+                  }}
                   onClick={() => { setPlacing(item.id); setTool('select'); setDraft(null) }}
                 >
                   {item.name}
@@ -995,6 +1244,7 @@ export default function FloorPlanApp() {
                     <line x1="0" y1="0" x2="0" y2="5" stroke="#0c0a09" strokeWidth="1.35" />
                   </pattern>
                 </defs>
+                <g data-testid="plan-camera" transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
                 <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.4} />
                 <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
                 {visibleRooms(plan).map((item) => (
@@ -1088,8 +1338,8 @@ export default function FloorPlanApp() {
                 )}
                 {liveEnd && tool !== 'room' && (
                   <g style={{ pointerEvents: 'none' }}>
-                    <line x1={X(draft.x)} y1={Y(draft.z)} x2={X(liveEnd.x)} y2={Y(liveEnd.z)} stroke="#0f766e" strokeWidth={1.4} strokeDasharray="5 4" />
-                    <text x={(X(draft.x) + X(liveEnd.x)) / 2} y={(Y(draft.z) + Y(liveEnd.z)) / 2 - 8} textAnchor="middle" fontSize={12} fontWeight={700} fill="#0f766e">{formatMm(liveLength)}</text>
+                    <line x1={X(draft.x)} y1={Y(draft.z)} x2={X(liveEnd.x)} y2={Y(liveEnd.z)} stroke="#0f766e" strokeWidth={1.5 / camera.zoom} strokeDasharray={`${6 / camera.zoom} ${4 / camera.zoom}`} />
+                    <text x={(X(draft.x) + X(liveEnd.x)) / 2} y={(Y(draft.z) + Y(liveEnd.z)) / 2 - 10 / camera.zoom} textAnchor="middle" fontSize={13 / camera.zoom} fontWeight={700} fill="#0f766e">{formatMm(liveLength)}</text>
                   </g>
                 )}
                 {tool === 'room' && roomShape === 'rect' && draft && roomCursor && (
@@ -1216,6 +1466,8 @@ export default function FloorPlanApp() {
                 {plan.walls.length === 0 && (
                   <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">Piirrä ulkoseinät tai avaa esimerkkitalo</text>
                 )}
+                <SnapMark snap={snapVisual} X={X} Y={Y} zoom={camera.zoom} />
+                </g>
               </svg>
             </div>
           ) : (
@@ -1227,9 +1479,23 @@ export default function FloorPlanApp() {
                 fitToken={fitToken}
                 selected={pick}
                 hovered={hover}
+                drawMode={!svcTool && (tool !== 'select' || Boolean(placing))}
+                cursor={snapVisual?.point || cursor}
+                cursorPpm={cursorPpm}
+                snapKind={snapVisual?.kind || null}
+                draft={(tool === 'exterior' || tool === 'interior') ? draft : null}
+                liveEnd={liveEnd}
+                liveLabel={liveEnd ? `${formatMm(liveLength)} mm` : ''}
+                roomDraft={tool === 'room' && roomShape === 'rect' ? draft : null}
+                roomCursor={roomCursor}
                 onSelect={(hit) => { setMenu(null); choose(hit) }}
                 onHover={onHover3d}
                 onContext={openHitMenu}
+                onPreview={onPreview3d}
+                onPlace={onPlace3d}
+                onFixtureDrag={onFixtureDrag3d}
+                onOpeningDrag={onOpeningDrag3d}
+                onDropFixture={onDropFixture3d}
               />
               <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', gap: 4, background: '#14181f', padding: 4, borderRadius: 10 }}>
