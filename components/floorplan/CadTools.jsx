@@ -1,6 +1,7 @@
 'use client'
 
 import { CAD_COMMANDS, CAD_LAYERS, SELECT_TYPES } from '@/lib/cadEdit'
+import { CadIcon } from './CadIcons'
 
 const barBtn = (active) => ({
   border: '1px solid #e7e5e4',
@@ -31,18 +32,34 @@ const iconBtn = (active) => ({
 })
 
 const EXTRA = [
-  { id: 'rotate90', testid: 'cad-rotate-90', icon: '90', title: 'Käännä 90°' },
-  { id: 'delete', testid: 'cad-delete', icon: '✕', title: 'Poista (Del)' },
-  { id: 'group', testid: 'cad-group', icon: 'Grp', title: 'Ryhmitä' },
-  { id: 'ungroup', testid: 'cad-ungroup', icon: 'Ung', title: 'Pura ryhmä' },
-  { id: 'lock', testid: 'cad-lock', icon: 'Luk', title: 'Lukitse' },
-  { id: 'unlock', testid: 'cad-unlock', icon: 'Av', title: 'Avaa lukitus' },
-  { id: 'hide', testid: 'cad-hide', icon: 'Pi', title: 'Piilota' },
-  { id: 'isolate', testid: 'cad-isolate', icon: 'Er', title: 'Eristä' },
-  { id: 'show', testid: 'cad-show', icon: 'Nä', title: 'Näytä kaikki' },
-  { id: 'similar', testid: 'cad-similar', icon: 'Sa', title: 'Valitse samanlaiset' },
-  { id: 'match', testid: 'cad-match', icon: 'Ko', title: 'Kopioi ominaisuudet' },
+  { id: 'rotate90', testid: 'cad-rotate-90', label: 'Käännä 90°', shortcut: 'R' },
+  { id: 'delete', testid: 'cad-delete', label: 'Poista', shortcut: 'Del' },
+  { id: 'group', testid: 'cad-group', label: 'Ryhmitä', shortcut: 'Ctrl+G' },
+  { id: 'ungroup', testid: 'cad-ungroup', label: 'Pura ryhmä', shortcut: 'Ctrl+Shift+G' },
+  { id: 'lock', testid: 'cad-lock', label: 'Lukitse', shortcut: 'L' },
+  { id: 'unlock', testid: 'cad-unlock', label: 'Avaa lukitus', shortcut: 'L' },
+  { id: 'hide', testid: 'cad-hide', label: 'Piilota', shortcut: 'H' },
+  { id: 'isolate', testid: 'cad-isolate', label: 'Eristä', shortcut: 'I' },
+  { id: 'show', testid: 'cad-show', label: 'Näytä kaikki', shortcut: 'Shift+H' },
+  { id: 'similar', testid: 'cad-similar', label: 'Valitse samanlaiset', shortcut: 'Shift+S' },
+  { id: 'match', testid: 'cad-match', label: 'Kopioi ominaisuudet', shortcut: 'K' },
 ]
+
+const COMMANDS = [
+  ...CAD_COMMANDS.map((cmd) => ({ ...cmd, shortcut: cmd.short })),
+  ...EXTRA,
+]
+
+const GROUPS = [
+  ['move', 'copy', 'rotate', 'rotate90', 'scale', 'mirror'],
+  ['array', 'offset', 'stretch', 'align', 'measure'],
+  ['delete', 'group', 'ungroup', 'lock', 'unlock'],
+  ['hide', 'isolate', 'show', 'similar', 'match'],
+]
+
+function byId(id) {
+  return COMMANDS.find((item) => item.id === id)
+}
 
 export function CadToolbar({ active, onCommand, onSelectType, onLayer }) {
   return (
@@ -51,16 +68,20 @@ export function CadToolbar({ active, onCommand, onSelectType, onLayer }) {
         <option value="">Tyyppi…</option>
         {SELECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
       </select>
-      {CAD_COMMANDS.map((cmd) => (
-        <button key={cmd.id} type="button" data-testid={cmd.testid} title={`${cmd.label} (${cmd.short})`} style={iconBtn(active === cmd.id)} onClick={() => onCommand(cmd.id)}>
-          {cmd.short}
-        </button>
-      ))}
       <span style={{ width: 1, height: 18, background: '#e7e5e4', flexShrink: 0 }} />
-      {EXTRA.map((cmd) => (
-        <button key={cmd.id} type="button" data-testid={cmd.testid} title={cmd.title} style={iconBtn(active === cmd.id)} onClick={() => onCommand(cmd.id)}>
-          {cmd.icon}
-        </button>
+      {GROUPS.map((group) => (
+        <span key={group[0]} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          {group.map((id) => {
+            const cmd = byId(id)
+            if (!cmd) return null
+            return (
+              <button key={id} type="button" data-testid={cmd.testid} aria-label={cmd.label} title={`${cmd.label} (${cmd.shortcut})`} style={iconBtn(active === id)} onClick={() => onCommand(id)}>
+                <CadIcon name={id} />
+              </button>
+            )
+          })}
+          <span style={{ width: 1, height: 18, background: '#e7e5e4', flexShrink: 0, marginLeft: 2 }} />
+        </span>
       ))}
       <select data-testid="cad-layer" defaultValue="" title="Vaihda taso" onChange={(event) => { if (event.target.value) onLayer(event.target.value); event.target.value = '' }} style={{ height: 28, maxWidth: 120, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12, fontWeight: 650, flexShrink: 0 }}>
         <option value="">Taso…</option>

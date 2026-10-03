@@ -420,7 +420,7 @@ function cableMark(run) {
   return ''
 }
 
-function CableMark({ points, text, X, Y, show = true, side = 1 }) {
+function CableMark({ points, text, X, Y, show = true, side = 1, along = 0.5, gap = 0.55 }) {
   if (!show || !text || !points || points.length < 2) return null
   let best = null
   for (let i = 1; i < points.length; i += 1) {
@@ -431,9 +431,8 @@ function CableMark({ points, text, X, Y, show = true, side = 1 }) {
   const dx = best.b.x - best.a.x
   const dz = best.b.z - best.a.z
   const len = Math.hypot(dx, dz) || 1
-  const along = 0.5
-  const ox = (-dz / len) * 0.55 * side
-  const oz = (dx / len) * 0.55 * side
+  const ox = (-dz / len) * gap * side
+  const oz = (dx / len) * gap * side
   return (
     <text
       data-testid="cable-mark"
@@ -450,6 +449,20 @@ function CableMark({ points, text, X, Y, show = true, side = 1 }) {
     >
       {text}
     </text>
+  )
+}
+
+function LoopTag({ points, label, X, Y }) {
+  if (!points?.length || label == null) return null
+  const cx = points.reduce((sum, point) => sum + point.x, 0) / points.length
+  const cz = points.reduce((sum, point) => sum + point.z, 0) / points.length
+  const text = String(label)
+  const width = Math.max(14, text.length * 6.5 + 8)
+  return (
+    <g data-testid="loop-tag" transform={`translate(${X(cx)} ${Y(cz)})`} style={{ pointerEvents: 'none' }}>
+      <rect x={-width / 2} y={-7} width={width} height={12} rx={2} fill="#fff" stroke="#c2410c" strokeWidth={0.8} />
+      <text x={0} y={2.4} textAnchor="middle" fontSize="8" fontWeight="700" fill="#9a3412">{text}</text>
+    </g>
   )
 }
 
@@ -528,7 +541,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               fill="none"
               stroke={color}
               strokeWidth={width}
-              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : dashed ? '6 4' : undefined}
+              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : (run.kind === 'floorheat' || run.role === 'loop' ? '3 2' : dashed ? '6 4' : undefined)}
               data-wire-role={run.role || ''}
               data-heat-kind={run.system === 'heat' ? run.kind : undefined}
               data-testid={run.kind === 'collector' ? 'collector-pipe' : (String(run.linkedFrom || '').includes(':sewer') ? 'sewer-line' : (run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined))}
@@ -603,7 +616,19 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               </g>
             ))}
             <SlopeMark run={{ ...run, points }} X={X} Y={Y} show={showText} />
-            <CableMark points={points} text={cableMark(run)} X={X} Y={Y} show={showText} side={run.role === 'return' ? -1 : 1} />
+            <CableMark
+              points={points}
+              text={cableMark(run)}
+              X={X}
+              Y={Y}
+              show={showText && run.kind !== 'floorheat'}
+              side={run.role === 'return' ? -1 : 1}
+              along={run.role === 'return' ? 0.18 : run.role === 'supply' ? 0.82 : 0.5}
+              gap={run.system === 'heat' ? 0.9 : 0.55}
+            />
+            {(run.kind === 'floorheat' || run.role === 'loop') && (
+              <LoopTag points={points} label={run.loopIndex || run.outlet} X={X} Y={Y} />
+            )}
           </g>
         )
       })}

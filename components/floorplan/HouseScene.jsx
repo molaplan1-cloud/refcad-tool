@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { Edges, Html, Line, OrbitControls } from '@react-three/drei'
+import { ContactShadows, Edges, Html, Line, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { finishesOf } from '@/lib/finishes'
 import {
@@ -118,18 +118,17 @@ function paintCanvas(look) {
   ctx.strokeStyle = joint
   ctx.lineWidth = look.painted ? 1.2 : 2
   if (look.pattern === 'brick') {
-    const course = 16
-    for (let y = 0; y <= 128; y += course) {
-      ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(128, y)
-      ctx.stroke()
-      const shift = Math.round(y / course) % 2 ? 16 : 0
-      for (let x = -32 + shift; x < 128; x += 32) {
-        ctx.beginPath()
-        ctx.moveTo(x, y)
-        ctx.lineTo(x, y + course)
-        ctx.stroke()
+    ctx.fillStyle = look.mortar || '#c8b8a4'
+    ctx.fillRect(0, 0, 128, 128)
+    const brickW = 60
+    const brickH = 28
+    const mortar = 4
+    for (let row = 0, y = mortar; y < 128; row += 1, y += brickH + mortar) {
+      const shift = row % 2 ? -(brickW + mortar) / 2 : 0
+      for (let x = shift; x < 128; x += brickW + mortar) {
+        const tone = 0.86 + ((row * 3 + Math.round(x)) % 5) * 0.03
+        ctx.fillStyle = shadeHex(look.color || '#9c341f', tone)
+        ctx.fillRect(x, y, brickW, brickH)
       }
     }
   } else if (look.pattern === 'boards-h' || look.pattern === 'boards-v' || look.pattern === 'batten') {
@@ -166,11 +165,25 @@ function paintCanvas(look) {
       ctx.fillStyle = 'rgba(0,0,0,0.08)'
       for (let i = 0; i < 70; i += 1) ctx.fillRect((i * 19) % 128, (i * 23) % 128, 3, 2)
     } else if (look.pattern === 'tile' || look.pattern === 'tile-metal') {
-      for (let y = 18; y < 128; y += step) {
+      const tileW = look.pattern === 'tile-metal' ? 32 : 28
+      const tileH = 22
+      for (let row = 0, y = 2; y < 128; row += 1, y += tileH) {
+        const shift = row % 2 ? tileW / 2 : 0
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)'
         ctx.beginPath()
-        ctx.moveTo(0, y)
-        ctx.lineTo(128, y)
+        ctx.moveTo(0, y + tileH - 2)
+        ctx.lineTo(128, y + tileH - 2)
         ctx.stroke()
+        for (let x = -tileW + shift; x < 128; x += tileW) {
+          ctx.beginPath()
+          ctx.moveTo(x, y + 4)
+          ctx.quadraticCurveTo(x + tileW / 2, y - 2, x + tileW, y + 4)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.moveTo(x + tileW, y + 4)
+          ctx.lineTo(x + tileW, y + tileH - 2)
+          ctx.stroke()
+        }
       }
     } else {
       for (let x = step; x < 128; x += step) {
@@ -191,10 +204,17 @@ function paintCanvas(look) {
   return tex
 }
 
+function shadeHex(hex, tone) {
+  const raw = String(hex || '#9c341f').replace('#', '')
+  const full = raw.length === 3 ? raw.split('').map((ch) => ch + ch).join('') : raw.padEnd(6, '0')
+  const channel = (index) => Math.max(0, Math.min(255, Math.round(parseInt(full.slice(index, index + 2), 16) * tone)))
+  return `#${[0, 2, 4].map((index) => channel(index).toString(16).padStart(2, '0')).join('')}`
+}
+
 function repeatedCladding(look, span, height) {
   const board = Math.max(0.07, (look.boardWidthMm || 145) / 1000)
-  const unitX = look.pattern === 'brick' ? 0.48 : look.pattern === 'boards-v' || look.pattern === 'batten' ? board : look.pattern === 'seam' || look.pattern === 'corrugated' ? 0.28 : 0.6
-  const unitY = look.pattern === 'brick' ? 0.075 : look.pattern === 'boards-h' ? board : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.18 : 0.4
+  const unitX = look.pattern === 'brick' ? 0.52 : look.pattern === 'boards-v' || look.pattern === 'batten' ? board * 4 : look.pattern === 'seam' || look.pattern === 'corrugated' ? 0.42 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.56 : 0.6
+  const unitY = look.pattern === 'brick' ? 0.26 : look.pattern === 'boards-h' ? board * 4 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.36 : look.pattern === 'seam' ? 0.8 : 0.4
   const rx = Math.max(0.5, Math.round((span / unitX) * 4) / 4)
   const ry = Math.max(0.5, Math.round((height / unitY) * 4) / 4)
   const key = `clad-repeat:${look.pattern}:${look.color}:${look.mortar}:${look.painted ? 1 : 0}:${look.boardWidthMm}:${rx}:${ry}`
@@ -250,7 +270,7 @@ function outlineScale(args, mark) {
   return args.map((size) => (Math.max(size, 0.02) + pad * 2) / Math.max(size, 0.02))
 }
 
-function Solid({ args, position, rotation, color, map, opacity = 1, edges = true, pick, mark }) {
+function Solid({ args, position, rotation, color, map, opacity = 1, edges = true, pick, mark, realistic = false, roughness = 0.82 }) {
   const transparent = opacity < 0.98
   const face = mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#ccfbf1' : color
   const edge = mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : '#1e293b'
@@ -258,22 +278,24 @@ function Solid({ args, position, rotation, color, map, opacity = 1, edges = true
     <mesh
       position={position}
       rotation={rotation}
-      castShadow={false}
-      receiveShadow={false}
+      castShadow={realistic}
+      receiveShadow={realistic}
       userData={pick ? { pick } : undefined}
       raycast={opacity < 0.5 ? noopRaycast : undefined}
     >
       <boxGeometry args={args} />
-      <meshLambertMaterial
+      <meshStandardMaterial
         color={face}
         emissive={mark === 'selected' ? '#115e59' : '#000000'}
-        emissiveIntensity={mark === 'selected' ? 0.55 : 0}
+        emissiveIntensity={mark === 'selected' ? 0.35 : 0}
         map={mark || transparent ? null : map || null}
+        roughness={realistic ? roughness : 1}
+        metalness={0.02}
         transparent={transparent}
         opacity={opacity}
         depthWrite={!transparent}
       />
-      {edges && !transparent && <Edges threshold={20} color={edge} />}
+      {edges && !realistic && !transparent && <Edges threshold={20} color={edge} />}
       {mark && (
         <mesh scale={outlineScale(args, mark)} raycast={noopRaycast}>
           <boxGeometry args={args} />
@@ -344,24 +366,32 @@ function WallMesh({ plan, mode, selected, hovered }) {
                 opacity={opacity}
                 pick={pick}
                 mark={mark}
+                realistic={realistic}
+                roughness={cladding?.pattern === 'brick' ? 0.86 : 0.72}
+                edges={!realistic}
               />
               {['left', 'right'].map((side) => {
                 if (!roomForWallSide(plan, wall, side)) return null
                 const matId = resolveFaceMaterial(plan, wall, side)
                 const item = materialOf('interior', matId)
                 const sign = side === 'left' ? 1 : -1
-                const shift = thick / 2 + 0.012
+                const shift = thick / 2 + 0.018
+                const skin = mode === 'solid' ? finishTexture('interior', item.id) : null
                 return (
                   <mesh
                     key={`${faceKey}-${side}`}
                     position={[mid.x + (-dz * sign) * shift, y, mid.z + (dx * sign) * shift]}
                     rotation={[0, yaw, 0]}
                     raycast={noopRaycast}
+                    castShadow={realistic}
+                    receiveShadow={realistic}
                   >
-                    <boxGeometry args={[Math.max(0.05, span - 0.02), height, 0.02]} />
-                    <meshLambertMaterial
+                    <boxGeometry args={[Math.max(0.05, span - 0.02), height, 0.036]} />
+                    <meshStandardMaterial
                       color={item.color}
-                      map={mode === 'solid' ? finishTexture('interior', item.id) : null}
+                      map={skin}
+                      roughness={0.78}
+                      metalness={0.02}
                       transparent={opacity < 0.98}
                       opacity={opacity}
                     />
@@ -392,20 +422,59 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
   const width = Math.max(0.2, opening.width || 0.9)
   const depth = thicknessOf(wall, plan) + 0.04
   const frame = Math.min(0.07, width * 0.08, height * 0.08)
+  const finish = finishesOf(plan)
+  const box = planBounds(plan)
+  const cx = (box.minX + box.maxX) / 2
+  const cz = (box.minZ + box.maxZ) / 2
+  const outward = (-dz) * (mid.x - cx) + dx * (mid.z - cz) >= 0 ? 1 : -1
+  const glassW = Math.max(0.08, width - frame * 2)
+  const glassH = Math.max(0.08, height - frame * 2)
+  if (realistic && opening.kind === 'window') {
+    const trim = finish.windowColor || '#f4f1ea'
+    const bar = (args, position) => (
+      <mesh position={position} castShadow receiveShadow raycast={noopRaycast}>
+        <boxGeometry args={args} />
+        <meshStandardMaterial color={trim} roughness={0.42} metalness={0.05} />
+      </mesh>
+    )
+    return (
+      <group position={[mid.x, sill + height / 2, mid.z]} rotation={[0, yaw, 0]}>
+        <mesh userData={{ pick }} raycast={undefined}>
+          <boxGeometry args={[width, height, 0.04]} />
+          <meshStandardMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+        {bar([width + 0.02, frame, 0.08], [0, height / 2 - frame / 2, 0])}
+        {bar([width + 0.02, frame, 0.08], [0, -height / 2 + frame / 2, 0])}
+        {bar([frame, height, 0.08], [-width / 2 + frame / 2, 0, 0])}
+        {bar([frame, height, 0.08], [width / 2 - frame / 2, 0, 0])}
+        {bar([0.035, glassH, 0.05], [0, 0, 0])}
+        <mesh position={[0, 0, 0.012]} raycast={noopRaycast}>
+          <boxGeometry args={[glassW, glassH, 0.012]} />
+          <meshStandardMaterial color="#d5e7f6" roughness={0.06} metalness={0.22} transparent opacity={0.62} />
+        </mesh>
+        <mesh position={[0, -height / 2 - 0.025, outward * (depth / 2 + 0.02)]} raycast={noopRaycast} castShadow>
+          <boxGeometry args={[width + 0.08, 0.045, 0.14]} />
+          <meshStandardMaterial color={trim} roughness={0.5} metalness={0.04} />
+        </mesh>
+      </group>
+    )
+  }
   return (
     <group position={[mid.x, sill + height / 2, mid.z]} rotation={[0, yaw, 0]}>
       <Solid
-        args={[width, height, depth]}
-        position={[0, 0, 0]}
+        args={opening.kind === 'window' ? [width, height, 0.06] : [width * 0.96, height, 0.05]}
+        position={[0, 0, opening.kind === 'window' ? 0 : outward * 0.02]}
         color={realistic ? colour.color : '#f8fafc'}
         pick={pick}
         mark={markOf(selected, hovered, pick)}
-        edges={opening.kind !== 'window'}
+        edges={!realistic && opening.kind !== 'window'}
+        realistic={realistic}
+        roughness={0.55}
       />
       {opening.kind === 'window' && (
-        <mesh position={[0, 0, depth / 2 + 0.005]} raycast={noopRaycast}>
-          <boxGeometry args={[Math.max(0.05, width - frame * 2), Math.max(0.05, height - frame * 2), 0.015]} />
-          <meshLambertMaterial color={realistic ? '#c5d8ee' : '#e2e8f0'} />
+        <mesh position={[0, 0, 0.02]} raycast={noopRaycast}>
+          <boxGeometry args={[glassW, glassH, 0.012]} />
+          <meshStandardMaterial color="#e2e8f0" roughness={0.2} />
         </mesh>
       )}
     </group>
@@ -532,12 +601,14 @@ function RoofMesh({ plan, mode, selected, hovered }) {
   const mark = markOf(selected, hovered, pick)
   return (
     <group>
-      <mesh geometry={geom} userData={{ pick }} raycast={ghost ? noopRaycast : undefined}>
-        <meshLambertMaterial
+      <mesh geometry={geom} userData={{ pick }} castShadow={realistic} receiveShadow={realistic} raycast={ghost ? noopRaycast : undefined}>
+        <meshStandardMaterial
           color={mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#99f6e4' : ghost || !realistic ? '#e2e8f0' : finish.color}
           emissive={mark === 'selected' ? '#115e59' : '#000000'}
-          emissiveIntensity={mark === 'selected' ? 0.45 : 0}
+          emissiveIntensity={mark === 'selected' ? 0.35 : 0}
           map={mark ? null : map}
+          roughness={finish.pattern === 'seam' || finish.pattern === 'corrugated' ? 0.38 : 0.72}
+          metalness={finish.pattern === 'seam' || finish.pattern === 'corrugated' || finish.pattern === 'tile-metal' ? 0.35 : 0.04}
           side={THREE.DoubleSide}
           transparent={ghost && !mark}
           opacity={ghost && !mark ? 0.15 : 1}
@@ -545,7 +616,7 @@ function RoofMesh({ plan, mode, selected, hovered }) {
         />
         {mark && <Edges threshold={15} color={mark === 'selected' ? '#0f766e' : '#14b8a6'} />}
       </mesh>
-      {edgeSpecs.map((edge, index) => (
+      {!realistic && edgeSpecs.map((edge, index) => (
         <mesh key={index} position={edge.position} quaternion={edge.quaternion}>
           <boxGeometry args={[0.045, edge.length, 0.045]} />
           <meshBasicMaterial color={realistic ? finishesOf(plan).trimColor : '#1e293b'} />
@@ -1260,13 +1331,24 @@ function Dressing({ plan }) {
     .map((edge, index) => {
       const length = Math.max(0.2, Math.hypot(edge.b[0] - edge.a[0], edge.b[2] - edge.a[2]))
       const yaw = Math.atan2(-(edge.b[2] - edge.a[2]), edge.b[0] - edge.a[0])
-      return {
-        key: `gutter-${index}`,
-        position: [(edge.a[0] + edge.b[0]) / 2, model.wallHeight - 0.05, (edge.a[2] + edge.b[2]) / 2],
-        rotation: [0, yaw, 0],
-        args: [length, 0.06, 0.09],
-        color: gutter,
-      }
+      const mx = (edge.a[0] + edge.b[0]) / 2
+      const mz = (edge.a[2] + edge.b[2]) / 2
+      return [
+        {
+          key: `fascia-${index}`,
+          position: [mx, model.wallHeight + 0.02, mz],
+          rotation: [0, yaw, 0],
+          args: [length, 0.18, 0.03],
+          color: trim,
+        },
+        {
+          key: `gutter-${index}`,
+          position: [mx, model.wallHeight - 0.08, mz],
+          rotation: [0, yaw, 0],
+          args: [length, 0.07, 0.1],
+          color: gutter,
+        },
+      ]
     })
   const downs = [[box.minX, box.minZ], [box.maxX, box.minZ], [box.minX, box.maxZ], [box.maxX, box.maxZ]].map(([x, z], index) => ({
     key: `down-${index}`,
@@ -1277,10 +1359,10 @@ function Dressing({ plan }) {
   }))
   return (
     <group>
-      {[...trims.map((item) => ({ ...item, color: trim })), ...gutters, ...downs].map((item) => (
-        <mesh key={item.key} position={item.position} rotation={item.rotation} raycast={noopRaycast}>
+      {[...trims.map((item) => ({ ...item, color: trim })), ...gutters.flat(), ...downs].map((item) => (
+        <mesh key={item.key} position={item.position} rotation={item.rotation} castShadow receiveShadow raycast={noopRaycast}>
           <boxGeometry args={item.args} />
-          <meshLambertMaterial color={item.color} />
+          <meshStandardMaterial color={item.color} roughness={0.55} metalness={item.key.startsWith('gutter') || item.key.startsWith('down') ? 0.35 : 0.04} />
         </mesh>
       ))}
     </group>
@@ -1332,14 +1414,31 @@ export default function HouseScene({
       dpr={[1, 2]}
       gl={{ antialias: true }}
       onCreated={({ gl }) => {
-        gl.toneMapping = THREE.NoToneMapping
-        gl.shadowMap.enabled = false
+        gl.toneMapping = THREE.ACESFilmicToneMapping
+        gl.toneMappingExposure = 1.05
+        gl.shadowMap.enabled = true
+        gl.shadowMap.type = THREE.PCFSoftShadowMap
         gl.setClearColor('#e7e5e4')
       }}
     >
-      <color attach="background" args={['#e7e5e4']} />
-      <ambientLight intensity={0.94} />
-      <directionalLight position={[8, 22, 10]} intensity={0.5} />
+      <color attach="background" args={['#d9e3ee']} />
+      <hemisphereLight args={['#f7f4ee', '#b7aa98', 0.55]} />
+      <ambientLight intensity={0.22} />
+      <directionalLight
+        position={[14, 22, 8]}
+        intensity={1.25}
+        castShadow
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+        shadow-camera-near={1}
+        shadow-camera-far={80}
+        shadow-camera-left={-18}
+        shadow-camera-right={18}
+        shadow-camera-top={18}
+        shadow-camera-bottom={-18}
+        shadow-bias={-0.0006}
+      />
+      <ContactShadows position={[cx, 0.01, cz]} opacity={0.32} scale={Math.max(18, span * 1.15)} blur={2.6} far={6} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.02, cz]} raycast={noopRaycast}>
         <planeGeometry args={[Math.max(24, span * 1.4), Math.max(24, span * 1.4)]} />
         <meshBasicMaterial color="#efe8d8" transparent={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground')} opacity={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground') ? 0.35 : 1} depthWrite={!(yardHasUnderground(plan.yard) && layerVisible(plan, 'ground'))} />

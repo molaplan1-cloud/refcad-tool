@@ -378,6 +378,14 @@ function worldPath(points, X, Y) {
   return `${points.map((point, index) => `${index ? 'L' : 'M'}${X(point.x)} ${Y(point.z)}`).join(' ')} Z`
 }
 
+function faceInk(color) {
+  const hex = String(color || '').replace('#', '')
+  if (hex.length < 6) return '#44403c'
+  const value = (pair) => parseInt(hex.slice(pair, pair + 2), 16)
+  const mix = (channel) => Math.round(channel * 0.55)
+  return `#${[mix(value(0)), mix(value(2)), mix(value(4))].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`
+}
+
 function FaceLines({ plan, X, Y, selected, onSelect }) {
   return (
     <g data-testid="face-lines">
@@ -400,11 +408,11 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
         const cx = poly.reduce((sum, point) => sum + point.x, 0) / (poly.length || 1)
         const cz = poly.reduce((sum, point) => sum + point.z, 0) / (poly.length || 1)
         if ((cx - midX) * ox + (cz - midZ) * oz < 0) { ox = -ox; oz = -oz }
-        const shift = 0.07
+        const shift = 0.16
         const a = { x: a0.x + ox * shift, z: a0.z + oz * shift }
         const b = { x: b0.x + ox * shift, z: b0.z + oz * shift }
         const active = selected?.id === room.id && selected?.wallId === edge.wallId
-        const dashed = material === 'gypsum' || material === 'wallpaper'
+        const hatch = material === 'tile' ? '2 1.6' : material === 'panel' ? '7 2' : material === 'gypsum' || material === 'wallpaper' ? '4 2.5' : undefined
         return (
           <line
             key={`${room.id}-${index}`}
@@ -414,9 +422,9 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
             y1={Y(a.z)}
             x2={X(b.x)}
             y2={Y(b.z)}
-            stroke={active ? '#0f766e' : color}
-            strokeWidth={active ? 5 : 4}
-            strokeDasharray={dashed ? '5 3' : undefined}
+            stroke={active ? '#0f766e' : faceInk(color)}
+            strokeWidth={active ? 3.2 : 2.2}
+            strokeDasharray={hatch}
             strokeLinecap="butt"
             onPointerDown={(event) => {
               event.stopPropagation()
@@ -515,8 +523,7 @@ function WallOutlines({ plan, X, Y, selectedIds = [], simple = false }) {
                   data-wall={wall.id}
                   points={pointsOf(face.points)}
                   fill={`url(#hatch-${face.hatch || 'gypsum'})`}
-                  stroke="#a8a29e"
-                  strokeWidth={0.25}
+                  stroke="none"
                 />
               ))}
             </g>
@@ -2093,9 +2100,9 @@ export default function FloorPlanApp() {
                 style={{ display: 'block', cursor: tool === 'select' && !placing && !svcTool && !yardTool ? 'default' : 'crosshair', touchAction: 'none' }}
               >
                 <defs>
-                  <pattern id="poche" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                    <rect width="5" height="5" fill="#3f3834" />
-                    <line x1="0" y1="0" x2="0" y2="5" stroke="#2a241f" strokeWidth="0.6" />
+                  <pattern id="poche" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <rect width="6" height="6" fill="#f4f2ef" />
+                    <line x1="0" y1="0" x2="0" y2="6" stroke="#c8c2ba" strokeWidth="0.7" />
                   </pattern>
                   <HatchDefs />
                 </defs>
@@ -2144,7 +2151,9 @@ export default function FloorPlanApp() {
                     )
                   }
                   return (
-                    <g key={opening.id} data-testid="door-mark" data-swing={opening.swing >= 0 ? 'left' : 'right'} data-leaf={opening.inward ? 'in' : 'out'} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
+                    <g key={opening.id} data-testid="door-mark" data-swing={opening.swing >= 0 ? 'left' : 'right'} data-leaf={opening.inward ? 'in' : 'out'} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.05} fill="none">
+                      <line data-testid="door-jamb" x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} />
+                      <line data-testid="door-jamb" x1={X(fig.jambB[0].x)} y1={Y(fig.jambB[0].z)} x2={X(fig.jambB[1].x)} y2={Y(fig.jambB[1].z)} />
                       <polyline points={fig.arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} />
                       <line x1={X(fig.hinge.x)} y1={Y(fig.hinge.z)} x2={X(fig.leaf.x)} y2={Y(fig.leaf.z)} />
                     </g>
