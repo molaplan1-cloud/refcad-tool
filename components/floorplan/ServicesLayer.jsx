@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import { FUSE_SERIES } from '@/lib/electric'
 import { HEAT_SOURCES, pexSize } from '@/lib/hydronic'
 import {
-  CIRCUITS,
   PLACEABLES,
   SERVICE_SYSTEMS,
   airflowBalance,
@@ -297,7 +296,21 @@ function NodeSymbol({ node }) {
       </g>
     )
   }
-  if (node.kind === 'junction') return <circle r="3.4" fill="#1c1917" />
+  if (node.kind === 'junction') {
+    return (
+      <g data-testid="junction-symbol">
+        <rect x="-3.4" y="-3.4" width="6.8" height="6.8" fill="#fff" stroke="#1c1917" strokeWidth="1.15" />
+      </g>
+    )
+  }
+  if (node.kind === 'heater-control') {
+    return (
+      <g data-testid="heater-control-symbol">
+        <rect x="-7" y="-5" width="14" height="10" fill="#fff" stroke="#1c1917" strokeWidth="1.1" />
+        <text x="0" y="3" textAnchor="middle" fontSize="6" fontWeight="700" fill="#1c1917">OK</text>
+      </g>
+    )
+  }
   if (node.kind === 'data') return <polygon points="0,-6 6,5 -6,5" fill="#fff" stroke="#1c1917" strokeWidth="1.1" />
   if (node.kind === 'antenna') {
     return (
@@ -483,7 +496,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               fill="none"
               stroke={color}
               strokeWidth={width}
-              strokeDasharray={dashed ? '5 3' : undefined}
+              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : dashed ? '5 3' : undefined}
+              data-wire-role={run.role || ''}
               strokeLinejoin="round"
               strokeLinecap="round"
               style={{ pointerEvents: 'none' }}
@@ -535,7 +549,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               <text x="16" y="-14" fontSize="8" fontWeight="700" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth="2.2" paintOrder="stroke">{node.flow} l/s</text>
             </g>
           ) : null}
-          {node.system === 'electric' && node.circuit && node.kind !== 'junction' && node.kind !== 'panel' ? (
+          {node.system === 'electric' && node.circuit && node.kind !== 'panel' ? (
             <text data-testid="circuit-badge" x="11" y="-2" fontSize="9" fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{`R${node.circuit}`}</text>
           ) : null}
         </g>
@@ -634,6 +648,25 @@ function DeviceFields({ node, onPatch }) {
           ))}
         </select>
       </label>
+      {node.kind === 'switch' && (
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+          Kytkin
+          <select data-testid="switch-style" style={fieldStyle} value={node.switchStyle || 'single'} onChange={(event) => onPatch({ switchStyle: event.target.value })}>
+            <option value="single">Yksinkertainen</option>
+            <option value="two-way">Vaihtokytkin</option>
+            <option value="series">Sarjakytkin</option>
+          </select>
+        </label>
+      )}
+      {node.kind === 'socket' && (
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+          Syöttö
+          <select data-testid="socket-feed" style={fieldStyle} value={node.feed === 'radial' ? 'radial' : 'chain'} onChange={(event) => onPatch({ feed: event.target.value })}>
+            <option value="chain">Ketjutus</option>
+            <option value="radial">Säteittäinen</option>
+          </select>
+        </label>
+      )}
       <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
         Sulake
         <select
@@ -761,7 +794,7 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
             <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
               Virtapiiri
               <select data-testid="service-circuit" style={fieldStyle} value={node.circuit || 1} onChange={(event) => patchNode({ circuit: Number(event.target.value), circuitMode: 'manual' })}>
-                {CIRCUITS.map((item) => <option key={item.id} value={item.id}>{item.id} {item.name}</option>)}
+                {Array.from({ length: 16 }, (_, index) => index + 1).map((id) => <option key={id} value={id}>R{id}</option>)}
               </select>
             </label>
           )}
@@ -871,7 +904,7 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
               <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
                 Virtapiiri
                 <select data-testid="service-circuit" style={fieldStyle} value={run.circuit || 1} onChange={(event) => patchRun({ circuit: Number(event.target.value) })}>
-                  {CIRCUITS.map((item) => <option key={item.id} value={item.id}>{item.id} {item.name}</option>)}
+                  {Array.from({ length: 16 }, (_, index) => index + 1).map((id) => <option key={id} value={id}>R{id}</option>)}
                 </select>
               </label>
             </>
