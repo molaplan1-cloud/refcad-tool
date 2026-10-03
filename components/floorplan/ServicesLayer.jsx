@@ -1,5 +1,7 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { FUSE_SERIES } from '@/lib/electric'
 import {
   CIRCUITS,
   PLACEABLES,
@@ -58,6 +60,9 @@ export function ServiceBar({
   onTool,
   onLayer,
   onRoute,
+  onRewire,
+  onSchedule,
+  onDiagram,
   onFloorHeating,
   onFinish,
   onPdf,
@@ -104,6 +109,13 @@ export function ServiceBar({
         Lattialämmitys
       </label>
       <button type="button" data-testid="route-services" style={barBtn(false)} onClick={onRoute}>Reititä automaattisesti</button>
+      {system === 'electric' && (
+        <>
+          <button type="button" data-testid="rewire-electric" style={barBtn(false)} onClick={onRewire}>Johdota</button>
+          <button type="button" data-testid="open-schedule" style={barBtn(false)} onClick={onSchedule}>Ryhmäluettelo</button>
+          <button type="button" data-testid="open-diagram" style={barBtn(false)} onClick={onDiagram}>Pääkaavio</button>
+        </>
+      )}
       {SERVICE_SYSTEMS.map((item) => (
         <button key={`pdf-${item.id}`} type="button" data-testid={`service-pdf-${item.id}`} style={barBtn(false)} onClick={() => onPdf(item.id)}>{item.name} PDF</button>
       ))}
@@ -285,7 +297,59 @@ function NodeSymbol({ node }) {
       </g>
     )
   }
+  const badge = {
+    oven: ['U', 18],
+    radiator: ['P', 18],
+    ev: ['EV', 24],
+    heatpump: ['LP', 24],
+    'iv-unit': ['IV', 24],
+    boiler: ['V', 18],
+    washer: ['PK', 24],
+    dishwasher: ['AP', 24],
+  }[node.kind]
+  if (badge) {
+    const [label, width] = badge
+    return (
+      <g>
+        <rect x={-width / 2} y={-7} width={width} height={14} fill="#fff" stroke="#1c1917" strokeWidth={1.2} />
+        <text x="0" y="3.5" textAnchor="middle" fontSize="8" fontWeight="700" fill="#1c1917">{label}</text>
+      </g>
+    )
+  }
   return <circle r="4" fill={color} />
+}
+
+function cableMark(run) {
+  if (run.system !== 'electric') return ''
+  if (run.showMark || run.locked) return run.marking || ''
+  return ''
+}
+
+function CableMark({ points, text, X, Y }) {
+  if (!text || !points || points.length < 2) return null
+  let best = null
+  for (let i = 1; i < points.length; i += 1) {
+    const len = Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z)
+    if (!best || len > best.len) best = { len, a: points[i - 1], b: points[i] }
+  }
+  if (!best || best.len < 0.35) return null
+  return (
+    <text
+      data-testid="cable-mark"
+      x={X((best.a.x + best.b.x) / 2)}
+      y={Y((best.a.z + best.b.z) / 2) - 7}
+      textAnchor="middle"
+      fontSize="8"
+      fontWeight="650"
+      fill="#1c1917"
+      stroke="#fbfaf7"
+      strokeWidth="2.6"
+      paintOrder="stroke"
+      style={{ pointerEvents: 'none' }}
+    >
+      {text}
+    </text>
+  )
 }
 
 export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext }) {
@@ -360,6 +424,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               onContextMenu={(event) => open(event, { target: 'run', id: run.id, system: run.system })}
             />
             <SlopeMark run={{ ...run, points }} X={X} Y={Y} />
+            <CableMark points={points} text={cableMark(run)} X={X} Y={Y} />
           </g>
         )
       })}
@@ -397,8 +462,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               <text x="16" y="-14" fontSize="8" fontWeight="700" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth="2.2" paintOrder="stroke">{node.flow} l/s</text>
             </g>
           ) : null}
-          {!multi && node.system === 'electric' && node.circuit && (node.kind === 'panel' || node.kind === 'stove' || node.kind === 'heater') ? (
-            <text x="10" y="4" fontSize="8" fill="#44403c" stroke="#fbfaf7" strokeWidth="2" paintOrder="stroke">{node.circuit}</text>
+          {node.system === 'electric' && node.circuit && node.kind !== 'junction' && node.kind !== 'panel' ? (
+            <text data-testid="circuit-badge" x="11" y="-2" fontSize="9" fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{`R${node.circuit}`}</text>
           ) : null}
         </g>
       ))}
@@ -425,6 +490,121 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         </g>
       )}
     </g>
+  )
+}
+
+const LOAD_KINDS = ['socket', 'switch', 'light', 'stove', 'oven', 'heater', 'radiator', 'ev', 'heatpump', 'iv-unit', 'boiler', 'washer', 'dishwasher']
+const SECTIONS = [1.5, 2.5, 4, 6, 10, 16, 25]
+
+function NumberField({ testid, label, value, onCommit, step = '0.1' }) {
+  const [text, setText] = useState(value == null ? '' : String(value))
+  useEffect(() => {
+    setText(value == null ? '' : String(value))
+  }, [value])
+  return (
+    <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+      {label}
+      <input
+        data-testid={testid}
+        style={fieldStyle}
+        inputMode="decimal"
+        step={step}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={() => {
+          const next = Number(String(text).replace(',', '.'))
+          if (Number.isFinite(next)) onCommit(next)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+        }}
+      />
+    </label>
+  )
+}
+
+function DeviceFields({ node, onPatch }) {
+  const cores = Number(node.voltage) >= 300 ? 5 : 3
+  const circuitValue = node.circuitMode === 'manual' && node.circuit ? String(node.circuit) : 'auto'
+  return (
+    <div data-testid="device-fields">
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Jännite
+        <select data-testid="device-voltage" style={fieldStyle} value={Number(node.voltage) >= 300 ? 400 : 230} onChange={(event) => onPatch({ voltage: Number(event.target.value) })}>
+          <option value={230}>230 V (1~ L+N+PE)</option>
+          <option value={400}>400 V (3~ L1–L3+N+PE)</option>
+        </select>
+      </label>
+      <NumberField testid="device-power" label="Teho (W)" value={node.power ?? 0} step="1" onCommit={(power) => onPatch({ power })} />
+      <NumberField testid="device-cos" label="cos φ" value={node.cosPhi ?? 1} onCommit={(cosPhi) => onPatch({ cosPhi })} />
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Liitäntä
+        <select data-testid="device-connection" style={fieldStyle} value={node.connection === 'socket' ? 'socket' : 'fixed'} onChange={(event) => onPatch({ connection: event.target.value })}>
+          <option value="socket">Pistorasia</option>
+          <option value="fixed">Kiinteä</option>
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Ryhmä
+        <select
+          data-testid="device-circuit"
+          style={fieldStyle}
+          value={circuitValue}
+          onChange={(event) => {
+            if (event.target.value === 'auto') onPatch({ circuitMode: 'auto' })
+            else onPatch({ circuitMode: 'manual', circuit: Number(event.target.value) })
+          }}
+        >
+          <option value="auto">Automaattinen{node.circuit ? ` (R${node.circuit})` : ''}</option>
+          {Array.from({ length: 16 }, (_, index) => index + 1).map((id) => (
+            <option key={id} value={id}>R{id}</option>
+          ))}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Sulake
+        <select
+          data-testid="device-fuse"
+          style={fieldStyle}
+          value={node.fuseManual ? String(node.fuse) : 'auto'}
+          onChange={(event) => {
+            if (event.target.value === 'auto') onPatch({ fuseManual: false })
+            else onPatch({ fuseManual: true, fuse: Number(event.target.value) })
+          }}
+        >
+          <option value="auto">Automaattinen ({node.recommendedFuse || node.fuse || '—'} A)</option>
+          {FUSE_SERIES.map((amp) => <option key={amp} value={amp}>{amp} A</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Kaapeli
+        <select
+          data-testid="device-cable"
+          style={fieldStyle}
+          value={node.cableManual ? String(node.section) : 'auto'}
+          onChange={(event) => {
+            if (event.target.value === 'auto') onPatch({ cableManual: false })
+            else onPatch({ cableManual: true, section: Number(event.target.value) })
+          }}
+        >
+          <option value="auto">Automaattinen ({node.cable || '—'})</option>
+          {SECTIONS.map((section) => (
+            <option key={section} value={section}>{cores}x{String(section).replace('.', ',')}</option>
+          ))}
+        </select>
+      </label>
+      <div data-testid="device-size" style={{ fontSize: 12, color: '#44403c', marginBottom: 8, lineHeight: 1.45 }}>
+        {`${Number(node.current || 0).toFixed(1).replace('.', ',')} A`}
+        {node.phase ? ` · ${node.phase}` : ''}
+        {node.cable ? ` · ${node.cable}` : ''}
+        {node.marking ? ` · ${node.marking}` : ''}
+        {node.rcd ? ' · vikavirtasuoja 30 mA' : ''}
+        {node.dropPct ? ` · jännitehäviö ${String(node.dropPct).replace('.', ',')} %` : ''}
+      </div>
+      {node.warning ? (
+        <div data-testid="size-warning" style={{ fontSize: 12, color: '#b91c1c', marginBottom: 8 }}>{node.warning}</div>
+      ) : null}
+    </div>
   )
 }
 
@@ -501,10 +681,13 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
               </select>
             </label>
           )}
-          {node.system === 'electric' && (
+          {node.system === 'electric' && LOAD_KINDS.includes(node.kind) && (
+            <DeviceFields node={node} onPatch={patchNode} />
+          )}
+          {node.system === 'electric' && !LOAD_KINDS.includes(node.kind) && node.kind !== 'panel' && (
             <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
               Virtapiiri
-              <select data-testid="service-circuit" style={fieldStyle} value={node.circuit || 1} onChange={(event) => patchNode({ circuit: Number(event.target.value) })}>
+              <select data-testid="service-circuit" style={fieldStyle} value={node.circuit || 1} onChange={(event) => patchNode({ circuit: Number(event.target.value), circuitMode: 'manual' })}>
                 {CIRCUITS.map((item) => <option key={item.id} value={item.id}>{item.id} {item.name}</option>)}
               </select>
             </label>
@@ -558,12 +741,19 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
             </label>
           )}
           {run.system === 'electric' && (
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-              Virtapiiri
-              <select data-testid="service-circuit" style={fieldStyle} value={run.circuit || 1} onChange={(event) => patchRun({ circuit: Number(event.target.value) })}>
-                {CIRCUITS.map((item) => <option key={item.id} value={item.id}>{item.id} {item.name}</option>)}
-              </select>
-            </label>
+            <>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                <input data-testid="service-lock" type="checkbox" checked={Boolean(run.locked)} onChange={(event) => patchRun({ locked: event.target.checked })} />
+                Lukitse johto
+              </label>
+              {run.marking ? <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>{run.marking}</div> : null}
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                Virtapiiri
+                <select data-testid="service-circuit" style={fieldStyle} value={run.circuit || 1} onChange={(event) => patchRun({ circuit: Number(event.target.value) })}>
+                  {CIRCUITS.map((item) => <option key={item.id} value={item.id}>{item.id} {item.name}</option>)}
+                </select>
+              </label>
+            </>
           )}
         </>
       )}
