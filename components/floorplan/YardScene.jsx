@@ -239,6 +239,7 @@ function sheetGeometry(points, lift = 0.03) {
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
   geo.computeVertexNormals()
+  geo.computeBoundingSphere()
   return geo
 }
 
@@ -284,7 +285,7 @@ function CoverMesh({ plan, item, selected }) {
   return (
     <group userData={{ pick }}>
       {members.posts.map((post, index) => (
-        <mesh key={`post-${index}`} position={[post.x, cover.height / 2, post.z]}>
+        <mesh key={`post-${index}`} position={[post.x, cover.height / 2, post.z]} frustumCulled={false}>
           <boxGeometry args={[cover.postSize, cover.height, cover.postSize]} />
           <meshStandardMaterial color={frame} roughness={metal ? 0.35 : 0.62} metalness={metal ? 0.55 : 0.04} />
         </mesh>
@@ -300,31 +301,16 @@ function CoverMesh({ plan, item, selected }) {
         metal,
       ))}
       {roofGeo && (
-        <mesh geometry={roofGeo}>
-          {glass ? (
-            <meshPhysicalMaterial
-              color={look.color || '#DBEAFE'}
-              transparent
-              opacity={Math.min(0.72, (look.opacity || 0.28) + 0.18)}
-              transmission={0.72}
-              thickness={0.04}
-              roughness={cover.roofing === 'glass' ? 0.04 : 0.16}
-              metalness={0}
-              ior={1.42}
-              side={THREE.DoubleSide}
-              depthWrite={false}
-            />
-          ) : (
-            <meshStandardMaterial
-              color={look.color || '#334155'}
-              transparent={Boolean(look.transparent)}
-              opacity={look.transparent ? (look.opacity || 0.9) : 1}
-              roughness={cover.roofing === 'metal' ? 0.42 : 0.8}
-              metalness={cover.roofing === 'metal' ? 0.35 : 0}
-              side={THREE.DoubleSide}
-              depthWrite={!look.transparent}
-            />
-          )}
+        <mesh geometry={roofGeo} frustumCulled={false}>
+          <meshStandardMaterial
+            color={glass ? (cover.roofing === 'polycarbonate' && cover.roofTint !== 'opal' ? '#8ECAEF' : (look.color || '#E0F2FE')) : (look.color || '#334155')}
+            transparent={Boolean(look.transparent)}
+            opacity={look.transparent ? (cover.roofing === 'polycarbonate' ? (cover.roofTint === 'opal' ? 0.55 : 0.46) : cover.roofing === 'glass' ? 0.32 : (look.opacity || 0.9)) : 1}
+            roughness={cover.roofing === 'glass' ? 0.04 : cover.roofing === 'metal' ? 0.4 : 0.12}
+            metalness={cover.roofing === 'metal' ? 0.35 : 0}
+            side={THREE.DoubleSide}
+            depthWrite={!look.transparent}
+          />
         </mesh>
       )}
       {sideGeo && (
