@@ -149,13 +149,16 @@ function pointsOf(points, X, Y) {
 
 const RUN_SHIFT = { drain: -0.22, water: -0.08, electric: 0.08, iv: 0.22 }
 
-function shiftPoints(points, system, multi) {
-  if (!multi || !points || points.length < 2) return points || []
+function shiftPoints(points, system, multi, kind) {
+  const base = points || []
+  const kindShift = system === 'water' && kind === 'hot' ? 0.16 : system === 'water' && kind === 'circ' ? 0.32 : 0
+  const shifted = kindShift ? base.map((point) => ({ ...point, x: point.x + kindShift, z: point.z + kindShift })) : base
+  if (!multi || shifted.length < 2) return shifted
   const dist = RUN_SHIFT[system] || 0
-  if (!dist) return points
-  return points.map((point, index) => {
-    const prev = points[Math.max(0, index - 1)]
-    const next = points[Math.min(points.length - 1, index + 1)]
+  if (!dist) return shifted
+  return shifted.map((point, index) => {
+    const prev = shifted[Math.max(0, index - 1)]
+    const next = shifted[Math.min(shifted.length - 1, index + 1)]
     let dx = next.x - prev.x
     let dz = next.z - prev.z
     const len = Math.hypot(dx, dz) || 1
@@ -429,7 +432,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const order = { drain: 0, water: 1, heat: 2, electric: 3, iv: 4 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
-  const drawn = runs.map((run) => ({ run, points: shiftPoints(run.points, run.system, multi) }))
+  const drawn = runs.map((run) => ({ run, points: shiftPoints(run.points, run.system, multi, run.kind) }))
   const fittings = collectFittings(drawn.map((item) => ({ ...item.run, points: item.points })))
   const legend = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
   const open = (event, hit) => {

@@ -744,6 +744,7 @@ export default function FloorPlanApp() {
           size: spec.size,
           circuit: spec.circuit,
           name: spec.name,
+          pointType: spec.pointType,
           x: snapped.x,
           z: snapped.z,
         }))
