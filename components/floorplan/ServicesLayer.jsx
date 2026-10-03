@@ -11,15 +11,21 @@ import {
   deleteServiceNode,
   deleteServiceRun,
   ensureServices,
+  joinServiceRuns,
   layerVisible,
   nodeColor,
+  rerouteRun,
+  rerouteSystem,
   runColor,
   serviceLegend,
   serviceObjectTitle,
+  splitServiceRun,
   updateServiceNode,
   updateServiceRun,
 } from '@/lib/services'
-import { CadItem, CadMenu, CadSep, Segmented } from './CadMenu'
+import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
+import { CAD_COMMANDS } from '@/lib/cadEdit'
+import { CadItem, CadMenu, CadSep, Flyout, Segmented } from './CadMenu'
 
 const barBtn = (active) => ({
   height: 26,
@@ -337,6 +343,12 @@ function NodeSymbol({ node }) {
     boiler: ['V', 18],
     washer: ['PK', 24],
     dishwasher: ['AP', 24],
+    fridge: ['JK', 22],
+    dryer: ['KR', 22],
+    microwave: ['M', 18],
+    tv: ['TV', 22],
+    towel: ['PK', 22],
+    spa: ['PA', 22],
   }[node.kind]
   if (badge) {
     const [label, width] = badge
@@ -438,10 +450,10 @@ function CableMark({ points, text, X, Y }) {
   )
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext }) {
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown }) {
   const services = ensureServices(plan)
-  const visibleRuns = services.runs.filter((run) => layerVisible(plan, run.system))
-  const visibleNodes = services.nodes.filter((node) => layerVisible(plan, node.system))
+  const visibleRuns = services.runs.filter((run) => layerVisible(plan, run.system) && !run.hidden)
+  const visibleNodes = services.nodes.filter((node) => layerVisible(plan, node.system) && !node.hidden)
   const order = { drain: 0, water: 1, heat: 2, electric: 3, iv: 4 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
@@ -510,6 +522,70 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               style={{ pointerEvents: interactive ? 'auto' : 'none' }}
               onContextMenu={(event) => open(event, { target: 'run', id: run.id, system: run.system })}
             />
+            {points.map((point, index) => {
+              if (!index) return null
+              const prev = points[index - 1]
+              const vertical = Math.hypot(point.x - prev.x, point.z - prev.z) < 0.05 && Math.abs((point.y || 0) - (prev.y || 0)) > 0.08
+              if (!vertical) return null
+              const up = (point.y || 0) > (prev.y || 0)
+              return (
+                <g key={`riser-${run.id}-${index}`} data-testid="route-riser" style={{ pointerEvents: 'none' }}>
+                  <circle cx={X(point.x)} cy={Y(point.z)} r={5.5} fill="#fff" stroke={color} strokeWidth={1.6} />
+                  <text x={X(point.x) + 8} y={Y(point.z) - 4} fontSize="9" fontWeight="700" fill={color}>{up ? 'nousu' : 'lasku'}</text>
+                </g>
+              )
+            })}
+            {run.locked && points.length > 1 && (
+              <text
+                data-testid="route-lock-badge"
+                x={X((points[0].x + points[1].x) / 2)}
+                y={Y((points[0].z + points[1].z) / 2) - 8}
+                fontSize="9"
+                fontWeight="700"
+                fill="#0f766e"
+                stroke="#fbfaf7"
+                strokeWidth="2.4"
+                paintOrder="stroke"
+                style={{ pointerEvents: 'none' }}
+              >
+                Manuaalinen
+              </text>
+            )}
+            {interactive && selected?.service?.target === 'run' && selected?.service?.id === run.id && points.map((point, index) => (
+              <g key={`edit-${run.id}-${index}`}>
+                <circle
+                  data-testid={`route-vertex-${index}`}
+                  cx={X(point.x)}
+                  cy={Y(point.z)}
+                  r={5}
+                  fill="#fff"
+                  stroke="#0f766e"
+                  strokeWidth={1.6}
+                  style={{ cursor: 'grab' }}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    event.preventDefault()
+                    onRouteDown?.(event, { id: run.id, mode: 'vertex', index })
+                  }}
+                />
+                {index < points.length - 1 && (
+                  <rect
+                    data-testid={`route-segment-${index}`}
+                    x={X((point.x + points[index + 1].x) / 2) - 4}
+                    y={Y((point.z + points[index + 1].z) / 2) - 4}
+                    width={8}
+                    height={8}
+                    fill="#0f766e"
+                    style={{ cursor: 'move' }}
+                    onPointerDown={(event) => {
+                      event.stopPropagation()
+                      event.preventDefault()
+                      onRouteDown?.(event, { id: run.id, mode: 'segment', index })
+                    }}
+                  />
+                )}
+              </g>
+            ))}
             <SlopeMark run={{ ...run, points }} X={X} Y={Y} />
             <CableMark points={points} text={cableMark(run)} X={X} Y={Y} />
           </g>
@@ -722,15 +798,112 @@ function MenuBtn({ children, onClick, testid }) {
   )
 }
 
-export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked = false }) {
+function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
+  const metres = routeLength(run.points)
+  const materials = materialOptions(run.system)
+  const insulations = insulationOptions(run.system)
+  const cableChoices = run.system === 'electric'
+    ? [...new Set([run.cable, run.marking, ...materials].filter(Boolean))]
+    : materials
+  const segment = Math.min(segmentIndex || 0, Math.max(0, (run.points || []).length - 2))
+  const a = run.points?.[segment]
+  const b = run.points?.[segment + 1]
+  const segmentMetres = a && b ? Math.hypot(b.x - a.x, b.z - a.z) : metres
+  return (
+    <div data-testid="route-fields">
+      <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>
+        {`Pituus ${metres.toFixed(1).replace('.', ',')} m`}
+        {run.locked ? ' · manuaalinen' : ''}
+      </div>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Nimi
+        <input data-testid="route-label" style={fieldStyle} defaultValue={run.label || ''} onBlur={(event) => onPatch({ label: event.target.value })} />
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Korkeus
+        <select
+          data-testid="route-height"
+          style={fieldStyle}
+          value={run.heightMode || ''}
+          onChange={(event) => onCommit(updateServiceRun(plan, run.id, { heightMode: event.target.value }))}
+        >
+          <option value="">Oma</option>
+          {HEIGHT_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Osuuden korkeus
+        <select
+          data-testid="route-segment-height"
+          style={fieldStyle}
+          value=""
+          onChange={(event) => {
+            if (!event.target.value) return
+            onCommit(updateServiceRun(plan, run.id, { segmentHeight: { index: segment, mode: event.target.value } }))
+          }}
+        >
+          <option value="">Valitse osuudelle</option>
+          {HEIGHT_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Osuuden pituus (m)
+        <input
+          data-testid="route-length"
+          type="number"
+          step="0.1"
+          min="0.05"
+          style={fieldStyle}
+          defaultValue={Number(segmentMetres.toFixed(2))}
+          onBlur={(event) => onCommit(updateServiceRun(plan, run.id, { segmentLength: { index: segment, metres: Number(event.target.value) } }))}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') onCommit(updateServiceRun(plan, run.id, { segmentLength: { index: segment, metres: Number(event.target.value) } }))
+          }}
+        />
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        {run.system === 'electric' ? 'Kaapeli' : 'Materiaali'}
+        <select
+          data-testid="route-material"
+          style={fieldStyle}
+          value={run.system === 'electric' ? (run.cable || '') : (run.material || '')}
+          onChange={(event) => onCommit(updateServiceRun(plan, run.id, run.system === 'electric' ? { cable: event.target.value } : { material: event.target.value }))}
+        >
+          <option value="">—</option>
+          {cableChoices.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Eristys
+        <select data-testid="route-insulation" style={fieldStyle} value={run.insulation || ''} onChange={(event) => onCommit(updateServiceRun(plan, run.id, { insulation: event.target.value }))}>
+          <option value="">—</option>
+          {insulations.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>
+      <div style={{ fontSize: 11, color: '#78716c', marginBottom: 8 }}>
+        {`Asennuskorkeus ${heightMetres(plan, run.heightMode || 'ceiling', run.system) ?? '—'} m`}
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        <input data-testid="service-lock" type="checkbox" checked={Boolean(run.locked)} onChange={(event) => onCommit(updateServiceRun(plan, run.id, { locked: event.target.checked }))} />
+        Manuaalinen
+      </label>
+      <MenuBtn testid="route-reroute" onClick={() => onCommit(rerouteRun(plan, run.id))}>Reititä uudelleen</MenuBtn>
+      <MenuBtn testid="route-reroute-system" onClick={() => onCommit(rerouteSystem(plan, run.system))}>Reititä järjestelmä uudelleen</MenuBtn>
+    </div>
+  )
+}
+
+export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperties, onRedraw, onCad, docked = false }) {
   if (!menu || menu.kind !== 'service') return null
   const services = ensureServices(plan)
   const node = menu.service?.target === 'node' ? services.nodes.find((item) => item.id === menu.service.id) : null
   const run = menu.service?.target === 'run' ? services.runs.find((item) => item.id === menu.service.id) : null
   const target = node || run
   if (!target) return null
+  const write = onCommit || onApply
   const patchNode = (patch) => onApply(updateServiceNode(plan, node.id, patch))
-  const patchRun = (patch) => onApply(updateServiceRun(plan, run.id, patch))
+  const patchRun = (patch) => write(updateServiceRun(plan, run.id, patch))
+  const segmentIndex = menu.service?.segmentIndex || 0
   const remove = () => {
     onApply(node ? deleteServiceNode(plan, node.id) : deleteServiceRun(plan, run.id))
     onClose()
@@ -754,6 +927,45 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
           />
         )}
         <CadItem testid="ctx-properties" onClick={() => (onProperties ? onProperties() : onClose())}>Ominaisuudet…</CadItem>
+        {onCad && (
+          <Flyout label="Muokkaa" testid="ctx-cad">
+            {CAD_COMMANDS.map((cmd) => (
+              <CadItem key={cmd.id} testid={`ctx-${cmd.testid}`} shortcut={cmd.short} onClick={() => { onCad(cmd.id); onClose() }}>{cmd.label}</CadItem>
+            ))}
+          </Flyout>
+        )}
+        {run && (
+          <>
+            <CadSep />
+            <CadItem testid="route-add-vertex" onClick={() => {
+              const index = segmentIndex
+              const pts = run.points || []
+              const a = pts[index]
+              const b = pts[Math.min(pts.length - 1, index + 1)]
+              if (!a || !b) return
+              write(updateServiceRun(plan, run.id, { points: pts.flatMap((point, i) => (i === index ? [point, { x: (a.x + b.x) / 2, y: ((a.y || 0) + (b.y || 0)) / 2, z: (a.z + b.z) / 2 }] : [point])) }))
+            }}>Lisää taitepiste</CadItem>
+            <CadItem testid="route-remove-vertex" onClick={() => {
+              if ((run.points || []).length <= 2) return
+              const index = Math.min((run.points || []).length - 2, segmentIndex + 1)
+              write(updateServiceRun(plan, run.id, { points: run.points.filter((_, i) => i !== index) }))
+            }}>Poista piste</CadItem>
+            <CadItem testid="route-split" onClick={() => write(splitServiceRun(plan, run.id, segmentIndex, 0.5))}>Jaa reitti</CadItem>
+            <CadItem testid="route-join" onClick={() => write(joinServiceRuns(plan, run.id))}>Yhdistä</CadItem>
+            <CadItem testid="route-redraw" onClick={() => onRedraw?.(run)}>Piirrä uudelleen</CadItem>
+            <CadItem testid="route-reroute" onClick={() => { write(rerouteRun(plan, run.id)); onClose() }}>Reititä uudelleen</CadItem>
+            <Segmented
+              label="Korkeus"
+              value={run.heightMode || 'ceiling'}
+              options={HEIGHT_PRESETS.map((item) => ({ value: item.id, label: item.label, testid: `ctx-height-${item.id}` }))}
+              onChange={(heightMode) => write(updateServiceRun(plan, run.id, { heightMode }))}
+            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, padding: '4px 8px' }}>
+              <input data-testid="service-lock" type="checkbox" checked={Boolean(run.locked)} onChange={(event) => write(updateServiceRun(plan, run.id, { locked: event.target.checked }))} />
+              Manuaalinen
+            </label>
+          </>
+        )}
         <CadSep />
         <CadItem testid="service-delete" danger shortcut="Del" onClick={remove}>Poista</CadItem>
       </CadMenu>
@@ -856,6 +1068,7 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
       )}
       {run && (
         <>
+          <RouteFields plan={plan} run={run} segmentIndex={segmentIndex} onPatch={patchRun} onCommit={write} />
           {run.system === 'iv' && (
             <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
               Kanava
@@ -896,10 +1109,6 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
           )}
           {run.system === 'electric' && (
             <>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-                <input data-testid="service-lock" type="checkbox" checked={Boolean(run.locked)} onChange={(event) => patchRun({ locked: event.target.checked })} />
-                Lukitse johto
-              </label>
               {run.marking ? <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>{run.marking}</div> : null}
               <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
                 Virtapiiri
@@ -909,6 +1118,17 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
               </label>
             </>
           )}
+          <MenuBtn testid="route-add-vertex" onClick={() => {
+            const index = segmentIndex
+            const pts = run.points || []
+            const a = pts[index]
+            const b = pts[Math.min(pts.length - 1, index + 1)]
+            if (!a || !b) return
+            write(updateServiceRun(plan, run.id, { points: pts.flatMap((point, i) => (i === index ? [point, { x: (a.x + b.x) / 2, y: ((a.y || 0) + (b.y || 0)) / 2, z: (a.z + b.z) / 2 }] : [point])) }))
+          }}>Lisää taitepiste</MenuBtn>
+          <MenuBtn testid="route-split" onClick={() => write(splitServiceRun(plan, run.id, segmentIndex, 0.5))}>Jaa reitti</MenuBtn>
+          <MenuBtn testid="route-join" onClick={() => write(joinServiceRuns(plan, run.id))}>Yhdistä</MenuBtn>
+          <MenuBtn testid="route-redraw" onClick={() => onRedraw?.(run)}>Piirrä uudelleen</MenuBtn>
         </>
       )}
       <MenuBtn testid="service-form-delete" onClick={remove}>Poista</MenuBtn>

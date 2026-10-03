@@ -7,6 +7,8 @@ import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
 import { pointInEquipment } from '@/lib/placement'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
 import { highlightedPorts, pipeAppearance, snapPort } from '@/lib/pipeTopology'
+import { followEndpoint, moveSegmentPoints, moveVertexPoints, riseMetres, translatePoints } from '@/lib/routeEdit'
+import { designerHits, mergeIds, selectionBox } from '@/lib/cadEdit'
 import { calculateProject } from '@/lib/heatLoad'
 import { doorPlanFigures } from '@/lib/doors'
 import {
@@ -378,6 +380,12 @@ export default function PlanView({
   onCreateRoute,
   onPlace,
   onContextMenu,
+  onPreviewPipes,
+  onPreviewCables,
+  cad = null,
+  onCadDown,
+  onCadMove,
+  onCadStretch,
   pipes = [],
   cables = [],
   pipeKind = 'suction',
@@ -403,6 +411,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
+    onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch,
   }
 
   const setCamera = (next) => {
@@ -619,6 +628,7 @@ export default function PlanView({
       }
       if (!g) {
         setCursor({ ...world, kind: null })
+        if (p.cad?.step === 'to') p.onCadMove?.(world)
         const eq = hitEquipment(p.rooms, world.x, world.z)
         setHoverId(eq?.room?.id || hitRoom(p.rooms, world.x, world.z)?.id || null)
         return
@@ -639,7 +649,8 @@ export default function PlanView({
         return
       }
       if (g.kind === 'marquee') {
-        setDraft({ kind: 'marquee', x1: g.x1, z1: g.z1, x2: world.x, z2: world.z })
+        const mode = g.stretch || g.x1 > world.x ? 'crossing' : 'window'
+        setDraft({ kind: 'marquee', x1: g.x1, z1: g.z1, x2: world.x, z2: world.z, mode })
         return
       }
       const snapped = snapWorld(world.x, world.z, {
@@ -738,9 +749,33 @@ export default function PlanView({
         p.onPreview(g.orig.map((item) => (item.id === room.id ? proposed : item)))
         return
       }
+      if (g.kind === 'route') {
+        const snapped = snapWorld(world.x, world.z, {
+          origin: g.mode === 'vertex' ? g.base[Math.max(0, g.index - 1)] : { x: g.startX, z: g.startZ },
+          scale: current.scale,
+          grid: p.snapOn ? p.gridSize : 0,
+          rooms: p.rooms,
+          flags: { ...p.snapFlags, ortho: p.snapFlags?.ortho !== false },
+        })
+        let points = g.base
+        if (g.mode === 'vertex') points = moveVertexPoints(g.base, g.index, { ...g.base[g.index], x: snapped.x, z: snapped.z }, { ortho: true })
+        else if (g.mode === 'segment') points = moveSegmentPoints(g.base, g.index, snapped.x - g.startX, snapped.z - g.startZ)
+        else points = translatePoints(g.base, snapped.x - g.startX, snapped.z - g.startZ)
+        const apply = (items) => (items || []).map((item) => (item.id === g.id ? { ...item, points, riseM: riseMetres(points), locked: true, manual: true } : item))
+        if (g.routeKind === 'cable') p.onPreviewCables?.(apply(p.cables))
+        else p.onPreviewPipes?.(apply(p.pipes))
+        return
+      }
       if (g.kind === 'equip') {
         const dx = world.x - g.startX
         const dz = world.z - g.startZ
+        const follow = (items) => (items || []).map((item) => {
+          const points = followEndpoint(item.points, g.anchor, { x: g.anchor.x + dx, z: g.anchor.z + dz }, 0.9)
+          if (points === item.points) return item
+          return { ...item, points, riseM: riseMetres(points), locked: true, manual: true }
+        })
+        p.onPreviewPipes?.(follow(g.pipes))
+        p.onPreviewCables?.(follow(g.cables))
         p.onPreview(g.orig.map((room) => {
           if (room.id !== g.roomId) return room
           return {
@@ -795,15 +830,18 @@ export default function PlanView({
         const right = Math.max(g.x1, x2)
         const top = Math.min(g.z1, z2)
         const bottom = Math.max(g.z1, z2)
-        if (right - left < 0.15 && bottom - top < 0.15) {
-          if (!g.shift) p.onSelect([])
+        const box = selectionBox({ x: g.x1, z: g.z1 }, { x: x2, z: z2 })
+        const modeBox = g.stretch ? { ...box, mode: 'crossing' } : box
+        if (g.stretch) {
+          p.onCadStretch?.(modeBox)
           return
         }
-        const hits = p.rooms.filter((room) => {
-          const box = bboxOf(outlineOf(room))
-          return box.right >= left && box.left <= right && box.bottom >= top && box.top <= bottom
-        }).map((room) => room.id)
-        p.onSelect(g.shift ? [...new Set([...p.selectedIds, ...hits])] : hits)
+        if (right - left < 0.15 && bottom - top < 0.15) {
+          if (!g.shift && !g.ctrl) p.onSelect([])
+          return
+        }
+        const hits = designerHits({ rooms: p.rooms, pipes: p.pipes, cables: p.cables }, modeBox).map((item) => item.id)
+        p.onSelect(mergeIds(p.selectedIds, hits, { shift: g.shift, ctrl: g.ctrl }))
       } else if (g.started) {
         p.onGestureEnd()
       }
@@ -840,6 +878,14 @@ export default function PlanView({
     }
     if (event.button !== 0) return
     const p = propsRef.current
+    if (p.cad && p.tool === 'select' && !p.placing) {
+      if (p.cad.step === 'window' || p.cad.name === 'stretch' && p.cad.step === 'window') {
+        gesture.current = { kind: 'marquee', x1: world.x, z1: world.z, stretch: true, shift: false, ctrl: false }
+        return
+      }
+      p.onCadDown?.(world)
+      return
+    }
     const handle = event.target?.dataset?.handle
     const handleRoom = event.target?.dataset?.room
     if (isRouteTool(p.tool)) {
@@ -903,6 +949,26 @@ export default function PlanView({
       if (room) p.onPlace(room.id, world.x, world.z)
       return
     }
+    const routeHandle = event.target?.dataset?.routeHandle
+    const routeId = event.target?.dataset?.routeId
+    if (routeHandle && routeId && p.tool === 'select') {
+      const routeKind = event.target.dataset.routeKind || 'pipe'
+      const list = routeKind === 'cable' ? p.cables : p.pipes
+      const item = (list || []).find((entry) => entry.id === routeId)
+      gesture.current = {
+        kind: 'route',
+        id: routeId,
+        routeKind,
+        mode: routeHandle.startsWith('v') ? 'vertex' : routeHandle.startsWith('s') ? 'segment' : 'run',
+        index: Number(event.target.dataset.routeIndex || 0),
+        base: (item?.points || []).map((point) => ({ ...point })),
+        startX: world.x,
+        startZ: world.z,
+        started: false,
+      }
+      p.onSelect([routeId])
+      return
+    }
     if (handle && handleRoom) {
       const orig = p.rooms.map((room) => ({ ...room, equipment: [...(room.equipment || [])], outline: room.outline ? room.outline.map((pt) => ({ ...pt })) : null }))
       if (handle.startsWith('v-') || handle.startsWith('e-')) {
@@ -938,6 +1004,9 @@ export default function PlanView({
         eqId: eqHit.eq.id,
         startX: world.x,
         startZ: world.z,
+        anchor: { x: eqHit.room.x + eqHit.eq.x, z: eqHit.room.z + eqHit.eq.z },
+        pipes: (p.pipes || []).map((pipe) => ({ ...pipe, points: (pipe.points || []).map((point) => ({ ...point })) })),
+        cables: (p.cables || []).map((cable) => ({ ...cable, points: (cable.points || []).map((point) => ({ ...point })) })),
         orig: p.rooms.map((room) => ({ ...room, equipment: room.equipment.map((item) => ({ ...item })) })),
         started: false,
       }
@@ -945,7 +1014,8 @@ export default function PlanView({
     }
     const room = hitRoom(p.rooms, world.x, world.z)
     if (room) {
-      const next = event.shiftKey
+      const toggle = event.shiftKey || event.ctrlKey || event.metaKey
+      const next = toggle
         ? (p.selectedIds.includes(room.id) ? p.selectedIds.filter((id) => id !== room.id) : [...p.selectedIds, room.id])
         : (p.selectedIds.includes(room.id) ? p.selectedIds : [room.id])
       p.onSelect(next)
@@ -963,7 +1033,7 @@ export default function PlanView({
       }
       return
     }
-    gesture.current = { kind: 'marquee', x1: world.x, z1: world.z, shift: event.shiftKey }
+    gesture.current = { kind: 'marquee', x1: world.x, z1: world.z, shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey }
   }
 
   const { minor, major } = gridSpec(view.scale)
@@ -1050,7 +1120,7 @@ export default function PlanView({
               />
             )
           })}
-          {rooms.map((room) => {
+          {rooms.filter((room) => !room.hidden).map((room) => {
             const outer = outlineOf(room)
             const inner = insetOrthogonal(outer, room.wallThickness) || outer
             const active = selected.has(room.id)
@@ -1071,7 +1141,7 @@ export default function PlanView({
                   stroke={active ? TEAL : 'none'}
                   strokeWidth={(active ? 1.6 : 0) / view.scale}
                 />
-                {(room.equipment || []).map((eq) => {
+                {(room.equipment || []).filter((eq) => !eq.hidden).map((eq) => {
                   if (eq.category === 'door') {
                     return <DoorGlyph key={eq.id} room={room} eq={eq} scale={view.scale} />
                   }
@@ -1166,7 +1236,7 @@ export default function PlanView({
           {(() => {
             const projectNow = calculateProject(rooms)
             const placedLabels = []
-            return pipes.map((pipe) => {
+            return pipes.filter((pipe) => !pipe.hidden).map((pipe) => {
               const points = pipe.points || []
               if (points.length < 2) return null
               const { sized } = sizePlacedPipe(pipe, rooms, projectNow.rooms, pipes)
@@ -1229,6 +1299,39 @@ export default function PlanView({
                     strokeWidth={(traced ? 3.4 : 2.8) / view.scale}
                     strokeDasharray={look.dash ? look.dash.split(' ').map((part) => Number(part)).join(' ') : undefined}
                   />
+                  {pipe.locked && (
+                    <text data-testid="cold-route-lock-badge" x={mid.x} y={mid.z - 10 / view.scale} textAnchor="middle" fill="#0f766e" fontSize={9 / view.scale} fontWeight="700">Manuaalinen</text>
+                  )}
+                  {points.map((point, index) => {
+                    if (!index) return null
+                    const prev = points[index - 1]
+                    const vertical = Math.hypot(point.x - prev.x, point.z - prev.z) < 0.05 && Math.abs((point.y || 0) - (prev.y || 0)) > 0.08
+                    if (!vertical) return null
+                    return (
+                      <g key={`riser-${index}`} data-testid="cold-riser">
+                        <circle cx={point.x} cy={point.z} r={5 / view.scale} fill="#fff" stroke={color} strokeWidth={1.2 / view.scale} />
+                        <text x={point.x + 6 / view.scale} y={point.z} fontSize={8 / view.scale} fill={color}>{(point.y || 0) > (prev.y || 0) ? 'nousu' : 'lasku'}</text>
+                      </g>
+                    )
+                  })}
+                  {active && tool === 'select' && points.map((point, index) => (
+                    <g key={`grip-${index}`}>
+                      <circle data-route-handle="vertex" data-route-id={pipe.id} data-route-kind="pipe" data-route-index={index} data-testid={`cold-vertex-${index}`} cx={point.x} cy={point.z} r={5 / view.scale} fill="#fff" stroke="#0f766e" strokeWidth={1.4 / view.scale} />
+                      {index < points.length - 1 && (
+                        <rect
+                          data-route-handle="segment"
+                          data-route-id={pipe.id}
+                          data-route-kind="pipe"
+                          data-route-index={index}
+                          x={(point.x + points[index + 1].x) / 2 - 3.5 / view.scale}
+                          y={(point.z + points[index + 1].z) / 2 - 3.5 / view.scale}
+                          width={7 / view.scale}
+                          height={7 / view.scale}
+                          fill="#0f766e"
+                        />
+                      )}
+                    </g>
+                  ))}
                   {traced && (
                     <polyline
                       points={points.map((point) => `${point.x},${point.z - 0.08}`).join(' ')}
@@ -1299,16 +1402,27 @@ export default function PlanView({
               <text x={port.x + 8 / view.scale} y={port.z - 6 / view.scale} fontSize={9 / view.scale} fill="#1c1917" fontFamily="ui-sans-serif, system-ui, sans-serif">{port.label}</text>
             </g>
           ))}
-          {cables.map((cable) => (
-            <polyline
-              key={cable.id}
-              points={(cable.points || []).map((point) => `${point.x},${point.z}`).join(' ')}
-              fill="none"
-              stroke={selected.has(cable.id) ? TEAL : '#7c3aed'}
-              strokeWidth={1.2 / view.scale}
-              strokeDasharray={`${0.12} ${0.08}`}
-            />
-          ))}
+          {cables.filter((cable) => !cable.hidden).map((cable) => {
+            const points = cable.points || []
+            const activeCable = selected.has(cable.id)
+            return (
+              <g key={cable.id} data-cable={cable.id}>
+                <polyline
+                  points={points.map((point) => `${point.x},${point.z}`).join(' ')}
+                  fill="none"
+                  stroke={activeCable ? TEAL : '#7c3aed'}
+                  strokeWidth={1.2 / view.scale}
+                  strokeDasharray={`${0.12} ${0.08}`}
+                />
+                {cable.locked && points.length > 1 && (
+                  <text data-testid="cold-route-lock-badge" x={(points[0].x + points[1].x) / 2} y={points[0].z - 8 / view.scale} fill="#0f766e" fontSize={9 / view.scale} fontWeight="700">Manuaalinen</text>
+                )}
+                {activeCable && tool === 'select' && points.map((point, index) => (
+                  <circle key={index} data-route-handle="vertex" data-route-id={cable.id} data-route-kind="cable" data-route-index={index} cx={point.x} cy={point.z} r={4.5 / view.scale} fill="#fff" stroke="#7c3aed" strokeWidth={1.2 / view.scale} />
+                ))}
+              </g>
+            )
+          })}
           {rectDraft && (
             <g>
               <rect
@@ -1364,13 +1478,16 @@ export default function PlanView({
           )}
           {draft?.kind === 'marquee' && (
             <rect
+              data-testid={draft.mode === 'crossing' ? 'select-crossing' : 'select-window'}
+              data-mode={draft.mode || 'window'}
               x={Math.min(draft.x1, draft.x2)}
               y={Math.min(draft.z1, draft.z2)}
               width={Math.abs(draft.x2 - draft.x1)}
               height={Math.abs(draft.z2 - draft.z1)}
-              fill="rgba(15,118,110,0.08)"
-              stroke={TEAL}
-              strokeWidth={1 / view.scale}
+              fill={draft.mode === 'crossing' ? 'rgba(217,119,6,0.12)' : 'rgba(15,118,110,0.12)'}
+              stroke={draft.mode === 'crossing' ? '#d97706' : TEAL}
+              strokeWidth={1.4 / view.scale}
+              strokeDasharray={draft.mode === 'crossing' ? `${7 / view.scale} ${4 / view.scale}` : undefined}
             />
           )}
           {cursor?.kind && (

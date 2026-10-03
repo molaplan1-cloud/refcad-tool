@@ -41,6 +41,8 @@ import {
   planBounds,
   pointInPolygon,
   duplicateFixture,
+  furnishAll,
+  furnishRoom,
   removeFixture,
   roomLabelPoint,
   rotateFixture,
@@ -53,6 +55,34 @@ import {
   claddingOf,
 } from '@/lib/floorplan'
 import { wallFigures } from '@/lib/wall-outline'
+import { FixtureSymbol } from './FixtureSymbol'
+import { FURNITURE_GROUPS, layoutFor, resolveFixture, scheduleRows, suggestionsFor } from '@/lib/furniture'
+import { fixtureServiceKey, syncFixtureServices } from '@/lib/fixtureServices'
+import {
+  FLOOR_CLIPBOARD_KEY,
+  changeLayer,
+  deleteSelection,
+  expandGroups,
+  floorClipboard,
+  groupSelection,
+  hideSelection,
+  isolateSelection,
+  matchProperties,
+  measureReadout,
+  mergeSelection,
+  pasteFloorClipboard,
+  patchShared,
+  runCommand,
+  selectionBounds,
+  selectionBox,
+  setCadFlag,
+  showAll,
+  similarTargets,
+  targetsByType,
+  targetsInBox,
+  ungroupSelection,
+} from '@/lib/cadEdit'
+import { CadPrompt, CadToolbar } from './CadTools'
 import { buildPlanPdf } from '@/lib/roominfo'
 import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
@@ -60,6 +90,33 @@ import FacadeView from './FacadeView'
 import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import { ElectricPanel } from './ElectricPanel'
 import { HeatingPanel } from './HeatingPanel'
+import YardLayer, { YARD_DRAW_TOOLS, yardToolLabel } from './YardLayer'
+import {
+  BUILDINGS,
+  OBJECTS,
+  PLANTS,
+  addBed,
+  addBuilding,
+  addFence,
+  addObject,
+  addPath,
+  addPlant,
+  addTerrace,
+  applyExampleYard,
+  buildSitePdf,
+  deleteYardItem,
+  ensureYard,
+  formatSquare,
+  hitTestYard,
+  moveYardItem,
+  plotMetrics,
+  rotateYardItem,
+  setPlot,
+  siteViewLayout,
+  snapYardPoint,
+  syncYardServices,
+  updateYardItem,
+} from '@/lib/yard'
 import {
   PLACEABLES,
   addServiceNode,
@@ -69,6 +126,8 @@ import {
   autoRouteAll,
   applyHeating,
   assignDeviceCircuit,
+  commitRunGeometry,
+  dragServiceRun,
   refreshHeat,
   buildElectricPdf,
   buildHydronicPdf,
@@ -79,7 +138,9 @@ import {
   ensureServices,
   hitService,
   layerVisible,
+  roomKind,
   snapServicePoint,
+  updateServiceNode,
 } from '@/lib/services'
 import {
   CURRENT_KEY,
@@ -210,8 +271,8 @@ function SnapMark({ snap, X, Y, zoom }) {
   )
 }
 
-function sheetPixels(size, plan) {
-  const layout = viewLayout(plan)
+function sheetPixels(size, plan, site = false) {
+  const layout = site ? siteViewLayout(plan) : viewLayout(plan)
   const pad = 14
   const availW = Math.max(280, size.w - pad * 2)
   const availH = Math.max(200, size.h - pad * 2)
@@ -351,107 +412,6 @@ function DimLine({ dim, offset, X, Y }) {
   )
 }
 
-function FixtureMark({ type, w, d, color }) {
-  const stroke = color || '#1c1917'
-  const sw = 1.05
-  const box = { fill: '#fff', stroke, strokeWidth: sw }
-  if (type === 'toilet') {
-    return (
-      <g>
-        <rect x={-w * 0.34} y={-d / 2} width={w * 0.68} height={d * 0.28} rx={2} {...box} />
-        <ellipse cx={0} cy={d * 0.06} rx={w * 0.36} ry={d * 0.32} {...box} />
-      </g>
-    )
-  }
-  if (type === 'basin' || type === 'sink') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        <ellipse cx={0} cy={0} rx={w * 0.28} ry={d * 0.28} fill="none" stroke={stroke} strokeWidth={sw} />
-      </g>
-    )
-  }
-  if (type === 'stove') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        {[[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]].map(([x, y]) => (
-          <circle key={`${x}${y}`} cx={x * w} cy={y * d} r={Math.min(w, d) * 0.12} fill="none" stroke={stroke} strokeWidth={sw} />
-        ))}
-      </g>
-    )
-  }
-  if (type === 'bed') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        <rect x={-w * 0.42} y={-d / 2} width={w * 0.84} height={d * 0.22} fill="#f5f5f4" stroke={stroke} strokeWidth={sw} />
-      </g>
-    )
-  }
-  if (type === 'sofa') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        <line x1={-w / 2} y1={-d * 0.18} x2={w / 2} y2={-d * 0.18} stroke={stroke} strokeWidth={sw} />
-      </g>
-    )
-  }
-  if (type === 'table') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        <rect x={-w * 0.32} y={-d * 0.28} width={w * 0.64} height={d * 0.56} fill="none" stroke={stroke} strokeWidth={sw} />
-      </g>
-    )
-  }
-  if (type === 'chair') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        <line x1={-w / 2} y1={-d * 0.2} x2={w / 2} y2={-d * 0.2} stroke={stroke} strokeWidth={sw} />
-      </g>
-    )
-  }
-  if (type === 'shower') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        <line x1={-w / 2} y1={-d / 2} x2={w / 2} y2={d / 2} stroke={stroke} strokeWidth={sw} />
-        <line x1={w / 2} y1={-d / 2} x2={-w / 2} y2={d / 2} stroke={stroke} strokeWidth={sw} />
-      </g>
-    )
-  }
-  if (type === 'bath') {
-    return <rect x={-w / 2} y={-d / 2} width={w} height={d} rx={Math.min(w, d) * 0.35} {...box} />
-  }
-  if (type === 'bench') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        <line x1={-w / 2} y1={0} x2={w / 2} y2={0} stroke={stroke} strokeWidth={sw} />
-      </g>
-    )
-  }
-  if (type === 'heater') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        <circle cx={0} cy={0} r={Math.min(w, d) * 0.22} fill="none" stroke={stroke} strokeWidth={sw} />
-      </g>
-    )
-  }
-  if (type === 'fridge' || type === 'wardrobe' || type === 'dishwasher') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-        <line x1={-w / 2} y1={-d * 0.15} x2={w / 2} y2={-d * 0.15} stroke={stroke} strokeWidth={sw} />
-      </g>
-    )
-  }
-  return <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
-}
-
 function worldPath(points, X, Y) {
   if (!points?.length) return ''
   return `${points.map((point, index) => `${index ? 'L' : 'M'}${X(point.x)} ${Y(point.z)}`).join(' ')} Z`
@@ -494,9 +454,13 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
   )
 }
 
-function WallOutlines({ plan, X, Y, selectedId }) {
+function WallOutlines({ plan, X, Y, selectedIds = [] }) {
+  const walls = (plan.walls || []).filter((wall) => !wall.hidden)
+  const openings = (plan.openings || []).filter((opening) => !opening.hidden && walls.some((wall) => wall.id === opening.wallId))
   const figures = useMemo(
-    () => wallFigures(plan.walls || [], plan.openings || [], (wall) => thicknessOf(wall, plan)),
+    () => wallFigures(walls, openings, (wall) => thicknessOf(wall, plan)),
+    // Hidden walls drop out of the drawing; rooms still use the full plan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [plan],
   )
   const paint = (loops, fill) => loops.map((loop, index) => (
@@ -520,8 +484,8 @@ function WallOutlines({ plan, X, Y, selectedId }) {
           strokeLinecap="square"
         />
       ))}
-      {(plan.walls || []).filter((wall) => wall.id === selectedId).flatMap((wall) => wallQuads(wall, plan.openings, plan.walls, plan).map((quad, index) => (
-        <polygon key={`sel-${wall.id}-${index}`} points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} fill="none" stroke="#0f766e" strokeWidth={1.6} />
+      {walls.filter((wall) => selectedIds.includes(wall.id)).flatMap((wall) => wallQuads(wall, openings, walls, plan).map((quad, index) => (
+        <polygon key={`sel-${wall.id}-${index}`} points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} fill="rgba(15,118,110,0.18)" stroke="#0f766e" strokeWidth={2.6} />
       )))}
     </g>
   )
@@ -538,11 +502,15 @@ export default function FloorPlanApp() {
   const [hover, setHover] = useState(null)
   const [tool, setTool] = useState('select')
   const [placing, setPlacing] = useState(null)
+  const [fixtureQuery, setFixtureQuery] = useState('')
   const [draft, setDraft] = useState(null)
   const [cursor, setCursor] = useState(null)
   const [selectedRoom, setSelectedRoom] = useState(null)
   const [selectedFixture, setSelectedFixture] = useState(null)
   const [pick, setPick] = useState(null)
+  const [picks, setPicks] = useState([])
+  const [command, setCommand] = useState(null)
+  const [marquee, setMarquee] = useState(null)
   const [panel, setPanel] = useState('materials')
   const [menu, setMenu] = useState(null)
   const [roomShape, setRoomShape] = useState('rect')
@@ -557,6 +525,9 @@ export default function FloorPlanApp() {
   const [floorHeating, setFloorHeating] = useState(false)
   const [electricView, setElectricView] = useState(null)
   const [heatView, setHeatView] = useState(null)
+  const [sheetMode, setSheetMode] = useState('plan')
+  const [yardTool, setYardTool] = useState(null)
+  const [yardPoints, setYardPoints] = useState([])
   const [wallMode, setWallMode] = useState('solid')
   const [roofMode, setRoofMode] = useState('solid')
   const [fitToken, setFitToken] = useState(1)
@@ -570,9 +541,18 @@ export default function FloorPlanApp() {
   const [snapVisual, setSnapVisual] = useState(null)
   const [cursorPpm, setCursorPpm] = useState(40)
   const history = useRef([])
+  const redo = useRef([])
+  const originPlan = useRef(null)
+  const commandRef = useRef(null)
+  commandRef.current = command
+  const pending = useRef(null)
   const dragBefore = useRef(null)
+  const routeDrag = useRef(null)
+  const dragNode = useRef(null)
+  const [redrawId, setRedrawId] = useState(null)
   const dragId = useRef(null)
   const dragOpen = useRef(null)
+  const dragYard = useRef(null)
   const dragLabel = useRef(null)
   const clip = useRef(null)
   const hostRef = useRef(null)
@@ -596,6 +576,7 @@ export default function FloorPlanApp() {
             ...emptyPlan(),
             ...parsed,
             services: ensureServices(parsed),
+            yard: ensureYard(parsed),
             rooms: detectRooms(parsed.walls, parsed.rooms || []),
           })
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
@@ -638,16 +619,30 @@ export default function FloorPlanApp() {
   const commit = useCallback((next) => {
     setPlan((current) => {
       history.current = [...history.current, current].slice(-40)
-      return next
+      redo.current = []
+      return fixtureServiceKey(current) === fixtureServiceKey(next) ? next : syncFixtureServices(next)
     })
   }, [])
 
   const undo = useCallback(() => {
     const prev = history.current.pop()
-    if (prev) setPlan(prev)
+    if (!prev) return
+    setPlan((current) => {
+      redo.current = [...redo.current, current].slice(-40)
+      return prev
+    })
   }, [])
 
-  const sheet = useMemo(() => sheetPixels(size, plan), [size, plan])
+  const redoChange = useCallback(() => {
+    const next = redo.current.pop()
+    if (!next) return
+    setPlan((current) => {
+      history.current = [...history.current, current].slice(-40)
+      return next
+    })
+  }, [])
+
+  const sheet = useMemo(() => sheetPixels(size, plan, sheetMode === 'site'), [size, plan, sheetMode])
   const { layout, k } = sheet
   const X = useCallback((x) => sheet.x + (layout.ox + (x - layout.box.minX) * layout.scale) * k, [sheet, layout, k])
   const Y = useCallback((z) => sheet.y + (layout.oy + (z - layout.box.minZ) * layout.scale) * k, [sheet, layout, k])
@@ -688,8 +683,12 @@ export default function FloorPlanApp() {
       const placed = snapFixturePoint(world, walls, { radius: Math.max(radius, 0.45), enabled, grid: gridStep, depth: tpl?.d || 0.6 })
       return { point: { x: placed.x, z: placed.z }, kind: placed.kind, guides: [], rotation: placed.rotation }
     }
+    if (yardTool) {
+      const origin = yardPoints[yardPoints.length - 1] || null
+      return snapYardPoint(world, plan, { grid: gridStep, radius, origin, ortho: angleStep === 90 && Boolean(origin) })
+    }
     return null
-  }, [ppm2d, plan.walls, tool, draft, angleStep, gridStep, roomShape, poly, placing, svcTool])
+  }, [ppm2d, plan, tool, draft, angleStep, gridStep, roomShape, poly, placing, svcTool, yardTool, yardPoints])
 
   useEffect(() => {
     if (view !== '2d') return undefined
@@ -707,31 +706,134 @@ export default function FloorPlanApp() {
     return () => node.removeEventListener('wheel', onWheel)
   }, [view])
 
-  const choose = (hit) => {
-    if (!hit || hit.kind === 'canvas') {
+  const remember = (items) => {
+    const list = items || []
+    setPicks(list)
+    const last = list[list.length - 1]
+    if (!last) {
       setPick(null)
       setSelectedRoom(null)
       setSelectedFixture(null)
       return
     }
+    const panelPick = last.kind === 'node' || last.kind === 'run'
+      ? { kind: 'service', id: last.id, service: last.service || { target: last.kind, id: last.id } }
+      : last
+    setPick(panelPick)
+    setSelectedRoom(last.kind === 'room' ? last.id : null)
+    setSelectedFixture(last.kind === 'fixture' ? last.id : null)
+    if (last.kind === 'fixture') {
+      const fixture = (plan.fixtures || []).find((item) => item.id === last.id)
+      if (fixture) clip.current = { ...fixture }
+    }
+    setPanel('object')
+  }
+
+  const selectHits = (hits, mods) => {
+    const base = mods?.shift || mods?.ctrl ? picks : []
+    remember(expandGroups(plan, mergeSelection(base, hits, mods || {})))
+  }
+
+  const choose = (hit, mods) => {
+    if (!hit || hit.kind === 'canvas') {
+      if (!mods?.shift && !mods?.ctrl) remember([])
+      return
+    }
     if (hit.kind === 'house') {
+      remember([])
       setPick({ kind: 'house', id: 'house' })
       setSelectedRoom(null)
       setSelectedFixture(null)
       setPanel('house')
       return
     }
-    const next = hit.kind === 'service'
-      ? { kind: 'service', id: hit.service?.id, service: hit.service }
-      : { kind: hit.kind, id: hit.id || hit.kind }
-    setPick(next)
-    setSelectedRoom(hit.kind === 'room' ? hit.id : null)
-    setSelectedFixture(hit.kind === 'fixture' ? hit.id : null)
-    if (hit.kind === 'fixture') {
-      const fixture = (plan.fixtures || []).find((item) => item.id === hit.id)
-      if (fixture) clip.current = { ...fixture }
+    const item = hit.kind === 'service'
+      ? { kind: hit.service?.target === 'run' ? 'run' : 'node', id: hit.service?.id, service: hit.service }
+      : { kind: hit.kind, id: hit.id || hit.kind, collection: hit.collection }
+    selectHits([item], mods)
+  }
+
+  const snappedPoint = (world) => describeSnap(world, ppm2d)?.point || world
+
+  const beginCommand = (name, extra) => {
+    const selected = picks
+    if (name === 'delete') {
+      commit(deleteSelection(plan, selected))
+      remember([])
+      setMenu(null)
+      return
     }
-    setPanel(hit.kind === 'house' ? 'house' : 'object')
+    if (name === 'group') { commit(groupSelection(plan, selected)); setMenu(null); return }
+    if (name === 'ungroup') { commit(ungroupSelection(plan, selected)); setMenu(null); return }
+    if (name === 'lock') { commit(setCadFlag(plan, selected, 'cadLock', true)); setMenu(null); return }
+    if (name === 'unlock') { commit(setCadFlag(plan, selected, 'cadLock', false)); setMenu(null); return }
+    if (name === 'hide') { commit(hideSelection(plan, selected)); remember([]); setMenu(null); return }
+    if (name === 'isolate') { commit(isolateSelection(plan, selected)); setMenu(null); return }
+    if (name === 'show') { commit(showAll(plan)); setMenu(null); return }
+    if (name === 'similar') { remember(similarTargets(plan, selected)); setMenu(null); return }
+    if (name === 'layer') { commit(changeLayer(plan, selected, extra)); setMenu(null); return }
+    if (name === 'rotate90') {
+      const box = selectionBounds(plan, selected)
+      const center = { x: (box.minX + box.maxX) / 2, z: (box.minZ + box.maxZ) / 2 }
+      commit(runCommand(plan, selected, { name: 'rotate', base: center, value: '90' }, center))
+      setMenu(null)
+      return
+    }
+    if (!selected.length && name !== 'stretch' && name !== 'measure' && name !== 'match') return
+    originPlan.current = plan
+    setCommand({
+      name,
+      step: name === 'stretch' ? 'window' : name === 'match' ? 'source' : 'base',
+      copies: 1,
+      count: 3,
+      cols: 3,
+      rows: 2,
+      arrayMode: 'linear',
+      edge: 'left',
+      value: '',
+    })
+    setTool('select')
+    setPlacing(null)
+    setMenu(null)
+  }
+
+  const cancelCommand = () => {
+    commandRef.current = null
+    if (originPlan.current) setPlan(originPlan.current)
+    originPlan.current = null
+    setCommand(null)
+    setMarquee(null)
+    pending.current = null
+  }
+
+  const confirmCommand = (point) => {
+    const active = commandRef.current || command
+    commandRef.current = null
+    if (!active || !originPlan.current) return
+    if (active.name === 'measure') {
+      originPlan.current = null
+      setCommand(null)
+      return
+    }
+    const next = runCommand(originPlan.current, picks, active, point)
+    history.current = [...history.current, originPlan.current].slice(-40)
+    redo.current = []
+    originPlan.current = null
+    setPlan(next)
+    setCommand(null)
+  }
+
+  const copyClipboard = () => {
+    if (!picks.length) return
+    window.localStorage.setItem(FLOOR_CLIPBOARD_KEY, JSON.stringify(floorClipboard(plan, picks)))
+  }
+
+  const pasteClipboard = (at) => {
+    let payload = null
+    try { payload = JSON.parse(window.localStorage.getItem(FLOOR_CLIPBOARD_KEY) || 'null') } catch (err) { payload = null }
+    if (!payload) return
+    const point = at || { x: (payload.origin?.x || 0) + 0.4, z: (payload.origin?.z || 0) + 0.4 }
+    commit(pasteFloorClipboard(plan, payload, point))
   }
 
   const openHitMenu = (hit, event, spot) => {
@@ -751,6 +853,7 @@ export default function FloorPlanApp() {
         y: event.clientY,
         kind: point.kind,
         id: point.id || point.kind,
+        collection: point.collection,
         at: point.at,
       })
     }
@@ -773,21 +876,69 @@ export default function FloorPlanApp() {
     const visual = describeSnap(world, ppm2d)
     setSnapVisual(visual)
     setCursor(world)
+    if (pending.current && Math.hypot(world.x - pending.current.x, world.z - pending.current.z) > 0.08) {
+      pending.current.moved = true
+      const box = selectionBox({ x: pending.current.x, z: pending.current.z }, world)
+      pending.current.box = pending.current.stretch ? { ...box, mode: 'crossing' } : box
+      setMarquee(pending.current.box)
+    }
+    const active = commandRef.current
+    if (active?.step === 'to' && originPlan.current && active.name !== 'measure') {
+      setPlan(runCommand(originPlan.current, picks, active, snappedPoint(world)))
+    } else if (active?.name === 'measure' && active.step === 'to') {
+      setCommand((current) => (current ? { ...current, readout: measureReadout(current, world) } : current))
+    }
     if (!typingDraw) setDrawGuide(null)
     const radius = Math.max(12 / Math.max(ppm2d, 0.001), 0.45)
     if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z, radius))
+    if (dragYard.current) setPlan((current) => moveYardItem(current, dragYard.current.collection, dragYard.current.id, world.x, world.z))
     if (dragOpen.current) setPlan((current) => moveOpening(current, dragOpen.current, world))
     if (dragLabel.current) setPlan((current) => moveRoomLabel(current, dragLabel.current, world.x, world.z))
+    if (routeDrag.current && Math.hypot(world.x - routeDrag.current.origin.x, world.z - routeDrag.current.origin.z) > 0.02) {
+      routeDrag.current.moved = true
+      const drag = routeDrag.current.mode === 'run' || event.shiftKey ? { ...routeDrag.current, mode: 'run' } : routeDrag.current
+      setPlan((current) => dragServiceRun(current, drag, world, { ortho: angleStep === 90 && !event.shiftKey, grid: gridStep, free: altRef.current }))
+    }
+    if (dragNode.current && Math.hypot(world.x - dragNode.current.origin.x, world.z - dragNode.current.origin.z) > 0.02) {
+      dragNode.current.moved = true
+      const snapped = altRef.current ? world : snapServicePoint(world, plan, { grid: gridStep, mode: 'free' })
+      setPlan((current) => updateServiceNode(current, dragNode.current.id, { x: snapped.x, z: snapped.z }))
+    }
   }
 
   const onPointerUp = () => {
+    if (pending.current?.stretch && pending.current.box) {
+      const box = pending.current.box
+      const hits = targetsInBox(plan, box)
+      remember(hits)
+      setCommand((current) => (current ? { ...current, step: 'base', box } : current))
+      pending.current = null
+      setMarquee(null)
+    } else if (pending.current?.moved && pending.current.box) {
+      selectHits(targetsInBox(plan, pending.current.box), { shift: pending.current.shift, ctrl: pending.current.ctrl })
+      pending.current = null
+      setMarquee(null)
+    } else if (pending.current) {
+      choose(pending.current.hit, { shift: pending.current.shift, ctrl: pending.current.ctrl })
+      pending.current = null
+      setMarquee(null)
+    }
     if (panRef.current?.button === 2 && panRef.current.moved) suppressMenu.current = true
     panRef.current = null
-    if ((dragId.current || dragLabel.current || dragOpen.current) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+    const movedYard = dragYard.current
+    const movedRoute = routeDrag.current?.moved
+    const movedNode = dragNode.current?.moved
+    const draggedFixture = Boolean(dragId.current)
+    if ((dragId.current || dragLabel.current || dragOpen.current || movedYard || movedRoute || movedNode) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
     dragId.current = null
     dragOpen.current = null
     dragLabel.current = null
+    dragYard.current = null
+    routeDrag.current = null
+    dragNode.current = null
     dragBefore.current = null
+    if (movedYard?.collection === 'objects') setPlan((current) => syncYardServices(current))
+    if (draggedFixture) setPlan((current) => syncFixtureServices(current))
   }
 
   const closeRoom = (points) => {
@@ -810,6 +961,13 @@ export default function FloorPlanApp() {
 
   const finishServiceRun = () => {
     if (svcPoints.length < 2) return
+    if (redrawId) {
+      commit(commitRunGeometry(plan, redrawId, svcPoints))
+      setRedrawId(null)
+      setSvcPoints([])
+      setSvcTool(null)
+      return
+    }
     const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES.find((item) => item.mode === 'run')
     commit(addServiceRun(plan, {
       system: spec.system,
@@ -820,6 +978,32 @@ export default function FloorPlanApp() {
       points: svcPoints,
     }))
     setSvcPoints([])
+  }
+
+  const beginRouteDrag = (id, mode, index, world) => {
+    const run = ensureServices(plan).runs.find((item) => item.id === id)
+    if (!run) return
+    choose({ kind: 'service', service: { target: 'run', id, system: run.system, segmentIndex: index } })
+    routeDrag.current = {
+      id,
+      mode,
+      index,
+      origin: { x: world.x, z: world.z },
+      basePoints: (run.points || []).map((point) => ({ ...point })),
+      moved: false,
+    }
+    dragBefore.current = plan
+  }
+
+  const beginRedraw = (run) => {
+    if (!run) return
+    setRedrawId(run.id)
+    setSvcTool('run')
+    setSvcSystem(run.system)
+    setSvcKind(run.kind)
+    setSvcPoints([])
+    setMenu(null)
+    choose({ kind: 'service', service: { target: 'run', id: run.id, system: run.system } })
   }
 
   const onContextMenu = (event) => {
@@ -841,13 +1025,57 @@ export default function FloorPlanApp() {
       return
     }
     const hit = hitTest(plan, world)
+    const yardHit = sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
+    if (hit.kind !== 'opening' && hit.kind !== 'wall' && yardHit && (yardHit.collection !== 'plot' || hit.kind === 'canvas')) {
+      setMenu({ x: event.clientX, y: event.clientY, kind: 'yard', id: yardHit.id, collection: yardHit.collection, at: world })
+      choose(yardHit)
+      return
+    }
     setMenu({ x: event.clientX, y: event.clientY, kind: hit.kind, id: hit.id, at: world })
     if (hit.kind !== 'canvas') choose(hit)
+  }
+
+  const finishYard = (points) => {
+    if (!yardTool) return
+    let next = plan
+    if (yardTool === 'plot') next = setPlot(plan, points)
+    else if (yardTool === 'terrace') next = addTerrace(plan, points, { railing: true, steps: true })
+    else if (yardTool === 'lawn' || yardTool === 'flowerbed') next = addBed(plan, points, yardTool)
+    else if (yardTool === 'path' || yardTool === 'drive' || yardTool === 'parking') next = addPath(plan, points, { kind: yardTool })
+    else if (yardTool === 'fence') next = addFence(plan, points, {})
+    else return
+    commit(next)
+    setYardPoints([])
   }
 
   const placeAt = (world, ppm) => {
     const visual = describeSnap(world, ppm)
     const point = visual?.point || world
+    if (yardTool) {
+      if (yardTool.startsWith('plant:')) {
+        commit(addPlant(plan, yardTool.slice(6), point.x, point.z))
+        return
+      }
+      if (yardTool.startsWith('object:')) {
+        commit(addObject(plan, yardTool.slice(7), point.x, point.z))
+        return
+      }
+      if (yardTool.startsWith('building:')) {
+        commit(addBuilding(plan, yardTool.slice(9), point.x, point.z))
+        return
+      }
+      const closed = yardTool === 'plot' || yardTool === 'terrace' || yardTool === 'lawn' || yardTool === 'flowerbed'
+      if (closed && yardPoints.length >= 3 && segmentLength(point, yardPoints[0]) < Math.max(0.45, 16 / Math.max(ppm, 0.001))) {
+        finishYard(yardPoints)
+        return
+      }
+      setYardPoints((points) => {
+        const prev = points[points.length - 1]
+        if (prev && segmentLength(prev, point) < 0.05) return points
+        return [...points, point]
+      })
+      return
+    }
     if (svcTool) {
       const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES[0]
       const snapped = snapServicePoint(world, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system })
@@ -943,23 +1171,78 @@ export default function FloorPlanApp() {
     if (event.button !== 0) return
     setMenu(null)
     const world = toWorld(event)
-    if (svcTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing) {
+    if (command && !svcTool && !yardTool && !placing && (tool === 'select' || tool === 'detect')) {
+      const point = snappedPoint(world)
+      if (command.name === 'stretch' && command.step === 'window') {
+        pending.current = { x: point.x, z: point.z, stretch: true, moved: false }
+        return
+      }
+      if (command.name === 'match' && command.step === 'source') {
+        const serviceHit = hitService(plan, world)
+        const hit = serviceHit
+          ? { kind: 'service', service: serviceHit }
+          : (sheetMode === 'site' ? hitTestYard(plan, world) : null) || hitTest(plan, world)
+        if (hit && hit.kind !== 'canvas') {
+          const source = hit.kind === 'service'
+            ? { kind: hit.service?.target === 'run' ? 'run' : 'node', id: hit.service?.id, service: hit.service }
+            : { kind: hit.kind, id: hit.id, collection: hit.collection }
+          commit(matchProperties(originPlan.current || plan, source, picks))
+          originPlan.current = null
+          setCommand(null)
+        }
+        return
+      }
+      if (command.step === 'base') {
+        originPlan.current = originPlan.current || plan
+        const next = { ...command, step: 'to', base: point }
+        commandRef.current = next
+        setCommand(next)
+        return
+      }
+      if (command.step === 'to') confirmCommand(point)
+      return
+    }
+    if (svcTool || yardTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing) {
       placeAt(world, ppm2d)
       return
     }
     const serviceHit = hitService(plan, world)
-    if (serviceHit) {
+    if (serviceHit?.target === 'node') {
       choose({ kind: 'service', service: serviceHit })
+      dragNode.current = { id: serviceHit.id, origin: { x: world.x, z: world.z }, moved: false }
+      dragBefore.current = plan
       return
     }
+    if (serviceHit?.target === 'run') {
+      const mode = event.shiftKey ? 'run' : serviceHit.vertexIndex != null ? 'vertex' : 'segment'
+      const index = serviceHit.vertexIndex != null ? serviceHit.vertexIndex : (serviceHit.segmentIndex || 0)
+      beginRouteDrag(serviceHit.id, mode, index, world)
+      return
+    }
+    const yardHit = sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
     const hit = hitTest(plan, world)
+    if (yardHit && hit.kind !== 'opening' && hit.kind !== 'wall' && (yardHit.collection !== 'plot' || hit.kind === 'canvas')) {
+      choose(yardHit)
+      if (yardHit.movable) {
+        dragYard.current = yardHit
+        dragBefore.current = plan
+      }
+      return
+    }
     if (hit.kind === 'opening') {
       dragOpen.current = hit.id
       dragBefore.current = plan
-      choose(hit)
+      choose(hit, { shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey })
       return
     }
-    choose(hit.kind === 'canvas' ? null : hit)
+    pending.current = {
+      x: world.x,
+      z: world.z,
+      hit,
+      shift: event.shiftKey,
+      ctrl: event.ctrlKey || event.metaKey,
+      moved: false,
+    }
   }
 
   useEffect(() => {
@@ -995,19 +1278,61 @@ export default function FloorPlanApp() {
         setCamera(FIT_CAMERA)
         return
       }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault()
+        remember(targetsByType(plan, 'all'))
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        copyClipboard()
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'x') {
+        event.preventDefault()
+        copyClipboard()
+        commit(deleteSelection(plan, picks))
+        remember([])
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') {
+        event.preventDefault()
+        pasteClipboard(cursor)
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
+        event.preventDefault()
+        redoChange()
+        return
+      }
       if (event.key === 'Escape') {
+        if (command) cancelCommand()
         setDraft(null)
         setPoly([])
         setPlacing(null)
         setMenu(null)
         setSvcPoints([])
         setSvcTool(null)
+        setRedrawId(null)
+        setYardPoints([])
+        setYardTool(null)
         setElectricView(null)
         setHeatView(null)
+        if (!command) remember([])
+      } else if (event.key === 'Enter' && command?.step === 'to') {
+        confirmCommand(snappedPoint(cursor || command.base || { x: 0, z: 0 }))
       } else if (event.key === 'Enter' && svcTool === 'run' && svcPoints.length >= 2) {
         finishServiceRun()
       } else if (event.key === 'Enter' && tool === 'room' && poly.length >= 3) {
         closeRoom(poly)
+      } else if (event.key === 'Enter' && yardTool && yardPoints.length >= ((yardTool === 'path' || yardTool === 'drive' || yardTool === 'parking' || yardTool === 'fence') ? 2 : 3)) {
+        finishYard(yardPoints)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && picks.length) {
+        commit(deleteSelection(plan, picks))
+        remember([])
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'yard') {
+        commit(deleteYardItem(plan, pick.collection, pick.id))
+        choose(null)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'wall') {
         commit(refreshHeat(deleteWall(plan, pick.id)))
         choose(null)
@@ -1029,9 +1354,15 @@ export default function FloorPlanApp() {
       } else if ((event.key === 'd' || event.key === 'D') && (event.metaKey || event.ctrlKey) && selectedFixture) {
         event.preventDefault()
         commit(duplicateFixture(plan, selectedFixture))
+      } else if ((event.key === 'r' || event.key === 'R') && pick?.kind === 'yard' && (pick.collection === 'objects' || pick.collection === 'buildings')) {
+        commit(rotateYardItem(plan, pick.collection, pick.id))
       } else if ((event.key === 'r' || event.key === 'R') && selectedFixture) {
         commit(rotateFixture(plan, selectedFixture))
-      } else if ((event.key === 'z' || event.key === 'Z') && (event.metaKey || event.ctrlKey)) {
+      } else if (!event.ctrlKey && !event.metaKey && !event.altKey && !command && tool === 'select') {
+        const key = event.key.toLowerCase()
+        const shortcut = { m: 'move', c: 'copy', e: 'rotate', s: 'scale', f: 'mirror', b: 'array', o: 'offset', t: 'stretch', n: 'align', d: 'measure' }[key]
+        if (shortcut) beginCommand(shortcut)
+      } else if ((event.key === 'z' || event.key === 'Z') && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
         undo()
       }
     }
@@ -1052,7 +1383,7 @@ export default function FloorPlanApp() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions, svcTool, svcPoints, svcKind, view])
+  }, [commit, plan, selectedFixture, undo, redoChange, tool, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints])
 
   const loadHouse = (house, roomName, panel) => {
     const next = { ...house, services: ensureServices(house) }
@@ -1065,6 +1396,9 @@ export default function FloorPlanApp() {
     setSelectedFixture(null)
     setMenu(null)
     setView('2d')
+    setSheetMode('plan')
+    setYardTool(null)
+    setYardPoints([])
     setPanel(panel || (room ? 'object' : 'house'))
     setReady(true)
     setStartOpen(false)
@@ -1138,6 +1472,7 @@ export default function FloorPlanApp() {
       if (dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
       dragBefore.current = null
       dragGrab.current = null
+      setPlan((current) => syncFixtureServices(current))
     }
   }
 
@@ -1148,6 +1483,68 @@ export default function FloorPlanApp() {
     if (phase === 'end') {
       history.current = [...history.current, dragBefore.current].slice(-40)
       dragBefore.current = null
+    }
+  }
+
+  const onServiceDrag3d = (service, spot, phase) => {
+    if (!service) return
+    if (service.target === 'node') {
+      if (phase === 'start') {
+        if (!dragBefore.current) dragBefore.current = plan
+        return
+      }
+      const snapped = snapServicePoint(spot, plan, { grid: gridStep, mode: 'free' })
+      setPlan((current) => updateServiceNode(current, service.id, { x: snapped.x, z: snapped.z }))
+      choose({ kind: 'service', service: { target: 'node', id: service.id, system: service.system } })
+      if (phase === 'end') {
+        if (dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+        dragBefore.current = null
+      }
+      return
+    }
+    if (phase === 'start') {
+      const run = ensureServices(plan).runs.find((item) => item.id === service.id)
+      if (!run) return
+      if (!dragBefore.current) dragBefore.current = plan
+      routeDrag.current = {
+        id: service.id,
+        mode: service.target === 'vertex' ? 'vertex' : service.target === 'segment' ? 'segment' : 'run',
+        index: service.index || 0,
+        origin: { x: spot.x, z: spot.z },
+        basePoints: (run.points || []).map((point) => ({ ...point })),
+      }
+      return
+    }
+    if (!routeDrag.current || routeDrag.current.id !== service.id) {
+      const run = ensureServices(plan).runs.find((item) => item.id === service.id)
+      if (!run) return
+      if (!dragBefore.current) dragBefore.current = plan
+      routeDrag.current = {
+        id: service.id,
+        mode: service.target === 'vertex' ? 'vertex' : service.target === 'segment' ? 'segment' : 'run',
+        index: service.index || 0,
+        origin: { x: spot.x, z: spot.z },
+        basePoints: (run.points || []).map((point) => ({ ...point })),
+      }
+    }
+    const drag = routeDrag.current
+    setPlan((current) => dragServiceRun(current, drag, spot, { ortho: angleStep === 90, grid: gridStep }))
+    choose({ kind: 'service', service: { target: 'run', id: service.id, system: service.system, segmentIndex: service.index || 0 } })
+    if (phase === 'end') {
+      if (dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+      dragBefore.current = null
+      routeDrag.current = null
+    }
+  }
+
+  const onYardDrag3d = (hit, spot, phase) => {
+    if (!dragBefore.current) dragBefore.current = plan
+    setPlan((current) => moveYardItem(current, hit.collection, hit.id, spot.x, spot.z))
+    setPick(hit)
+    if (phase === 'end') {
+      history.current = [...history.current, dragBefore.current].slice(-40)
+      dragBefore.current = null
+      if (hit.collection === 'objects') setPlan((current) => syncYardServices(current))
     }
   }
 
@@ -1174,13 +1571,17 @@ export default function FloorPlanApp() {
     })
   }
 
-  const loadExample = () => loadHouse(exampleHouse(), 'Olohuone')
+  const loadExample = () => loadHouse(syncYardServices(applyExampleYard(exampleHouse())), 'Olohuone')
 
   const loadFamily = () => loadHouse(familyHouse(), 'Eteinen')
 
   const onMenuNavigate = (action) => {
     if (action === 'close') {
       setMenu(null)
+      return
+    }
+    if (typeof action === 'string' && action.startsWith('cad:')) {
+      beginCommand(action.slice(4))
       return
     }
     if (action === 'house' || action === 'focus' || action === 'properties') {
@@ -1256,14 +1657,17 @@ export default function FloorPlanApp() {
   const room = (plan.rooms || []).find((item) => item.id === selectedRoom) || null
   const shownRooms = visibleRooms(plan).filter((item) => item.showLabel !== false)
   const rows = materialsList(plan)
-  const groups = []
-  FIXTURES.forEach((item) => {
-    let group = groups.find((entry) => entry.id === item.group)
-    if (!group) {
-      group = { id: item.group, items: [] }
-      groups.push(group)
-    }
-    group.items.push(item)
+  const query = fixtureQuery.trim().toLowerCase()
+  const matchesQuery = (item) => !query || item.name.toLowerCase().includes(query) || item.group.toLowerCase().includes(query)
+  const roomKindId = room ? roomKind(room) : ''
+  const suggested = suggestionsFor(roomKindId).filter(matchesQuery)
+  const groups = FURNITURE_GROUPS.map((id) => ({
+    id,
+    items: FIXTURES.filter((item) => item.group === id && matchesQuery(item)),
+  })).filter((group) => group.items.length)
+  const schedule = scheduleRows(plan.fixtures, (fixture) => {
+    const host = visibleRooms(plan).find((item) => pointInPolygon(fixture.x, fixture.z, item.polygon || item.gross || []))
+    return host?.name || ''
   })
   const totalArea = visibleRooms(plan).reduce((sum, item) => sum + item.area, 0)
   const dims = dimensionChains(plan)
@@ -1274,18 +1678,22 @@ export default function FloorPlanApp() {
     ...dims.overall.map((dim) => ({ ...dim, offset: 1.7 })),
   ])
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
-  const sheetTitle = activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva'
+  const sheetTitle = sheetMode === 'site' ? 'Asemapiirros' : (activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva')
   const liveEnd = draft && (tool === 'exterior' || tool === 'interior') ? (drawGuide || snapVisual?.point || null) : null
   const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
-  const status = svcTool === 'run'
+  const status = redrawId
+    ? 'Piirrä reitti uudelleen. Enter päättää, Escape peruuttaa.'
+    : svcTool === 'run'
     ? 'Linja: napsauta pisteet. Enter tai Valmis päättää. Escape peruuttaa.'
     : svcTool === 'node'
       ? `${spec?.name || 'Piste'}: napsauta paikka. Piste tarttuu verkkoon ja lähellä olevaan osaan.`
     : liveEnd
     ? `Pituus ${formatMm(liveLength)} mm`
-    : placing
+    : yardTool
+      ? yardToolLabel(yardTool)
+      : placing
       ? 'Napsauta pohjaan kalusteen paikka'
       : tool === 'room' && roomShape === 'poly'
         ? 'Huone: napsauta kulmat. Sulje ensimmäiseen pisteeseen tai paina Enter.'
@@ -1301,7 +1709,7 @@ export default function FloorPlanApp() {
             ? 'Ovi: napsauta seinää'
             : tool === 'window'
               ? 'Ikkuna: napsauta seinää'
-              : 'Valitse huone tai kaluste. Vedä huoneen nimeä. Hiiren oikea painike avaa valikon.'
+              : 'Valitse: vedä vasemmalta oikealle ikkuna, oikealta vasemmalle ylitys. Shift tai Ctrl lisää ja poistaa. Esc tyhjentää.'
 
   const px = (metres) => metres * layout.scale * k
 
@@ -1330,7 +1738,8 @@ export default function FloorPlanApp() {
           <button type="button" data-testid="tool-detect" style={textBtn(tool === 'detect')} onClick={() => { setTool('detect'); setPlacing(null); setDraft(null); setPoly([]) }}>Tunnista</button>
         </div>
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
-          <button type="button" data-testid="view-floor-2d" style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
+          <button type="button" data-testid="view-floor-2d" style={textBtn(view === '2d' && sheetMode !== 'site')} onClick={() => { setView('2d'); setSheetMode('plan'); setYardTool(null); setYardPoints([]) }}>2D</button>
+          <button type="button" data-testid="view-site" style={textBtn(view === '2d' && sheetMode === 'site')} onClick={() => { setView('2d'); setSheetMode('site'); setCamera(FIT_CAMERA); setYardTool(null); setYardPoints([]) }}>Piha</button>
           <button type="button" data-testid="view-floor-3d" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
           <button type="button" data-testid="view-facade" style={textBtn(view === 'facade')} onClick={() => setView('facade')}>Julkisivu</button>
         </div>
@@ -1338,7 +1747,8 @@ export default function FloorPlanApp() {
           <button type="button" style={textBtn(plan.paper !== 'a4')} onClick={() => setPlan({ ...plan, paper: 'a3' })}>A3</button>
           <button type="button" style={textBtn(plan.paper === 'a4')} onClick={() => setPlan({ ...plan, paper: 'a4' })}>A4</button>
         </div>
-        <button type="button" title="Kumoa" onClick={undo} style={textBtn(false)}>Kumoa</button>
+        <button type="button" title="Kumoa" data-testid="undo" onClick={undo} style={textBtn(false)}>Kumoa</button>
+        <button type="button" title="Tee uudelleen" data-testid="redo" onClick={redoChange} style={textBtn(false)}>Tee uudelleen</button>
         <span style={{ flex: 1 }} />
         <button type="button" data-testid="plan-new" onClick={() => { setMenu(null); setNewOpen(true) }} style={textBtn(false)}>Uusi</button>
         <button type="button" data-testid="plan-open" onClick={() => { setMenu(null); setLibraryOpen(true) }} style={textBtn(false)}>Avaa/Tallenna</button>
@@ -1346,6 +1756,7 @@ export default function FloorPlanApp() {
         <button type="button" data-testid="example-house" onClick={loadExample} style={textBtn(false)}>Esimerkkitalo</button>
         <button type="button" data-testid="family-house" onClick={loadFamily} style={textBtn(false)}>Huoneisto</button>
         <button type="button" data-testid="export-floor-pdf" onClick={exportPdf} style={textBtn(false)}>PDF</button>
+        <button type="button" data-testid="export-site-pdf" onClick={() => buildSitePdf(plan).save(`${(plan.name || 'asemapiirros').replace(/\s+/g, '-')}-asemapiirros.pdf`)} style={textBtn(false)}>Asemapiirros</button>
         <button type="button" data-testid="export-floor-png" onClick={exportPng} style={textBtn(false)}>PNG</button>
       </header>
       <div style={{ height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', background: '#1c212b', color: '#e7e5e4', flexShrink: 0 }}>
@@ -1355,6 +1766,30 @@ export default function FloorPlanApp() {
         </label>
         {tool === 'room' && roomShape === 'poly' && poly.length >= 3 && (
           <button type="button" data-testid="close-room" style={textBtn(false)} onClick={() => closeRoom(poly)}>Sulje huone</button>
+        )}
+        {sheetMode === 'site' && YARD_DRAW_TOOLS.map(([id, label]) => (
+          <button key={id} type="button" data-testid={`yard-tool-${id}`} style={textBtn(yardTool === id)} onClick={() => { setYardTool(id); setTool('select'); setPlacing(null); setYardPoints([]) }}>{label}</button>
+        ))}
+        {sheetMode === 'site' && (
+          <>
+            <select data-testid="yard-plant-tool" value={yardTool?.startsWith('plant:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
+              <option value="">Kasvi</option>
+              {PLANTS.map((item) => <option key={item.id} value={`plant:${item.id}`}>{item.name}</option>)}
+            </select>
+            <select data-testid="yard-object-tool" value={yardTool?.startsWith('object:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
+              <option value="">Pihaesine</option>
+              {OBJECTS.map((item) => <option key={item.id} value={`object:${item.id}`}>{item.name}</option>)}
+            </select>
+            <select data-testid="yard-building-tool" value={yardTool?.startsWith('building:') ? yardTool : ''} onChange={(event) => { setYardTool(event.target.value || null); setTool('select'); setYardPoints([]) }} style={{ fontSize: 12, borderRadius: 6 }}>
+              <option value="">Ulkorakennus</option>
+              {BUILDINGS.map((item) => <option key={item.id} value={`building:${item.id}`}>{item.name}</option>)}
+            </select>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+              Pohjoinen
+              <input data-testid="north-angle" type="number" value={ensureYard(plan).north} onChange={(event) => commit(updateYardItem(plan, 'north', 'north', { north: Number(event.target.value) || 0 }))} style={{ width: 52, padding: '2px 4px', borderRadius: 6, border: '1px solid #44403c', background: '#111827', color: '#fff' }} />
+              °
+            </label>
+          </>
         )}
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: '#a8a29e' }}>Tartunta</span>
@@ -1411,7 +1846,7 @@ export default function FloorPlanApp() {
           return { ...current, services: { ...services, layers: { ...services.layers, [id]: visible } } }
         })}
         onRoute={() => {
-          commit(autoRouteAll(plan, { floorHeating }))
+          commit(syncYardServices(autoRouteAll(plan, { floorHeating })))
           setSvcPoints([])
           setView('2d')
         }}
@@ -1458,9 +1893,51 @@ export default function FloorPlanApp() {
         }}
       />
 
+      <CadToolbar
+        active={command?.name}
+        onCommand={beginCommand}
+        onSelectType={(type) => remember(targetsByType(plan, type))}
+        onLayer={(layer) => beginCommand('layer', layer)}
+      />
+
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <aside style={{ width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '4px 4px 8px' }}>KALUSTEET</div>
+          <input
+            data-testid="fixture-search"
+            value={fixtureQuery}
+            placeholder="Hae kalustetta"
+            aria-label="Hae kalustetta"
+            onChange={(event) => setFixtureQuery(event.target.value)}
+            style={{ width: '100%', boxSizing: 'border-box', marginBottom: 8, padding: '6px 8px', borderRadius: 8, border: '1px solid #d6d3d1', fontSize: 12 }}
+          />
+          <button type="button" data-testid="furnish-all" style={{ ...sideBtn(false), marginBottom: 6 }} onClick={() => commit(furnishAll(plan))}>Kalusta tyypillisesti</button>
+          {room && layoutFor(roomKindId).length > 0 && (
+            <button type="button" data-testid="furnish-room" style={{ ...sideBtn(false), marginBottom: 8 }} onClick={() => commit(furnishRoom(plan, room.id))}>Kalusta {room.name}</button>
+          )}
+          {suggested.length > 0 && (
+            <div style={{ marginBottom: 10 }} data-testid="fixture-suggestions">
+              <div style={{ fontSize: 12, fontWeight: 750, margin: '0 4px 4px' }}>Ehdotukset{room ? `: ${room.name}` : ''}</div>
+              {suggested.map((item) => (
+                <button
+                  key={`sug-${item.id}`}
+                  type="button"
+                  data-testid={`suggest-${item.id}`}
+                  style={sideBtn(placing === item.id)}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('application/x-fixture', item.id)
+                    event.dataTransfer.setData('text/plain', item.id)
+                    event.dataTransfer.effectAllowed = 'copy'
+                  }}
+                  onClick={() => { setPlacing(item.id); setTool('select'); setDraft(null) }}
+                >
+                  {item.name}
+                  <span style={{ display: 'block', fontWeight: 500, color: '#78716c', fontSize: 11 }}>{Math.round(item.w * 1000)} × {Math.round(item.d * 1000)} mm</span>
+                </button>
+              ))}
+            </div>
+          )}
           {groups.map((group) => (
             <div key={group.id} style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 12, fontWeight: 750, margin: '0 4px 4px' }}>{group.id}</div>
@@ -1484,11 +1961,40 @@ export default function FloorPlanApp() {
               ))}
             </div>
           ))}
+          {schedule.length > 0 && (
+            <div data-testid="furniture-schedule" style={{ marginTop: 12, borderTop: '1px solid #e7e5e4', paddingTop: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '0 4px 6px' }}>KALUSTELUETTELO</div>
+              {schedule.map((row) => (
+                <div key={row.key} style={{ fontSize: 11, padding: '3px 4px', borderBottom: '1px solid #f5f5f4' }}>
+                  <div style={{ fontWeight: 700 }}>{row.count} × {row.name}{row.variant ? ` ${row.variant}` : ''}</div>
+                  <div style={{ color: '#78716c' }}>{row.room} · {Math.round(row.w * 1000)} × {Math.round(row.d * 1000)} mm</div>
+                </div>
+              ))}
+            </div>
+          )}
         </aside>
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
-          <div style={{ height: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
-            {draft && liveEnd && (tool === 'exterior' || tool === 'interior') ? (
+          <div style={{ minHeight: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
+            {command ? (
+              <CadPrompt
+                command={command}
+                readout={command.readout}
+                onChange={(patch) => {
+                  setCommand((current) => {
+                    if (!current) return current
+                    const next = { ...current, ...patch }
+                    commandRef.current = next
+                    if (next.step === 'to' && originPlan.current && cursor && next.name !== 'measure') {
+                      setPlan(runCommand(originPlan.current, picks, next, snappedPoint(cursor)))
+                    }
+                    return next
+                  })
+                }}
+                onApply={() => { if (command.step === 'to') confirmCommand(snappedPoint(cursor || command.base || { x: 0, z: 0 })) }}
+                onCancel={cancelCommand}
+              />
+            ) : draft && liveEnd && (tool === 'exterior' || tool === 'interior') ? (
               <DrawFields
                 draft={draft}
                 end={liveEnd}
@@ -1528,7 +2034,7 @@ export default function FloorPlanApp() {
                 onPointerDown={onPointerDown}
                 onPointerUp={onPointerUp}
                 onContextMenu={onContextMenu}
-                style={{ display: 'block', cursor: tool === 'select' && !placing && !svcTool ? 'default' : 'crosshair', touchAction: 'none' }}
+                style={{ display: 'block', cursor: tool === 'select' && !placing && !svcTool && !yardTool ? 'default' : 'crosshair', touchAction: 'none' }}
               >
                 <defs>
                   <pattern id="poche" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -1549,14 +2055,26 @@ export default function FloorPlanApp() {
                     strokeWidth={1.2}
                   />
                 ))}
-                <WallOutlines plan={plan} X={X} Y={Y} selectedId={pick?.kind === 'wall' ? pick.id : null} />
-                {(plan.openings || []).map((opening) => {
+                {sheetMode === 'site' && (
+                  <YardLayer
+                    plan={plan}
+                    X={X}
+                    Y={Y}
+                    px={px}
+                    sheet={sheet}
+                    selected={pick}
+                    preview={yardPoints.length ? { points: yardPoints, cursor: snapVisual?.point || cursor } : null}
+                  />
+                )}
+                <WallOutlines plan={plan} X={X} Y={Y} selectedIds={picks.filter((item) => item.kind === 'wall').map((item) => item.id)} />
+                {(plan.openings || []).filter((opening) => !opening.hidden).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
-                  if (!wall) return null
+                  if (!wall || wall.hidden) return null
                   const fig = openingSymbol(wall, opening)
+                  const selectedOpening = picks.some((item) => item.kind === 'opening' && item.id === opening.id)
                   if (fig.kind === 'window') {
                     return (
-                      <g key={opening.id} stroke={pick?.kind === 'opening' && pick.id === opening.id ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
+                      <g key={opening.id} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
                         {fig.glass.map((line, index) => (
                           <line key={index} x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} />
                         ))}
@@ -1566,16 +2084,16 @@ export default function FloorPlanApp() {
                     )
                   }
                   return (
-                    <g key={opening.id} stroke={pick?.kind === 'opening' && pick.id === opening.id ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
+                    <g key={opening.id} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
                       <polyline points={fig.arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} />
                       <line x1={X(fig.hinge.x)} y1={Y(fig.hinge.z)} x2={X(fig.leaf.x)} y2={Y(fig.leaf.z)} />
                     </g>
                   )
                 })}
-                {(plan.fixtures || []).map((fixture) => {
-                  const tpl = FIXTURES.find((item) => item.id === fixture.type) || FIXTURES[0]
-                  const w = px(fixture.w || tpl.w)
-                  const d = px(fixture.d || tpl.d)
+                {sheetMode !== 'site' && (plan.fixtures || []).filter((fixture) => !fixture.hidden).map((fixture) => {
+                  const spec = resolveFixture(fixture)
+                  const w = px(spec.w)
+                  const d = px(spec.d)
                   return (
                     <g
                       key={fixture.id}
@@ -1584,8 +2102,9 @@ export default function FloorPlanApp() {
                       style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none' }}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return
+                        if (commandRef.current) return
                         event.stopPropagation()
-                        setSelectedFixture(fixture.id)
+                        choose({ kind: 'fixture', id: fixture.id }, { shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey })
                         setTool('select')
                         setPlacing(null)
                         dragId.current = fixture.id
@@ -1599,8 +2118,8 @@ export default function FloorPlanApp() {
                         setMenu({ x: event.clientX, y: event.clientY, kind: 'fixture', id: fixture.id, at: { x: fixture.x, z: fixture.z } })
                       }}
                     >
-                      <FixtureMark type={fixture.type} w={w} d={d} color={fixture.color} />
-                      {fixture.id === selectedFixture && (
+                      <FixtureSymbol symbol={spec.symbol} w={w} d={d} color={fixture.color} />
+                      {picks.some((item) => item.kind === 'fixture' && item.id === fixture.id) && (
                         <rect x={-w / 2 - 3} y={-d / 2 - 3} width={w + 6} height={d + 6} fill="none" stroke="#0f766e" strokeWidth={1.4} />
                       )}
                     </g>
@@ -1612,7 +2131,7 @@ export default function FloorPlanApp() {
                   setPanel('object')
                   setMenu(null)
                 }} />
-                {plan.walls.length > 0 && (
+                {sheetMode !== 'site' && plan.walls.length > 0 && (
                   <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
                     {dimLines.map((dim, index) => <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}`} dim={dim} offset={0} X={X} Y={Y} />)}
                   </g>
@@ -1646,12 +2165,13 @@ export default function FloorPlanApp() {
                     style={{ pointerEvents: 'none' }}
                   />
                 )}
-                <g style={{ pointerEvents: 'none' }} data-testid="north-arrow">
+                <g style={{ pointerEvents: 'none' }} data-testid="north-arrow" data-north={ensureYard(plan).north || 0}>
                   {(() => {
                     const ax = sheet.x + sheet.w - 52
                     const ay = sheet.y + 48
+                    const north = sheetMode === 'site' ? (ensureYard(plan).north || 0) : 0
                     return (
-                      <g>
+                      <g transform={`rotate(${north} ${ax} ${ay})`}>
                         <circle cx={ax} cy={ay} r={15} fill="#fff" stroke="#1c1917" strokeWidth={0.8} />
                         <polygon points={`${ax},${ay - 10} ${ax + 4},${ay + 5} ${ax},${ay + 2} ${ax - 4},${ay + 5}`} fill="#1c1917" />
                         <text x={ax} y={ay - 20} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1c1917">N</text>
@@ -1666,7 +2186,15 @@ export default function FloorPlanApp() {
                     const tw = layout.title.w * k
                     const th = layout.title.h * k
                     const roofName = (ROOF_TYPES.find((item) => item.id === plan.roofType) || ROOF_TYPES[0]).name
-                    const lines = [
+                    const yard = ensureYard(plan)
+                    const lines = sheetMode === 'site' ? [
+                      plan.name || 'Omakotitalo',
+                      `Mittakaava 1:${layout.ratio}`,
+                      plan.paper === 'a4' ? 'A4 vaaka' : 'A3 vaaka',
+                      `Tontti ${formatSquare(plotMetrics(plan).area)}`,
+                      `Pohjoinen ${Math.round(yard.north || 0)}°`,
+                      `Ulkorakennukset ${yard.buildings.length}`,
+                    ] : [
                       plan.name || 'Omakotitalo',
                       `Mittakaava 1:${layout.ratio}`,
                       plan.paper === 'a4' ? 'A4 vaaka' : 'A3 vaaka',
@@ -1719,6 +2247,8 @@ export default function FloorPlanApp() {
                     w: layout.title.w * k,
                   }}
                   interactive={!svcTool}
+                  selected={pick}
+                  onRouteDown={(event, hit) => beginRouteDrag(hit.id, hit.mode, hit.index, toWorld(event))}
                   preview={svcTool === 'run' ? { points: svcPoints, cursor: cursor ? snapServicePoint(cursor, plan, { mode: 'free', system: svcSystem }) : null } : null}
                   onContext={openServiceMenu}
                 />
@@ -1739,6 +2269,7 @@ export default function FloorPlanApp() {
                       style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return
+                        if (commandRef.current) return
                         event.stopPropagation()
                         setSelectedRoom(item.id)
                         setSelectedFixture(null)
@@ -1753,6 +2284,32 @@ export default function FloorPlanApp() {
                 })}
                 {plan.walls.length === 0 && (
                   <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">Piirrä ulkoseinät tai avaa esimerkkitalo</text>
+                )}
+                {marquee && (
+                  <rect
+                    data-testid={marquee.mode === 'crossing' ? 'select-crossing' : 'select-window'}
+                    data-mode={marquee.mode}
+                    x={X(marquee.minX)}
+                    y={Y(marquee.minZ)}
+                    width={Math.max(0, X(marquee.maxX) - X(marquee.minX))}
+                    height={Math.max(0, Y(marquee.maxZ) - Y(marquee.minZ))}
+                    fill={marquee.mode === 'crossing' ? 'rgba(217,119,6,0.12)' : 'rgba(15,118,110,0.12)'}
+                    stroke={marquee.mode === 'crossing' ? '#d97706' : '#0f766e'}
+                    strokeWidth={1.4}
+                    strokeDasharray={marquee.mode === 'crossing' ? '7 4' : undefined}
+                  />
+                )}
+                {command?.base && cursor && (
+                  <line
+                    data-testid="cad-preview"
+                    x1={X(command.base.x)}
+                    y1={Y(command.base.z)}
+                    x2={X((snapVisual?.point || cursor).x)}
+                    y2={Y((snapVisual?.point || cursor).z)}
+                    stroke="#0f766e"
+                    strokeWidth={2.4}
+                    strokeDasharray="8 4"
+                  />
                 )}
                 <SnapMark snap={snapVisual} X={X} Y={Y} zoom={camera.zoom} />
                 <AngleMarks marks={cornerAngles(plan.walls)} X={X} Y={Y} zoom={camera.zoom} />
@@ -1784,6 +2341,8 @@ export default function FloorPlanApp() {
                 onPlace={onPlace3d}
                 onFixtureDrag={onFixtureDrag3d}
                 onOpeningDrag={onOpeningDrag3d}
+                onYardDrag={onYardDrag3d}
+                onServiceDrag={onServiceDrag3d}
                 onDropFixture={onDropFixture3d}
               />
               <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1827,7 +2386,7 @@ export default function FloorPlanApp() {
           {pick && panel !== 'house' ? (
             <div data-testid="panel-heading" style={{ marginBottom: 10 }}>
               <button type="button" data-testid="panel-back-house" onClick={() => setPanel('house')} style={{ display: 'block', padding: 0, border: 'none', background: 'transparent', color: '#0f766e', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 4 }}>← Talon asetukset</button>
-              <div data-testid="selection-title" style={{ fontSize: 15, fontWeight: 750 }}>{selectionLabel(plan, pick)}</div>
+              <div data-testid="selection-title" style={{ fontSize: 15, fontWeight: 750 }}>{picks.length > 1 ? `${picks.length} kohdetta` : selectionLabel(plan, pick)}</div>
             </div>
           ) : (
             <button type="button" data-testid="open-house-panel" style={{ ...sideBtn(panel === 'house'), marginBottom: 10 }} onClick={() => setPanel(panel === 'house' ? 'object' : 'house')}>Talon asetukset</button>
@@ -1835,7 +2394,7 @@ export default function FloorPlanApp() {
           {panel === 'house' ? (
             <HouseSettings plan={plan} onApply={setPlan} />
           ) : (
-            <SelectionPanel plan={plan} selection={pick} onApply={setPlan} onCommit={commit} onClear={() => { setPick(null); setMenu(null) }} />
+            <SelectionPanel plan={plan} selection={pick} picks={picks} onApply={setPlan} onCommit={commit} onPatchMany={(patch) => commit(patchShared(plan, picks, patch))} onClear={() => { remember([]); setMenu(null) }} onRedrawRoute={beginRedraw} />
           )}
           {pick?.kind === 'room' && room && (
             <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>
@@ -1910,7 +2469,7 @@ export default function FloorPlanApp() {
         />
       )}
       <FloorMenu menu={menu} plan={plan} onApply={setPlan} onCommit={commit} onNavigate={onMenuNavigate} />
-      <ServiceMenu menu={menu} plan={plan} onApply={setPlan} onClose={() => setMenu(null)} onProperties={() => onMenuNavigate('properties')} />
+      <ServiceMenu menu={menu} plan={plan} onApply={commit} onCommit={commit} onClose={() => setMenu(null)} onProperties={() => onMenuNavigate('properties')} onRedraw={beginRedraw} onCad={beginCommand} />
     </div>
   )
 }
