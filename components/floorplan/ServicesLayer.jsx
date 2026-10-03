@@ -13,6 +13,7 @@ import {
   ensureServices,
   joinServiceRuns,
   layerVisible,
+  manifoldCallouts,
   serviceItemVisible,
   nodeColor,
   rerouteRun,
@@ -403,11 +404,19 @@ function NodeSymbol({ node }) {
       </g>
     )
   }
-  if (node.kind === 'thermostat' || node.kind === 'actuator') {
+  if (node.kind === 'actuator') {
+    return (
+      <g data-testid="actuator-tag">
+        <rect x={-3} y={-3} width={6} height={6} rx={0.8} fill="#fff" stroke="#0f766e" strokeWidth={0.7} />
+        <text x="0" y="1.7" textAnchor="middle" fontSize="4.5" fontWeight="700" fill="#0f766e">A</text>
+      </g>
+    )
+  }
+  if (node.kind === 'thermostat') {
     return (
       <g>
         <rect x={-6} y={-6} width={12} height={12} fill="#fff" stroke="#0f766e" strokeWidth="1.1" />
-        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0f766e">{node.kind === 'thermostat' ? 'T' : 'A'}</text>
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0f766e">T</text>
       </g>
     )
   }
@@ -516,6 +525,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     }
   })
   bestTrunk.forEach((item) => leaders.push(item))
+  const callouts = quietLabels ? [] : manifoldCallouts(plan)
   const legendX = legendBox?.x ?? (sheet.x + sheet.w - 176)
   const legendW = Math.max(108, legendBox?.w ?? 160)
   const legendH = legend.length ? 22 + legend.length * 15 : 0
@@ -621,7 +631,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               text={cableMark(run)}
               X={X}
               Y={Y}
-              show={showText && run.kind !== 'floorheat'}
+              show={showText && run.kind !== 'floorheat' && !(callouts.length && run.system === 'heat' && (run.role === 'supply' || run.role === 'return'))}
               side={run.role === 'return' ? -1 : 1}
               along={run.role === 'return' ? 0.18 : run.role === 'supply' ? 0.82 : 0.5}
               gap={run.system === 'heat' ? 0.9 : 0.55}
@@ -629,6 +639,35 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
             {(run.kind === 'floorheat' || run.role === 'loop') && (
               <LoopTag points={points} label={run.loopIndex || run.outlet} X={X} Y={Y} />
             )}
+          </g>
+        )
+      })}
+      {callouts.map((item) => {
+        const ax = X(item.anchor.x)
+        const ay = Y(item.anchor.z)
+        const tx = X(item.x)
+        const ty = Y(item.z)
+        const fontSize = Math.max(6, 2.2 * (sheet?.k || 1))
+        const half = Math.max(fontSize * 2, String(item.text).length * fontSize * 0.3)
+        const shoulder = tx >= ax ? tx - half : tx + half
+        return (
+          <g key={`callout-${item.role}`} data-testid="manifold-callout" data-role={item.role} style={{ pointerEvents: 'none' }}>
+            <polyline points={`${ax},${ay} ${ax},${ty} ${shoulder},${ty}`} fill="none" stroke="#9a3412" strokeWidth={0.75} />
+            <circle cx={ax} cy={ay} r={1.35} fill="#9a3412" />
+            <text
+              x={tx}
+              y={ty}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={fontSize}
+              fontWeight="650"
+              fill="#1c1917"
+              stroke="#fbfaf7"
+              strokeWidth="2.4"
+              paintOrder="stroke"
+            >
+              {item.text}
+            </text>
           </g>
         )
       })}

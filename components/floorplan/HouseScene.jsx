@@ -31,7 +31,7 @@ import YardScene from './YardScene'
 import { hasYard, sceneBounds } from '@/lib/yard'
 import { yardHasUnderground } from '@/lib/groundworks'
 import { layerVisible } from '@/lib/services'
-import { layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { heatingLabelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { chimneyKind, chimneyTop, drawingOf } from '@/lib/chimney'
 
 const textureCache = new Map()
@@ -1057,6 +1057,7 @@ function RoomLabels({ plan }) {
     ratio: 100,
     showNames: display.roomNames,
     showAreas: display.areas,
+    obstacles: heatingLabelObstacles(plan),
   })
   return labels.map((label) => (
     <Html key={label.id} position={[label.x, 0.12, label.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>

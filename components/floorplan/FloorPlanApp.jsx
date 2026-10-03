@@ -86,7 +86,7 @@ import {
 import { CadPrompt } from './CadTools'
 import { LayerDock, PlanChrome } from './PlanChrome'
 import { buildPlanPdf } from '@/lib/roominfo'
-import { applyDisplay, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { applyDisplay, heatingLabelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { DisplayPanel } from './DisplayPanel'
 import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
@@ -1794,6 +1794,7 @@ export default function FloorPlanApp() {
     ratio: layout.ratio,
     showNames: display.roomNames,
     showAreas: display.areas,
+    obstacles: heatingLabelObstacles(plan),
   })
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = sheetMode === 'site' ? t('sheet.site') : (activeSystems.length === 1 ? text(locale, `service.${activeSystems[0].id}`, activeSystems[0].title) : t('sheet.plan'))
