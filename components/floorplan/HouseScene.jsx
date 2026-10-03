@@ -103,6 +103,9 @@ function finishTexture(group, id) {
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
   tex.colorSpace = THREE.SRGBColorSpace
+  tex.generateMipmaps = false
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
   textureCache.set(key, tex)
   return tex
 }
@@ -120,13 +123,13 @@ function paintCanvas(look) {
   if (look.pattern === 'brick') {
     ctx.fillStyle = look.mortar || '#c8b8a4'
     ctx.fillRect(0, 0, 128, 128)
-    const brickW = 60
-    const brickH = 28
-    const mortar = 4
+    const brickW = 52
+    const brickH = 22
+    const mortar = 8
     for (let row = 0, y = mortar; y < 128; row += 1, y += brickH + mortar) {
       const shift = row % 2 ? -(brickW + mortar) / 2 : 0
       for (let x = shift; x < 128; x += brickW + mortar) {
-        const tone = 0.86 + ((row * 3 + Math.round(x)) % 5) * 0.03
+        const tone = 1.02 + ((row * 3 + Math.round(x)) % 5) * 0.05
         ctx.fillStyle = shadeHex(look.color || '#9c341f', tone)
         ctx.fillRect(x, y, brickW, brickH)
       }
@@ -201,6 +204,9 @@ function paintCanvas(look) {
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
   tex.colorSpace = THREE.SRGBColorSpace
+  tex.generateMipmaps = false
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
   return tex
 }
 
@@ -285,7 +291,7 @@ function Solid({ args, position, rotation, color, map, opacity = 1, edges = true
     >
       <boxGeometry args={args} />
       <meshStandardMaterial
-        color={face}
+        color={map && !mark ? '#ffffff' : face}
         emissive={mark === 'selected' ? '#115e59' : '#000000'}
         emissiveIntensity={mark === 'selected' ? 0.35 : 0}
         map={mark || transparent ? null : map || null}
@@ -388,7 +394,7 @@ function WallMesh({ plan, mode, selected, hovered }) {
                   >
                     <boxGeometry args={[Math.max(0.05, span - 0.02), height, 0.036]} />
                     <meshStandardMaterial
-                      color={item.color}
+                      color={skin ? '#ffffff' : item.color}
                       map={skin}
                       roughness={0.78}
                       metalness={0.02}
@@ -427,10 +433,10 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
   const cx = (box.minX + box.maxX) / 2
   const cz = (box.minZ + box.maxZ) / 2
   const outward = (-dz) * (mid.x - cx) + dx * (mid.z - cz) >= 0 ? 1 : -1
-  const glassW = Math.max(0.08, width - frame * 2)
   const glassH = Math.max(0.08, height - frame * 2)
   if (realistic && opening.kind === 'window') {
     const trim = finish.windowColor || '#f4f1ea'
+    const face = outward * (depth / 2 - 0.01)
     const bar = (args, position) => (
       <mesh position={position} castShadow receiveShadow raycast={noopRaycast}>
         <boxGeometry args={args} />
@@ -439,21 +445,21 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
     )
     return (
       <group position={[mid.x, sill + height / 2, mid.z]} rotation={[0, yaw, 0]}>
-        <mesh userData={{ pick }} raycast={undefined}>
+        <mesh userData={{ pick }} position={[0, 0, face]}>
           <boxGeometry args={[width, height, 0.04]} />
           <meshStandardMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
-        {bar([width + 0.02, frame, 0.08], [0, height / 2 - frame / 2, 0])}
-        {bar([width + 0.02, frame, 0.08], [0, -height / 2 + frame / 2, 0])}
-        {bar([frame, height, 0.08], [-width / 2 + frame / 2, 0, 0])}
-        {bar([frame, height, 0.08], [width / 2 - frame / 2, 0, 0])}
-        {bar([0.035, glassH, 0.05], [0, 0, 0])}
-        <mesh position={[0, 0, 0.012]} raycast={noopRaycast}>
-          <boxGeometry args={[glassW, glassH, 0.012]} />
-          <meshStandardMaterial color="#d5e7f6" roughness={0.06} metalness={0.22} transparent opacity={0.62} />
+        {bar([width + 0.04, 0.08, 0.07], [0, height / 2 - 0.04, face])}
+        {bar([width + 0.04, 0.08, 0.07], [0, -height / 2 + 0.04, face])}
+        {bar([0.08, height, 0.07], [-width / 2 + 0.04, 0, face])}
+        {bar([0.08, height, 0.07], [width / 2 - 0.04, 0, face])}
+        {bar([0.045, glassH, 0.05], [0, 0, face])}
+        <mesh position={[0, 0, face + outward * 0.02]} raycast={noopRaycast}>
+          <boxGeometry args={[Math.max(0.08, width - 0.18), Math.max(0.08, height - 0.18), 0.02]} />
+          <meshStandardMaterial color="#b7d4ee" roughness={0.08} metalness={0.25} transparent opacity={0.78} />
         </mesh>
-        <mesh position={[0, -height / 2 - 0.025, outward * (depth / 2 + 0.02)]} raycast={noopRaycast} castShadow>
-          <boxGeometry args={[width + 0.08, 0.045, 0.14]} />
+        <mesh position={[0, -height / 2 - 0.03, outward * (depth / 2 + 0.04)]} raycast={noopRaycast} castShadow>
+          <boxGeometry args={[width + 0.1, 0.06, 0.16]} />
           <meshStandardMaterial color={trim} roughness={0.5} metalness={0.04} />
         </mesh>
       </group>
@@ -603,7 +609,7 @@ function RoofMesh({ plan, mode, selected, hovered }) {
     <group>
       <mesh geometry={geom} userData={{ pick }} castShadow={realistic} receiveShadow={realistic} raycast={ghost ? noopRaycast : undefined}>
         <meshStandardMaterial
-          color={mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#99f6e4' : ghost || !realistic ? '#e2e8f0' : finish.color}
+          color={mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#99f6e4' : ghost || !realistic || !map ? (ghost || !realistic ? '#e2e8f0' : finish.color) : '#ffffff'}
           emissive={mark === 'selected' ? '#115e59' : '#000000'}
           emissiveIntensity={mark === 'selected' ? 0.35 : 0}
           map={mark ? null : map}
@@ -1415,30 +1421,17 @@ export default function HouseScene({
       gl={{ antialias: true }}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.ACESFilmicToneMapping
-        gl.toneMappingExposure = 1.05
-        gl.shadowMap.enabled = true
-        gl.shadowMap.type = THREE.PCFSoftShadowMap
-        gl.setClearColor('#e7e5e4')
+        gl.toneMappingExposure = 1.12
+        gl.shadowMap.enabled = false
+        gl.setClearColor('#d9e3ee')
       }}
     >
       <color attach="background" args={['#d9e3ee']} />
-      <hemisphereLight args={['#f7f4ee', '#b7aa98', 0.55]} />
-      <ambientLight intensity={0.22} />
-      <directionalLight
-        position={[14, 22, 8]}
-        intensity={1.25}
-        castShadow
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
-        shadow-camera-near={1}
-        shadow-camera-far={80}
-        shadow-camera-left={-18}
-        shadow-camera-right={18}
-        shadow-camera-top={18}
-        shadow-camera-bottom={-18}
-        shadow-bias={-0.0006}
-      />
-      <ContactShadows position={[cx, 0.01, cz]} opacity={0.32} scale={Math.max(18, span * 1.15)} blur={2.6} far={6} />
+      <hemisphereLight args={['#fff8ef', '#d7c8b4', 0.85]} />
+      <ambientLight intensity={0.42} />
+      <directionalLight position={[12, 18, 10]} intensity={1.55} />
+      <directionalLight position={[-8, 6, -4]} intensity={0.35} />
+      <ContactShadows position={[cx, 0.01, cz]} opacity={0.28} scale={Math.max(18, span * 1.15)} blur={2.4} far={5} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.02, cz]} raycast={noopRaycast}>
         <planeGeometry args={[Math.max(24, span * 1.4), Math.max(24, span * 1.4)]} />
         <meshBasicMaterial color="#efe8d8" transparent={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground')} opacity={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground') ? 0.35 : 1} depthWrite={!(yardHasUnderground(plan.yard) && layerVisible(plan, 'ground'))} />
