@@ -7,6 +7,9 @@ import { MultiProperties } from './CadTools'
 import {
   CLADDING,
   MATERIALS,
+  claddingOf,
+  openingColour,
+  surfaceLook,
   ROOM_TYPES,
   ROOF_TYPES,
   STANDARD_SCALES,
@@ -50,6 +53,7 @@ import {
   visibleRooms,
 } from '@/lib/floorplan'
 import { usePlanLocale } from '@/components/i18n/Locale'
+import { BRICK_TONES, PAINTS, PLINTHS, ROOFINGS, ROOF_COLOURS, finishesOf, roofingOf } from '@/lib/finishes'
 import { text } from '@/lib/i18n'
 import { COUNTRIES, climateOf, countryById, countryPatch, heatingPatchFor } from '@/lib/places'
 import { wallBearing } from '@/lib/orientation'
@@ -265,6 +269,7 @@ export function HouseSettings({ plan, onApply }) {
       </Field>
       <div style={{ fontSize: 12, fontWeight: 700, margin: '4px 0 6px' }}>{t('house.facade')}</div>
       <SwatchRow group="exterior" value={plan.exteriorId} onPick={(id) => onApply({ ...plan, exteriorId: id })} />
+      <FinishSettings plan={plan} onApply={onApply} />
       <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 6px' }}>{t('house.roofing')}</div>
       <SwatchRow group="roof" value={plan.roofId} onPick={(id) => onApply({ ...plan, roofId: id })} />
       <HeatingSettings plan={plan} onApply={onApply} />
@@ -295,6 +300,87 @@ export function HouseSettings({ plan, onApply }) {
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+function ColorField({ testid, label, paints, color, customLabel, onChange }) {
+  const match = (paints || PAINTS).find((item) => item.hex.toUpperCase() === String(color || '').toUpperCase())
+  return (
+    <Field label={label}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <select data-testid={testid} style={{ ...inputStyle, flex: 1 }} value={match?.id || 'custom'} onChange={(event) => {
+          const item = (paints || PAINTS).find((paint) => paint.id === event.target.value)
+          if (item) onChange({ color: item.hex, code: item.code })
+        }}>
+          {(paints || PAINTS).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.code}</option>)}
+          <option value="custom">{customLabel}</option>
+        </select>
+        <input data-testid={`${testid}-hex`} aria-label={label} style={{ ...inputStyle, width: 96 }} value={color || ''} onChange={(event) => onChange({ color: event.target.value, code: event.target.value })} />
+      </div>
+    </Field>
+  )
+}
+
+function FinishSettings({ plan, onApply }) {
+  const { t } = usePlanLocale(plan)
+  const finish = finishesOf(plan)
+  const patch = (next) => onApply({ ...plan, ...next })
+  const wood = surfaceLook(plan, plan.exteriorId)
+  return (
+    <div data-testid="finish-settings">
+      <Field label={t('finish.cladding')}>
+        <select data-testid="cladding-material" style={inputStyle} value={claddingOf(plan.exteriorId).id} onChange={(event) => patch({ exteriorId: event.target.value })}>
+          {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.group}: {item.name}</option>)}
+        </select>
+      </Field>
+      <ColorField testid="cladding-color" label={t('finish.paint')} customLabel={t('finish.custom')} color={finish.claddingColor || wood.color} onChange={({ color, code }) => patch({ claddingColor: color, claddingCode: code })} />
+      <Field label={t('finish.board')}>
+        <input data-testid="board-width" style={inputStyle} type="number" min="70" max="280" value={finish.boardWidthMm} onChange={(event) => patch({ boardWidthMm: Number(event.target.value) || 145 })} />
+      </Field>
+      <ColorField testid="trim-color" label={t('finish.trim')} customLabel={t('finish.custom')} color={finish.trimColor} onChange={({ color, code }) => patch({ trimColor: color, trimCode: code })} />
+      <ColorField testid="mortar-color" label={t('finish.mortar')} paints={PAINTS.filter((item) => ['white', 'grey', 'dark-grey', 'brown'].includes(item.id))} customLabel={t('finish.custom')} color={finish.mortarColor} onChange={({ color }) => patch({ mortarColor: color })} />
+      <Field label={t('finish.brickTone')}>
+        <select data-testid="brick-tone" style={inputStyle} value={BRICK_TONES.some((item) => item.id === claddingOf(plan.exteriorId).id) ? claddingOf(plan.exteriorId).id : 'brick-red'} onChange={(event) => patch({ exteriorId: event.target.value, brickPaint: '', brickPaintCode: '' })}>
+          {BRICK_TONES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </Field>
+      <Field label={t('finish.brickPaint')}>
+        <select data-testid="brick-paint" style={inputStyle} value={PAINTS.find((item) => item.hex.toUpperCase() === finish.brickPaint)?.id || (finish.brickPaint ? 'custom' : 'natural')} onChange={(event) => {
+          if (event.target.value === 'natural') patch({ brickPaint: '', brickPaintCode: '' })
+          else {
+            const item = PAINTS.find((paint) => paint.id === event.target.value)
+            if (item) patch({ brickPaint: item.hex, brickPaintCode: item.code })
+          }
+        }}>
+          <option value="natural">{t('finish.brickNatural')}</option>
+          {PAINTS.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.code}</option>)}
+        </select>
+      </Field>
+      <ColorField testid="render-color" label={t('finish.render')} customLabel={t('finish.custom')} color={finish.renderColor || '#EFE8DC'} onChange={({ color, code }) => patch({ renderColor: color, renderCode: code })} />
+      <ColorField testid="concrete-color" label={t('finish.concrete')} customLabel={t('finish.custom')} color={finish.concreteColor || '#C5C3BE'} onChange={({ color, code }) => patch({ concreteColor: color, concreteCode: code })} />
+      <ColorField testid="stone-color" label={t('finish.stone')} customLabel={t('finish.custom')} color={finish.stoneColor || '#8D887F'} onChange={({ color, code }) => patch({ stoneColor: color, stoneCode: code })} />
+      <ColorField testid="fibre-color" label={t('finish.fibre')} customLabel={t('finish.custom')} color={finish.fibreColor || '#D5D0C8'} onChange={({ color, code }) => patch({ fibreColor: color, fibreCode: code })} />
+      <Field label={t('finish.roofMaterial')}>
+        <select data-testid="roof-material" style={inputStyle} value={roofingOf(plan.roofId).id} onChange={(event) => patch({ roofId: event.target.value })}>
+          {ROOFINGS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </Field>
+      <ColorField testid="roof-color" label={t('finish.roofColour')} paints={ROOF_COLOURS} customLabel={t('finish.custom')} color={finish.roofColor || '#1C1C1C'} onChange={({ color, code }) => patch({ roofColor: color, roofCode: code })} />
+      <ColorField testid="gutter-color" label={t('finish.gutter')} customLabel={t('finish.custom')} color={finish.gutterColor} onChange={({ color, code }) => patch({ gutterColor: color, gutterCode: code })} />
+      <Field label={t('finish.plinthHeight')}>
+        <input data-testid="plinth-height" style={inputStyle} type="number" min="300" max="600" value={Math.round(finish.plinthHeight * 1000)} onChange={(event) => patch({ plinthHeight: (Number(event.target.value) || 400) / 1000 })} />
+      </Field>
+      <Field label={t('finish.plinth')}>
+        <select data-testid="plinth-material" style={inputStyle} value={finish.plinthMaterial} onChange={(event) => {
+          const item = PLINTHS.find((plinth) => plinth.id === event.target.value) || PLINTHS[0]
+          patch({ plinthMaterial: item.id, plinthColor: item.color, plinthCode: item.code })
+        }}>
+          {PLINTHS.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.code}</option>)}
+        </select>
+      </Field>
+      <ColorField testid="window-color" label={t('finish.window')} customLabel={t('finish.custom')} color={finish.windowColor} onChange={({ color, code }) => patch({ windowColor: color, windowCode: code })} />
+      <ColorField testid="door-color" label={t('finish.door')} customLabel={t('finish.custom')} color={finish.doorColor} onChange={({ color, code }) => patch({ doorColor: color, doorCode: code })} />
     </div>
   )
 }
@@ -346,8 +432,10 @@ export function RoofFields({ plan, onApply }) {
 }
 
 function ZoneFields({ plan, id, onApply, onCommit }) {
+  const { t } = usePlanLocale(plan)
   const zone = (plan.facades || []).find((item) => item.id === id)
   if (!zone) return null
+  const look = surfaceLook(plan, zone.materialId, { color: zone.color, colorCode: zone.colorCode })
   return (
     <div data-testid="zone-fields">
       <Field label="Materiaali">
@@ -355,6 +443,7 @@ function ZoneFields({ plan, id, onApply, onCommit }) {
           {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.group}: {item.name}</option>)}
         </select>
       </Field>
+      <ColorField testid="zone-color" label={t('finish.paint')} customLabel={t('finish.custom')} color={zone.color || look.color} onChange={({ color, code }) => onApply(updateFacadeZone(plan, id, { color, colorCode: code }))} />
       <MenuBtn testid="ctx-delete" onClick={() => onCommit(deleteFacadeZone(plan, id))}>Poista vyöhyke</MenuBtn>
     </div>
   )
@@ -700,6 +789,7 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
       <Field label={t('opening.sill')}>
         <input style={inputStyle} type="number" value={mm(opening.sill || 0)} onChange={(event) => patch({ sill: fromMm(event.target.value) })} />
       </Field>
+      <ColorField testid="opening-color" label={opening.kind === 'window' ? t('finish.window') : t('finish.door')} customLabel={t('finish.custom')} color={opening.color || openingColour(plan, opening).color} onChange={({ color, code }) => patch({ color, colorCode: code })} />
       <Field label={t('opening.kind')}>
         <select style={inputStyle} value={opening.kind} onChange={(event) => {
           const kind = event.target.value

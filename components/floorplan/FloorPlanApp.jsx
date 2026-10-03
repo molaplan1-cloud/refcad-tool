@@ -2604,6 +2604,8 @@ export default function FloorPlanApp() {
                   <button type="button" data-testid="roof-solid" style={textBtn(roofMode === 'solid')} onClick={() => setRoofMode('solid')}>{t('view3d.visible')}</button>
                   <button type="button" data-testid="roof-ghost" style={textBtn(roofMode === 'ghost')} onClick={() => setRoofMode('ghost')}>{t('view3d.ghost')}</button>
                   <button type="button" data-testid="roof-hidden" aria-pressed={roofMode === 'hidden'} style={textBtn(roofMode === 'hidden')} onClick={() => setRoofMode('hidden')}>{t('view3d.hidden')}</button>
+                  <button type="button" data-testid="scene-realistic" style={textBtn(plan.sceneStyle !== 'technical')} onClick={() => setPlan({ ...plan, sceneStyle: 'realistic' })}>{t('finish.realistic')}</button>
+                  <button type="button" data-testid="scene-technical" style={textBtn(plan.sceneStyle === 'technical')} onClick={() => setPlan({ ...plan, sceneStyle: 'technical' })}>{t('finish.technical')}</button>
                 </div>
               </div>
             </div>
@@ -2651,7 +2653,7 @@ export default function FloorPlanApp() {
           {rows.map((row) => (
             <div key={row.key} data-testid={row.group === 'structure' ? 'structure-bom' : undefined} data-code={row.code || undefined} data-unit={row.unit || undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
               <span style={{ width: 14, height: 14, borderRadius: 3, background: row.color, border: '1px solid #a8a29e', flexShrink: 0 }} />
-              <span style={{ flex: 1 }}>{row.group === 'structure' ? `${row.code} ${text(locale, `struct.${row.structureId}`, row.structureName)}: ${text(locale, `layer.${row.materialId}`, row.name)}` : `${row.roomName ? `${row.roomName}: ` : ''}${text(locale, `group.${row.group}`, row.groupLabel)}: ${text(locale, `mat.${row.group}.${row.id}`, row.name)}`}</span>
+              <span data-testid={row.group === 'plinth' ? 'plinth-bom' : 'bom-line'} data-code={row.code || ''} style={{ flex: 1 }}>{row.group === 'structure' ? `${row.code} ${text(locale, `struct.${row.structureId}`, row.structureName)}: ${text(locale, `layer.${row.materialId}`, row.name)}` : `${row.roomName ? `${row.roomName}: ` : ''}${text(locale, `group.${row.group}`, row.groupLabel)}: ${text(locale, `mat.${row.group}.${row.id}`, row.name)}${row.code ? ` ${row.code}` : ''}`}</span>
               <span style={{ color: '#78716c' }}>{row.unit ? `${num(row.area || 0, row.unit === 'm³' ? 2 : 1)} ${row.unit}` : `${num(row.area || 0, 1)} m²`}</span>
             </div>
           ))}
