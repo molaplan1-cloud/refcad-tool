@@ -1107,19 +1107,57 @@ function Frame({ rooms }) {
     let cancelled = false
     const apply = () => {
       if (cancelled || !controls) return
-      const { cx, cz, spanX, spanZ, maxH } = boundsOf(rooms)
-      const radius = Math.hypot(spanX, maxH, spanZ) * 0.5
-      const fov = (camera.fov * Math.PI) / 180
-      const aspect = size.width / Math.max(size.height, 1)
-      const distV = radius / Math.sin(fov / 2)
-      const distH = radius / Math.sin(Math.atan(Math.tan(fov / 2) * aspect))
-      const distance = Math.max(distV, distH) * 1.02
+      const built = rooms.filter((room) => room && room.type !== 'yard')
+      const source = built.length ? built : rooms
+      const { cx, cz, maxH } = boundsOf(source)
       const dir = new THREE.Vector3(1, 0.58, 1).normalize()
       const ty = maxH * 0.36
-      controls.target.set(cx, ty, cz)
+      const corners = []
+      source.forEach((room) => {
+        const height = room.height || 2
+        outlineOf(room).forEach((point) => {
+          corners.push(new THREE.Vector3(point.x, 0, point.z))
+          corners.push(new THREE.Vector3(point.x, height, point.z))
+        })
+      })
+      const projectSpan = (distance) => {
+        camera.position.set(cx + dir.x * distance, ty + dir.y * distance, cz + dir.z * distance)
+        camera.lookAt(cx, ty, cz)
+        camera.updateMatrixWorld()
+        camera.updateProjectionMatrix()
+        let minX = Infinity
+        let maxXp = -Infinity
+        let minY = Infinity
+        let maxY = -Infinity
+        corners.forEach((corner) => {
+          const projected = corner.clone().project(camera)
+          minX = Math.min(minX, projected.x)
+          maxXp = Math.max(maxXp, projected.x)
+          minY = Math.min(minY, projected.y)
+          maxY = Math.max(maxY, projected.y)
+        })
+        return { spanX: maxXp - minX, spanY: maxY - minY, midX: (minX + maxXp) / 2, midY: (minY + maxY) / 2 }
+      }
+      let lo = 1.5
+      let hi = 500
+      for (let step = 0; step < 20; step += 1) {
+        const mid = (lo + hi) / 2
+        const span = projectSpan(mid)
+        if (span.spanX > 1.6) lo = mid
+        else hi = mid
+      }
+      let distance = hi
+      const fitted = projectSpan(distance)
+      if (fitted.spanY > 1.72) distance *= fitted.spanY / 1.68
+      const centered = projectSpan(distance)
+      const fov = (camera.fov * Math.PI) / 180
+      const halfW = distance * Math.tan(fov / 2) * camera.aspect
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0)
+      const focus = new THREE.Vector3(cx, ty, cz).addScaledVector(right, centered.midX * halfW)
+      controls.target.copy(focus)
       camera.position.set(cx + dir.x * distance, ty + dir.y * distance, cz + dir.z * distance)
       camera.near = 0.08
-      camera.far = Math.max(500, distance * 10)
+      camera.far = Math.max(500, distance * 12)
       camera.updateProjectionMatrix()
       controls.update()
       primed.current = signature
@@ -1728,7 +1766,7 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
             shadow-camera-bottom={-16}
           />
           {technical ? null : <directionalLight position={[-8, 7, -12]} intensity={0.28} />}
-          {technical ? null : <ContactShadows position={[0, 0.012, 0]} opacity={theme === 'dark' ? 0.18 : 0.28} scale={28} blur={2.2} far={8} />}
+          {technical || theme === 'dark' ? null : <ContactShadows position={[0, 0.012, 0]} opacity={0.22} scale={28} blur={2.4} far={8} />}
           <group userData={{ role: 'skip' }}>
             <Grid
               args={[1, 1]}
@@ -1760,7 +1798,7 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
                 onContextMenu={(event) => openMenu(event, onContext, room.id, 'room')}
               >
                 <boxGeometry args={[room.width, 0.03, room.depth]} />
-                <meshStandardMaterial color={technical ? '#e7efe0' : theme === 'dark' ? '#2a3328' : '#d9e7c4'} />
+                <meshStandardMaterial color={technical ? '#e7efe0' : theme === 'dark' ? '#7c868f' : '#d9e7c4'} roughness={1} metalness={0} />
               </mesh>
             ) : (
               <RoomMesh key={room.id} room={room} tag={tags.find((item) => item.id === room.id)} selected={room.id === selectedId} onSelect={onSelect} onContext={onContext} />
