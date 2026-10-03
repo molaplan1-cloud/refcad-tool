@@ -21,6 +21,10 @@ import {
   detectRooms,
   dimensionChains,
   dimensionRotation,
+  faceSide,
+  layoutDimensionLabels,
+  openingDimensions,
+  resolveFaceMaterial,
   drawRoom,
   emptyPlan,
   exampleHouse,
@@ -45,12 +49,17 @@ import {
   wallDirection,
   visibleRooms,
   wallQuads,
-  buildFloorPlanPdf,
+  thicknessOf,
+  claddingOf,
 } from '@/lib/floorplan'
+import { wallFigures } from '@/lib/wall-outline'
+import { buildPlanPdf } from '@/lib/roominfo'
 import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
 import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
+import { ElectricPanel } from './ElectricPanel'
+import { HeatingPanel } from './HeatingPanel'
 import {
   PLACEABLES,
   addServiceNode,
@@ -58,7 +67,14 @@ import {
   deleteServiceNode,
   deleteServiceRun,
   autoRouteAll,
+  applyHeating,
+  assignDeviceCircuit,
+  refreshHeat,
+  buildElectricPdf,
+  buildHydronicPdf,
   buildServicePdf,
+  rewireElectric,
+  rewireWater,
   SERVICE_SYSTEMS,
   ensureServices,
   hitService,
@@ -216,6 +232,33 @@ function sheetPixels(size, plan) {
   }
 }
 
+function roomNameLayout(name, boxW, boxH) {
+  const text = String(name || 'Huone').trim() || 'Huone'
+  const words = text.split(/\s+/).filter(Boolean)
+  const widthAt = (line, font) => line.length * font * 0.56
+  const shrink = (line, maxW, cap) => {
+    let font = cap
+    while (font > 6.2 && widthAt(line, font) > maxW) font -= 0.4
+    return Math.max(6.2, font)
+  }
+  if (words.length <= 1) return { lines: [text], font: shrink(text, boxW, Math.min(13, boxH * 0.42)) }
+  const longest = words.reduce((best, word) => (word.length > best.length ? word : best), words[0])
+  let font = Math.min(12, shrink(longest, boxW, 12), boxH / (Math.min(words.length, 3) + 1.8))
+  font = Math.max(6.2, font)
+  const lines = []
+  let current = ''
+  words.forEach((word) => {
+    const trial = current ? `${current} ${word}` : word
+    if (!current || widthAt(trial, font) <= boxW) current = trial
+    else {
+      lines.push(current)
+      current = word
+    }
+  })
+  if (current) lines.push(current)
+  return { lines, font }
+}
+
 function RoomName({ item, label, X, Y }) {
   const poly = item.polygon || []
   let minX = Infinity
@@ -232,14 +275,7 @@ function RoomName({ item, label, X, Y }) {
   })
   const boxW = Math.max(16, maxX - minX - 8)
   const boxH = Math.max(16, maxY - minY - 6)
-  const name = item.name || 'Huone'
-  const whole = boxW / Math.max(name.length * 0.58, 1)
-  const splitAt = whole >= 9.5 || name.length <= 8
-    ? name.length
-    : (name.indexOf('huone') > 2 ? name.indexOf('huone') : Math.ceil(name.length / 2))
-  const lines = splitAt < name.length ? [name.slice(0, splitAt), name.slice(splitAt)] : [name]
-  const longest = Math.max(...lines.map((line) => line.length), 1)
-  const font = Math.max(7.5, Math.min(13, boxW / (longest * 0.6), boxH / (lines.length + 1.2)))
+  const { lines, font } = roomNameLayout(item.name || 'Huone', boxW, boxH)
   const areaSize = Math.max(7, font - 1.5)
   const cx = X(label.x)
   const cy = Y(label.z)
@@ -266,24 +302,34 @@ function DimLine({ dim, offset, X, Y }) {
   const len = Math.hypot(x2 - x1, y2 - y1) || 1
   const ux = (x2 - x1) / len
   const uy = (y2 - y1) / len
-  const tick = 6
+  const tick = 4.2
   const tx = Math.cos(ang + Math.PI / 4) * tick
   const ty = Math.sin(ang + Math.PI / 4) * tick
   const vertical = Math.abs(x2 - x1) < Math.abs(y2 - y1)
-  const textW = Math.max(22, String(dim.label).length * 6.6)
-  const gap = len > textW + 16 ? textW : 0
+  const textW = Math.max(22, String(dim.label).length * 6.2)
+  const textSide = dim.textSide || 0
+  const gap = !textSide && len > textW + 18 ? textW : 0
   const mx = (x1 + x2) / 2
   const my = (y1 + y2) / 2
-  const labelX = mx + (gap ? 0 : -uy * 11)
-  const labelY = my + (gap ? 0 : ux * 11)
+  const labelX = mx + (gap || textSide ? 0 : -uy * 11) - uy * 11 * textSide
+  const labelY = my + (gap || textSide ? 0 : ux * 11) + ux * 11 * textSide
   const ax1 = X(dim.ax ?? dim.x1)
   const ay1 = Y(dim.az ?? dim.z1)
   const ax2 = X(dim.bx ?? dim.x2)
   const ay2 = Y(dim.bz ?? dim.z2)
+  const gapLine = (sx, sy, ex, ey) => {
+    const dx = ex - sx
+    const dy = ey - sy
+    const span = Math.hypot(dx, dy) || 1
+    const inset = Math.min(7, span * 0.35)
+    return { x1: sx + (dx / span) * inset, y1: sy + (dy / span) * inset, x2: ex, y2: ey }
+  }
+  const ext1 = gapLine(ax1, ay1, x1, y1)
+  const ext2 = gapLine(ax2, ay2, x2, y2)
   return (
-    <g stroke="#292524" fill="#1c1917" strokeWidth={0.9}>
-      {Math.hypot(ax1 - x1, ay1 - y1) > 1.5 && <line x1={ax1} y1={ay1} x2={x1} y2={y1} stroke="#a8a29e" strokeWidth={0.55} />}
-      {Math.hypot(ax2 - x2, ay2 - y2) > 1.5 && <line x1={ax2} y1={ay2} x2={x2} y2={y2} stroke="#a8a29e" strokeWidth={0.55} />}
+    <g stroke="#292524" fill="#1c1917" strokeWidth={0.7}>
+      {Math.hypot(ax1 - x1, ay1 - y1) > 8 && <line x1={ext1.x1} y1={ext1.y1} x2={ext1.x2} y2={ext1.y2} stroke="#a8a29e" strokeWidth={0.45} />}
+      {Math.hypot(ax2 - x2, ay2 - y2) > 8 && <line x1={ext2.x1} y1={ext2.y1} x2={ext2.x2} y2={ext2.y2} stroke="#a8a29e" strokeWidth={0.45} />}
       <line x1={x1} y1={y1} x2={mx - ux * gap / 2} y2={my - uy * gap / 2} />
       <line x1={mx + ux * gap / 2} y1={my + uy * gap / 2} x2={x2} y2={y2} />
       <line x1={x1 - tx} y1={y1 - ty} x2={x1 + tx} y2={y1 + ty} />
@@ -294,7 +340,9 @@ function DimLine({ dim, offset, X, Y }) {
         textAnchor="middle"
         dominantBaseline="middle"
         fontSize={11}
-        stroke="none"
+        stroke="#fbfaf7"
+        strokeWidth={3}
+        paintOrder="stroke"
         transform={vertical ? `rotate(${dimensionRotation(true)} ${labelX} ${labelY})` : undefined}
       >
         {dim.label}
@@ -404,6 +452,81 @@ function FixtureMark({ type, w, d, color }) {
   return <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
 }
 
+function worldPath(points, X, Y) {
+  if (!points?.length) return ''
+  return `${points.map((point, index) => `${index ? 'L' : 'M'}${X(point.x)} ${Y(point.z)}`).join(' ')} Z`
+}
+
+function FaceLines({ plan, X, Y, selected, onSelect }) {
+  return (
+    <g data-testid="face-lines">
+      {visibleRooms(plan).map((room) => (room.walls || []).map((edge, index) => {
+        const wall = (plan.walls || []).find((item) => item.id === edge.wallId)
+        const side = wall ? faceSide(wall, edge.a, edge.b) : 'left'
+        const material = wall ? resolveFaceMaterial(plan, wall, side) : (room.interiorId || 'paint')
+        const color = materialOf('interior', material).color
+        const a = room.polygon?.[index]
+        const b = room.polygon?.[(index + 1) % (room.polygon?.length || 1)]
+        if (!a || !b) return null
+        const active = selected?.id === room.id && selected?.wallId === edge.wallId
+        const dashed = material === 'gypsum' || material === 'tile' || material === 'wallpaper' || material === 'concrete-paint'
+        return (
+          <line
+            key={`${room.id}-${index}`}
+            data-testid={`face-line-${room.id}-${index}`}
+            x1={X(a.x)}
+            y1={Y(a.z)}
+            x2={X(b.x)}
+            y2={Y(b.z)}
+            stroke={active ? '#0f766e' : color}
+            strokeWidth={active ? 5 : 3}
+            strokeDasharray={dashed ? '5 3' : undefined}
+            strokeLinecap="butt"
+            onPointerDown={(event) => {
+              event.stopPropagation()
+              event.preventDefault()
+              onSelect({ kind: 'room', id: room.id, wallId: edge.wallId, side })
+            }}
+          />
+        )
+      }))}
+    </g>
+  )
+}
+
+function WallOutlines({ plan, X, Y, selectedId }) {
+  const figures = useMemo(
+    () => wallFigures(plan.walls || [], plan.openings || [], (wall) => thicknessOf(wall, plan)),
+    [plan],
+  )
+  const paint = (loops, fill) => loops.map((loop, index) => (
+    <path key={`${loop.role}-${index}`} d={worldPath(loop.points, X, Y)} fill={fill} stroke="none" />
+  ))
+  return (
+    <g data-testid="wall-outlines">
+      {paint(figures.exterior, 'url(#poche)')}
+      {paint(figures.interior, '#e7e5e4')}
+      {paint(figures.insulation, 'rgba(214,211,209,0.9)')}
+      {paint(figures.cladding, claddingOf(plan.exteriorId).color)}
+      {figures.core.map((loop, index) => (
+        <path
+          key={`edge-${index}`}
+          data-testid="wall-quad"
+          d={worldPath(loop.points, X, Y)}
+          fill="none"
+          stroke="#1c1917"
+          strokeWidth={1.05}
+          strokeLinejoin="miter"
+          strokeLinecap="square"
+        />
+      ))}
+      {(plan.walls || []).filter((wall) => wall.id === selectedId).flatMap((wall) => wallQuads(wall, plan.openings, plan.walls, plan).map((quad, index) => (
+        <polygon key={`sel-${wall.id}-${index}`} points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} fill="none" stroke="#0f766e" strokeWidth={1.6} />
+      )))}
+    </g>
+  )
+}
+
 export default function FloorPlanApp() {
   const [plan, setPlan] = useState(() => emptyPlan())
   const [hydrated, setHydrated] = useState(false)
@@ -432,6 +555,8 @@ export default function FloorPlanApp() {
   const [svcTool, setSvcTool] = useState(null)
   const [svcPoints, setSvcPoints] = useState([])
   const [floorHeating, setFloorHeating] = useState(false)
+  const [electricView, setElectricView] = useState(null)
+  const [heatView, setHeatView] = useState(null)
   const [wallMode, setWallMode] = useState('solid')
   const [roofMode, setRoofMode] = useState('solid')
   const [fitToken, setFitToken] = useState(1)
@@ -667,7 +792,7 @@ export default function FloorPlanApp() {
 
   const closeRoom = (points) => {
     if (!points || points.length < 3) return
-    const next = drawRoom(plan, points, { partitions, name: 'Huone', type: 'huone' })
+    const next = refreshHeat(drawRoom(plan, points, { partitions, name: 'Huone', type: 'huone' }))
     commit(next)
     const mid = points.reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 })
     mid.x /= points.length
@@ -680,6 +805,7 @@ export default function FloorPlanApp() {
 
   const openServiceMenu = (event, service) => {
     setMenu({ x: event.clientX, y: event.clientY, kind: 'service', service })
+    choose({ kind: 'service', service })
   }
 
   const finishServiceRun = () => {
@@ -734,6 +860,7 @@ export default function FloorPlanApp() {
           size: spec.size,
           circuit: spec.circuit,
           name: spec.name,
+          pointType: spec.pointType,
           x: snapped.x,
           z: snapped.z,
         }))
@@ -764,7 +891,7 @@ export default function FloorPlanApp() {
     if (tool === 'detect') {
       const roomHit = (plan.rooms || []).find((item) => pointInPolygon(world.x, world.z, item.polygon || []))
       if (roomHit) {
-        commit(detectRoomAt(plan, world))
+        commit(refreshHeat(detectRoomAt(plan, world)))
         choose({ kind: 'room', id: roomHit.id })
       }
       return
@@ -773,7 +900,7 @@ export default function FloorPlanApp() {
       const next = drawGuide || point
       if (!draft) setDraft(next)
       else {
-        commit(addWall(plan, draft, next, tool))
+        commit(refreshHeat(addWall(plan, draft, next, tool)))
         setDraft(null)
         setDrawGuide(null)
       }
@@ -781,7 +908,7 @@ export default function FloorPlanApp() {
     }
     if (tool === 'door' || tool === 'window') {
       const along = visual?.wall ? visual : snapAlongWall(world, plan.walls, Math.max(12 / Math.max(ppm, 0.001), 0.35), !altRef.current)
-      if (along?.wall) commit(addOpening(plan, along.wall.id, along.point || point, tool))
+      if (along?.wall) commit(refreshHeat(addOpening(plan, along.wall.id, along.point || point, tool)))
       return
     }
     if (placing) {
@@ -818,6 +945,11 @@ export default function FloorPlanApp() {
     const world = toWorld(event)
     if (svcTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing) {
       placeAt(world, ppm2d)
+      return
+    }
+    const serviceHit = hitService(plan, world)
+    if (serviceHit) {
+      choose({ kind: 'service', service: serviceHit })
       return
     }
     const hit = hitTest(plan, world)
@@ -870,15 +1002,17 @@ export default function FloorPlanApp() {
         setMenu(null)
         setSvcPoints([])
         setSvcTool(null)
+        setElectricView(null)
+        setHeatView(null)
       } else if (event.key === 'Enter' && svcTool === 'run' && svcPoints.length >= 2) {
         finishServiceRun()
       } else if (event.key === 'Enter' && tool === 'room' && poly.length >= 3) {
         closeRoom(poly)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'wall') {
-        commit(deleteWall(plan, pick.id))
+        commit(refreshHeat(deleteWall(plan, pick.id)))
         choose(null)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'opening') {
-        commit(deleteOpening(plan, pick.id))
+        commit(refreshHeat(deleteOpening(plan, pick.id)))
         choose(null)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'room') {
         commit(deleteRoom(plan, pick.id))
@@ -1090,7 +1224,7 @@ export default function FloorPlanApp() {
   }
 
   const exportPdf = () => {
-    buildFloorPlanPdf(plan).save(`${(plan.name || 'pohjakuva').replace(/\s+/g, '-')}.pdf`)
+    buildPlanPdf(plan).save(`${(plan.name || 'pohjakuva').replace(/\s+/g, '-')}.pdf`)
   }
 
   const exportPng = () => {
@@ -1133,6 +1267,12 @@ export default function FloorPlanApp() {
   })
   const totalArea = visibleRooms(plan).reduce((sum, item) => sum + item.area, 0)
   const dims = dimensionChains(plan)
+  const dimLines = layoutDimensionLabels([
+    ...openingDimensions(plan),
+    ...dims.rooms.map((dim) => ({ ...dim, offset: 0 })),
+    ...dims.chains.map((dim) => ({ ...dim, offset: 1.05 })),
+    ...dims.overall.map((dim) => ({ ...dim, offset: 1.7 })),
+  ])
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva'
   const liveEnd = draft && (tool === 'exterior' || tool === 'interior') ? (drawGuide || snapVisual?.point || null) : null
@@ -1275,9 +1415,47 @@ export default function FloorPlanApp() {
           setSvcPoints([])
           setView('2d')
         }}
+        onRewire={() => {
+          commit(rewireElectric(plan))
+          setSvcPoints([])
+          setView('2d')
+          setElectricView(null)
+        }}
+        onSchedule={() => {
+          setView('2d')
+          setElectricView('list')
+        }}
+        onDiagram={() => {
+          setView('2d')
+          setElectricView('diagram')
+        }}
+        onRewireWater={() => {
+          commit(rewireWater(plan))
+          setView('2d')
+          setHeatView(null)
+        }}
+        onRewireHeat={() => {
+          commit(applyHeating(plan, {}))
+          setView('2d')
+          setSvcSystem('heat')
+          setHeatView(null)
+        }}
+        onHeatTable={() => {
+          setView('2d')
+          setHeatView('table')
+          setElectricView(null)
+        }}
+        onHeatSchematic={() => {
+          setView('2d')
+          setHeatView('schematic')
+          setElectricView(null)
+        }}
         onFloorHeating={setFloorHeating}
         onFinish={finishServiceRun}
-        onPdf={(id) => buildServicePdf(plan, id).save(`${(plan.name || 'talotekniikka').replace(/\s+/g, '-')}-${id}.pdf`)}
+        onPdf={(id) => {
+          const doc = id === 'electric' ? buildElectricPdf(plan) : id === 'heat' || id === 'water' ? buildHydronicPdf(plan) : buildServicePdf(plan, id)
+          doc.save(`${(plan.name || 'talotekniikka').replace(/\s+/g, '-')}-${id}.pdf`)
+        }}
       />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -1308,7 +1486,7 @@ export default function FloorPlanApp() {
           ))}
         </aside>
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
           <div style={{ height: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
             {draft && liveEnd && (tool === 'exterior' || tool === 'interior') ? (
               <DrawFields
@@ -1329,7 +1507,7 @@ export default function FloorPlanApp() {
                 onCommit={() => {
                   const end = drawGuide || liveEnd
                   if (!draft || !end) return
-                  commit(addWall(plan, draft, end, tool))
+                  commit(refreshHeat(addWall(plan, draft, end, tool)))
                   setDraft(null)
                   setDrawGuide(null)
                 }}
@@ -1354,8 +1532,8 @@ export default function FloorPlanApp() {
               >
                 <defs>
                   <pattern id="poche" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                    <rect width="5" height="5" fill="#241f1c" />
-                    <line x1="0" y1="0" x2="0" y2="5" stroke="#0c0a09" strokeWidth="1.35" />
+                    <rect width="5" height="5" fill="#3f3834" />
+                    <line x1="0" y1="0" x2="0" y2="5" stroke="#2a241f" strokeWidth="0.6" />
                   </pattern>
                 </defs>
                 <g data-testid="plan-camera" transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
@@ -1371,27 +1549,7 @@ export default function FloorPlanApp() {
                     strokeWidth={1.2}
                   />
                 ))}
-                {(plan.walls || []).map((wall) => wallQuads(wall, plan.openings, plan.walls, plan).map((quad, index) => {
-                  const interior = wall.kind === 'interior' || wall.kind === 'partition'
-                  const selected = pick?.kind === 'wall' && pick.id === wall.id
-                  return (
-                    <polygon
-                      key={`${wall.id}-${index}`}
-                      data-testid="wall-quad"
-                      data-sax={X(wall.a.x)}
-                      data-say={Y(wall.a.z)}
-                      data-sbx={X(wall.b.x)}
-                      data-sby={Y(wall.b.z)}
-                      points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
-                      fill={wall.materialId
-                        ? materialOf(interior ? 'interior' : 'exterior', wall.materialId).color
-                        : (interior ? '#e7e5e4' : 'url(#poche)')}
-                      stroke={selected ? '#0f766e' : '#1c1917'}
-                      strokeWidth={interior ? 1.2 : 0.45}
-                      strokeLinejoin="miter"
-                    />
-                  )
-                }))}
+                <WallOutlines plan={plan} X={X} Y={Y} selectedId={pick?.kind === 'wall' ? pick.id : null} />
                 {(plan.openings || []).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
                   if (!wall) return null
@@ -1448,11 +1606,15 @@ export default function FloorPlanApp() {
                     </g>
                   )
                 })}
+                <FaceLines plan={plan} X={X} Y={Y} selected={pick?.kind === 'room' ? pick : null} onSelect={(face) => {
+                  setPick(face)
+                  setSelectedRoom(face.id)
+                  setPanel('object')
+                  setMenu(null)
+                }} />
                 {plan.walls.length > 0 && (
                   <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
-                    {dims.rooms.map((dim, index) => <DimLine key={`room-${index}-${dim.label}`} dim={dim} offset={0} X={X} Y={Y} />)}
-                    {dims.chains.map((dim, index) => <DimLine key={`chain-${index}-${dim.label}`} dim={dim} offset={0.48} X={X} Y={Y} />)}
-                    {dims.overall.map((dim, index) => <DimLine key={`overall-${index}`} dim={dim} offset={0.82} X={X} Y={Y} />)}
+                    {dimLines.map((dim, index) => <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}`} dim={dim} offset={0} X={X} Y={Y} />)}
                   </g>
                 )}
                 {liveEnd && tool !== 'room' && (
@@ -1488,22 +1650,11 @@ export default function FloorPlanApp() {
                   {(() => {
                     const ax = sheet.x + sheet.w - 52
                     const ay = sheet.y + 48
-                    const metres = layout.worldW >= 8 && layout.scale * 5 <= layout.title.w - 8 ? 5 : 2
-                    const bar = metres * layout.scale * k
-                    const bx = sheet.x + layout.title.x * k
-                    const by = sheet.y + layout.title.y * k - 36
                     return (
                       <g>
                         <circle cx={ax} cy={ay} r={15} fill="#fff" stroke="#1c1917" strokeWidth={0.8} />
                         <polygon points={`${ax},${ay - 10} ${ax + 4},${ay + 5} ${ax},${ay + 2} ${ax - 4},${ay + 5}`} fill="#1c1917" />
                         <text x={ax} y={ay - 20} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1c1917">N</text>
-                        <g data-testid="scale-bar">
-                          <text x={bx} y={by - 5} fontSize={11} fill="#1c1917">0</text>
-                          <text x={bx + bar} y={by - 5} textAnchor="end" fontSize={11} fill="#1c1917">{metres} m</text>
-                          {Array.from({ length: metres }, (_, index) => (
-                            <rect key={index} x={bx + (bar / metres) * index} y={by} width={bar / metres} height={7} fill={index % 2 ? '#fbfaf7' : '#1c1917'} stroke="#1c1917" strokeWidth={0.6} />
-                          ))}
-                        </g>
                       </g>
                     )
                   })()}
@@ -1525,7 +1676,7 @@ export default function FloorPlanApp() {
                     ]
                     const header = Math.min(22, th * 0.28)
                     const top = ty + header + 12
-                    const bottom = ty + th - 8
+                    const bottom = ty + th - 22
                     const step = lines.length > 1 ? (bottom - top) / (lines.length - 1) : 0
                     return (
                       <g data-testid="title-block">
@@ -1535,6 +1686,24 @@ export default function FloorPlanApp() {
                         {lines.map((line, index) => (
                           <text key={`${index}-${line}`} x={tx + 8} y={top + step * index} fontSize={10} fill="#292524">{line}</text>
                         ))}
+                        <g data-testid="scale-bar">
+                          {(() => {
+                            const metres = layout.worldW >= 8 ? 5 : 2
+                            const maxW = tw - 28
+                            const natural = metres * layout.scale * k
+                            const bar = Math.min(maxW, Math.max(36, natural))
+                            const sy = ty + th - 12
+                            return (
+                              <>
+                                <text x={tx + 8} y={sy - 3} fontSize={8} fill="#1c1917">0</text>
+                                <text x={tx + 8 + bar} y={sy - 3} textAnchor="end" fontSize={8} fill="#1c1917">{metres} m</text>
+                                {Array.from({ length: metres }, (_, index) => (
+                                  <rect key={index} x={tx + 8 + (bar / metres) * index} y={sy} width={bar / metres} height={5} fill={index % 2 ? '#fff' : '#1c1917'} stroke="#1c1917" strokeWidth={0.4} />
+                                ))}
+                              </>
+                            )
+                          })()}
+                        </g>
                       </g>
                     )
                   })()}
@@ -1633,6 +1802,25 @@ export default function FloorPlanApp() {
               </div>
             </div>
           )}
+          {electricView && (
+            <ElectricPanel
+              plan={plan}
+              mode={electricView}
+              onMode={setElectricView}
+              onClose={() => setElectricView(null)}
+              onPrint={() => buildElectricPdf(plan).save(`${(plan.name || 'sahko').replace(/\s+/g, '-')}-sahko.pdf`)}
+              onAssign={(deviceId, circuitId) => commit(assignDeviceCircuit(plan, deviceId, circuitId))}
+            />
+          )}
+          {heatView && (
+            <HeatingPanel
+              plan={plan}
+              mode={heatView}
+              onMode={setHeatView}
+              onClose={() => setHeatView(null)}
+              onPrint={() => buildHydronicPdf(plan).save(`${(plan.name || 'lammitys').replace(/\s+/g, '-')}-lammitys.pdf`)}
+            />
+          )}
         </div>
 
         <aside data-testid="materials-panel" style={{ width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}>
@@ -1657,14 +1845,15 @@ export default function FloorPlanApp() {
           {rows.map((row) => (
             <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
               <span style={{ width: 14, height: 14, borderRadius: 3, background: row.color, border: '1px solid #a8a29e', flexShrink: 0 }} />
-              <span style={{ flex: 1 }}>{row.groupLabel}: {row.name}</span>
-              <span style={{ color: '#78716c' }}>{row.area ? formatArea(row.area) : row.count}</span>
+              <span style={{ flex: 1 }}>{row.roomName ? `${row.roomName}: ` : ''}{row.groupLabel}: {row.name}</span>
+              <span style={{ color: '#78716c' }}>{formatArea(row.area || 0)}</span>
             </div>
           ))}
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '14px 0 8px' }}>SELITE</div>
           {[
             ['Lattia', 'floor'],
             ['Sisäseinä', 'interior'],
+            ['Sisäkatto', 'ceiling'],
             ['Ulkoseinä', 'exterior'],
             ['Katto', 'roof'],
           ].map(([label, group]) => (

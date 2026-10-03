@@ -1,7 +1,9 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { FUSE_SERIES } from '@/lib/electric'
+import { HEAT_SOURCES, pexSize } from '@/lib/hydronic'
 import {
-  CIRCUITS,
   PLACEABLES,
   SERVICE_SYSTEMS,
   airflowBalance,
@@ -58,6 +60,13 @@ export function ServiceBar({
   onTool,
   onLayer,
   onRoute,
+  onRewire,
+  onSchedule,
+  onDiagram,
+  onRewireWater,
+  onRewireHeat,
+  onHeatTable,
+  onHeatSchematic,
   onFloorHeating,
   onFinish,
   onPdf,
@@ -104,6 +113,23 @@ export function ServiceBar({
         Lattialämmitys
       </label>
       <button type="button" data-testid="route-services" style={barBtn(false)} onClick={onRoute}>Reititä automaattisesti</button>
+      {system === 'electric' && (
+        <>
+          <button type="button" data-testid="rewire-electric" style={barBtn(false)} onClick={onRewire}>Johdota</button>
+          <button type="button" data-testid="open-schedule" style={barBtn(false)} onClick={onSchedule}>Ryhmäluettelo</button>
+          <button type="button" data-testid="open-diagram" style={barBtn(false)} onClick={onDiagram}>Pääkaavio</button>
+        </>
+      )}
+      {system === 'water' && (
+        <button type="button" data-testid="rewire-water" style={barBtn(false)} onClick={onRewireWater}>Johdota käyttövesi</button>
+      )}
+      {system === 'heat' && (
+        <>
+          <button type="button" data-testid="rewire-heat" style={barBtn(false)} onClick={onRewireHeat}>Johdota lämmitys</button>
+          <button type="button" data-testid="open-heat-table" style={barBtn(false)} onClick={onHeatTable}>Piiritaulukko</button>
+          <button type="button" data-testid="open-heat-schematic" style={barBtn(false)} onClick={onHeatSchematic}>Periaatekaavio</button>
+        </>
+      )}
       {SERVICE_SYSTEMS.map((item) => (
         <button key={`pdf-${item.id}`} type="button" data-testid={`service-pdf-${item.id}`} style={barBtn(false)} onClick={() => onPdf(item.id)}>{item.name} PDF</button>
       ))}
@@ -122,13 +148,16 @@ function pointsOf(points, X, Y) {
 
 const RUN_SHIFT = { drain: -0.22, water: -0.08, electric: 0.08, iv: 0.22 }
 
-function shiftPoints(points, system, multi) {
-  if (!multi || !points || points.length < 2) return points || []
+function shiftPoints(points, system, multi, kind) {
+  const base = points || []
+  const kindShift = system === 'water' && kind === 'hot' ? 0.16 : system === 'water' && kind === 'circ' ? 0.32 : 0
+  const shifted = kindShift ? base.map((point) => ({ ...point, x: point.x + kindShift, z: point.z + kindShift })) : base
+  if (!multi || shifted.length < 2) return shifted
   const dist = RUN_SHIFT[system] || 0
-  if (!dist) return points
-  return points.map((point, index) => {
-    const prev = points[Math.max(0, index - 1)]
-    const next = points[Math.min(points.length - 1, index + 1)]
+  if (!dist) return shifted
+  return shifted.map((point, index) => {
+    const prev = shifted[Math.max(0, index - 1)]
+    const next = shifted[Math.min(shifted.length - 1, index + 1)]
     let dx = next.x - prev.x
     let dz = next.z - prev.z
     const len = Math.hypot(dx, dz) || 1
@@ -267,7 +296,21 @@ function NodeSymbol({ node }) {
       </g>
     )
   }
-  if (node.kind === 'junction') return <circle r="3.4" fill="#1c1917" />
+  if (node.kind === 'junction') {
+    return (
+      <g data-testid="junction-symbol">
+        <rect x="-3.4" y="-3.4" width="6.8" height="6.8" fill="#fff" stroke="#1c1917" strokeWidth="1.15" />
+      </g>
+    )
+  }
+  if (node.kind === 'heater-control') {
+    return (
+      <g data-testid="heater-control-symbol">
+        <rect x="-7" y="-5" width="14" height="10" fill="#fff" stroke="#1c1917" strokeWidth="1.1" />
+        <text x="0" y="3" textAnchor="middle" fontSize="6" fontWeight="700" fill="#1c1917">OK</text>
+      </g>
+    )
+  }
   if (node.kind === 'data') return <polygon points="0,-6 6,5 -6,5" fill="#fff" stroke="#1c1917" strokeWidth="1.1" />
   if (node.kind === 'antenna') {
     return (
@@ -285,17 +328,124 @@ function NodeSymbol({ node }) {
       </g>
     )
   }
+  const badge = {
+    oven: ['U', 18],
+    radiator: ['P', 18],
+    ev: ['EV', 24],
+    heatpump: ['LP', 24],
+    'iv-unit': ['IV', 24],
+    boiler: ['V', 18],
+    washer: ['PK', 24],
+    dishwasher: ['AP', 24],
+  }[node.kind]
+  if (badge) {
+    const [label, width] = badge
+    return (
+      <g>
+        <rect x={-width / 2} y={-7} width={width} height={14} fill="#fff" stroke="#1c1917" strokeWidth={1.2} />
+        <text x="0" y="3.5" textAnchor="middle" fontSize="8" fontWeight="700" fill="#1c1917">{label}</text>
+      </g>
+    )
+  }
+  if (node.kind === 'water-point') {
+    const both = node.supply !== 'cold'
+    return (
+      <g>
+        <circle r="6" fill="#fff" stroke={both ? '#dc2626' : '#1d4ed8'} strokeWidth="1.4" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1c1917">{both ? 'KL' : 'KV'}</text>
+      </g>
+    )
+  }
+  if (node.kind === 'dhw-tank' || node.kind === 'buffer-tank') {
+    return (
+      <g>
+        <rect x={-11} y={-8} width={22} height={16} rx="3" fill="#fff" stroke="#dc2626" strokeWidth="1.3" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#dc2626">{node.kind === 'buffer-tank' ? 'PV' : 'LV'}</text>
+      </g>
+    )
+  }
+  if (node.kind === 'kv-manifold' || node.kind === 'lv-manifold' || node.kind === 'floor-manifold') {
+    const label = node.kind === 'floor-manifold' ? 'LJT' : node.kind === 'lv-manifold' ? 'LV' : 'KV'
+    return (
+      <g>
+        <rect x={-12} y={-5} width={24} height={10} fill="#fff" stroke="#1d4ed8" strokeWidth="1.2" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1d4ed8">{label}</text>
+      </g>
+    )
+  }
+  if (node.kind === 'heat-source' || node.kind === 'air-air') {
+    return (
+      <g>
+        <rect x={-12} y={-8} width={24} height={16} fill="#fff7ed" stroke="#c2410c" strokeWidth="1.3" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#c2410c">{node.kind === 'air-air' ? 'ILP' : 'LL'}</text>
+      </g>
+    )
+  }
+  if (node.kind === 'heater-rad') {
+    return (
+      <g>
+        <rect x={-9} y={-6} width={18} height={12} fill="#fff" stroke="#dc2626" strokeWidth="1.2" />
+        <path d="M-5,-6 V6 M-1,-6 V6 M3,-6 V6" stroke="#dc2626" strokeWidth="0.7" />
+      </g>
+    )
+  }
+  if (node.kind === 'thermostat' || node.kind === 'actuator') {
+    return (
+      <g>
+        <rect x={-6} y={-6} width={12} height={12} fill="#fff" stroke="#0f766e" strokeWidth="1.1" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0f766e">{node.kind === 'thermostat' ? 'T' : 'A'}</text>
+      </g>
+    )
+  }
   return <circle r="4" fill={color} />
+}
+
+function cableMark(run) {
+  if (!run.marking || !run.showMark) return ''
+  if (run.system === 'electric' || run.system === 'water' || run.system === 'heat') return run.marking
+  return ''
+}
+
+function CableMark({ points, text, X, Y }) {
+  if (!text || !points || points.length < 2) return null
+  let best = null
+  for (let i = 1; i < points.length; i += 1) {
+    const len = Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z)
+    if (!best || len > best.len) best = { len, a: points[i - 1], b: points[i] }
+  }
+  if (!best || best.len < 0.35) return null
+  const dx = best.b.x - best.a.x
+  const dz = best.b.z - best.a.z
+  const len = Math.hypot(dx, dz) || 1
+  const ox = (-dz / len) * 0.28
+  const oz = (dx / len) * 0.28
+  return (
+    <text
+      data-testid="cable-mark"
+      x={X((best.a.x + best.b.x) / 2 + ox)}
+      y={Y((best.a.z + best.b.z) / 2 + oz)}
+      textAnchor="middle"
+      fontSize="10"
+      fontWeight="650"
+      fill="#1c1917"
+      stroke="#fbfaf7"
+      strokeWidth="2.6"
+      paintOrder="stroke"
+      style={{ pointerEvents: 'none' }}
+    >
+      {text}
+    </text>
+  )
 }
 
 export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext }) {
   const services = ensureServices(plan)
   const visibleRuns = services.runs.filter((run) => layerVisible(plan, run.system))
   const visibleNodes = services.nodes.filter((node) => layerVisible(plan, node.system))
-  const order = { drain: 0, water: 1, electric: 2, iv: 3 }
+  const order = { drain: 0, water: 1, heat: 2, electric: 3, iv: 4 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
-  const drawn = runs.map((run) => ({ run, points: shiftPoints(run.points, run.system, multi) }))
+  const drawn = runs.map((run) => ({ run, points: shiftPoints(run.points, run.system, multi, run.kind) }))
   const fittings = collectFittings(drawn.map((item) => ({ ...item.run, points: item.points })))
   const legend = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
   const open = (event, hit) => {
@@ -346,7 +496,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               fill="none"
               stroke={color}
               strokeWidth={width}
-              strokeDasharray={dashed ? '5 3' : undefined}
+              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : dashed ? '5 3' : undefined}
+              data-wire-role={run.role || ''}
               strokeLinejoin="round"
               strokeLinecap="round"
               style={{ pointerEvents: 'none' }}
@@ -360,6 +511,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               onContextMenu={(event) => open(event, { target: 'run', id: run.id, system: run.system })}
             />
             <SlopeMark run={{ ...run, points }} X={X} Y={Y} />
+            <CableMark points={points} text={cableMark(run)} X={X} Y={Y} />
           </g>
         )
       })}
@@ -397,8 +549,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               <text x="16" y="-14" fontSize="8" fontWeight="700" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth="2.2" paintOrder="stroke">{node.flow} l/s</text>
             </g>
           ) : null}
-          {!multi && node.system === 'electric' && node.circuit && (node.kind === 'panel' || node.kind === 'stove' || node.kind === 'heater') ? (
-            <text x="10" y="4" fontSize="8" fill="#44403c" stroke="#fbfaf7" strokeWidth="2" paintOrder="stroke">{node.circuit}</text>
+          {node.system === 'electric' && node.circuit && node.kind !== 'panel' ? (
+            <text data-testid="circuit-badge" x="11" y="-2" fontSize="9" fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{`R${node.circuit}`}</text>
           ) : null}
         </g>
       ))}
@@ -425,6 +577,140 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         </g>
       )}
     </g>
+  )
+}
+
+const LOAD_KINDS = ['socket', 'switch', 'light', 'stove', 'oven', 'heater', 'radiator', 'ev', 'heatpump', 'iv-unit', 'boiler', 'washer', 'dishwasher']
+const SECTIONS = [1.5, 2.5, 4, 6, 10, 16, 25]
+
+function NumberField({ testid, label, value, onCommit, step = '0.1' }) {
+  const [text, setText] = useState(value == null ? '' : String(value))
+  useEffect(() => {
+    setText(value == null ? '' : String(value))
+  }, [value])
+  return (
+    <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+      {label}
+      <input
+        data-testid={testid}
+        style={fieldStyle}
+        inputMode="decimal"
+        step={step}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={() => {
+          const next = Number(String(text).replace(',', '.'))
+          if (Number.isFinite(next)) onCommit(next)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+        }}
+      />
+    </label>
+  )
+}
+
+function DeviceFields({ node, onPatch }) {
+  const cores = Number(node.voltage) >= 300 ? 5 : 3
+  const circuitValue = node.circuitMode === 'manual' && node.circuit ? String(node.circuit) : 'auto'
+  return (
+    <div data-testid="device-fields">
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Jännite
+        <select data-testid="device-voltage" style={fieldStyle} value={Number(node.voltage) >= 300 ? 400 : 230} onChange={(event) => onPatch({ voltage: Number(event.target.value) })}>
+          <option value={230}>230 V (1~ L+N+PE)</option>
+          <option value={400}>400 V (3~ L1–L3+N+PE)</option>
+        </select>
+      </label>
+      <NumberField testid="device-power" label="Teho (W)" value={node.power ?? 0} step="1" onCommit={(power) => onPatch({ power })} />
+      <NumberField testid="device-cos" label="cos φ" value={node.cosPhi ?? 1} onCommit={(cosPhi) => onPatch({ cosPhi })} />
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Liitäntä
+        <select data-testid="device-connection" style={fieldStyle} value={node.connection === 'socket' ? 'socket' : 'fixed'} onChange={(event) => onPatch({ connection: event.target.value })}>
+          <option value="socket">Pistorasia</option>
+          <option value="fixed">Kiinteä</option>
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Ryhmä
+        <select
+          data-testid="device-circuit"
+          style={fieldStyle}
+          value={circuitValue}
+          onChange={(event) => {
+            if (event.target.value === 'auto') onPatch({ circuitMode: 'auto' })
+            else onPatch({ circuitMode: 'manual', circuit: Number(event.target.value) })
+          }}
+        >
+          <option value="auto">Automaattinen{node.circuit ? ` (R${node.circuit})` : ''}</option>
+          {Array.from({ length: 16 }, (_, index) => index + 1).map((id) => (
+            <option key={id} value={id}>R{id}</option>
+          ))}
+        </select>
+      </label>
+      {node.kind === 'switch' && (
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+          Kytkin
+          <select data-testid="switch-style" style={fieldStyle} value={node.switchStyle || 'single'} onChange={(event) => onPatch({ switchStyle: event.target.value })}>
+            <option value="single">Yksinkertainen</option>
+            <option value="two-way">Vaihtokytkin</option>
+            <option value="series">Sarjakytkin</option>
+          </select>
+        </label>
+      )}
+      {node.kind === 'socket' && (
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+          Syöttö
+          <select data-testid="socket-feed" style={fieldStyle} value={node.feed === 'radial' ? 'radial' : 'chain'} onChange={(event) => onPatch({ feed: event.target.value })}>
+            <option value="chain">Ketjutus</option>
+            <option value="radial">Säteittäinen</option>
+          </select>
+        </label>
+      )}
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Sulake
+        <select
+          data-testid="device-fuse"
+          style={fieldStyle}
+          value={node.fuseManual ? String(node.fuse) : 'auto'}
+          onChange={(event) => {
+            if (event.target.value === 'auto') onPatch({ fuseManual: false })
+            else onPatch({ fuseManual: true, fuse: Number(event.target.value) })
+          }}
+        >
+          <option value="auto">Automaattinen ({node.recommendedFuse || node.fuse || '—'} A)</option>
+          {FUSE_SERIES.map((amp) => <option key={amp} value={amp}>{amp} A</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Kaapeli
+        <select
+          data-testid="device-cable"
+          style={fieldStyle}
+          value={node.cableManual ? String(node.section) : 'auto'}
+          onChange={(event) => {
+            if (event.target.value === 'auto') onPatch({ cableManual: false })
+            else onPatch({ cableManual: true, section: Number(event.target.value) })
+          }}
+        >
+          <option value="auto">Automaattinen ({node.cable || '—'})</option>
+          {SECTIONS.map((section) => (
+            <option key={section} value={section}>{cores}x{String(section).replace('.', ',')}</option>
+          ))}
+        </select>
+      </label>
+      <div data-testid="device-size" style={{ fontSize: 12, color: '#44403c', marginBottom: 8, lineHeight: 1.45 }}>
+        {`${Number(node.current || 0).toFixed(1).replace('.', ',')} A`}
+        {node.phase ? ` · ${node.phase}` : ''}
+        {node.cable ? ` · ${node.cable}` : ''}
+        {node.marking ? ` · ${node.marking}` : ''}
+        {node.rcd ? ' · vikavirtasuoja 30 mA' : ''}
+        {node.dropPct ? ` · jännitehäviö ${String(node.dropPct).replace('.', ',')} %` : ''}
+      </div>
+      {node.warning ? (
+        <div data-testid="size-warning" style={{ fontSize: 12, color: '#b91c1c', marginBottom: 8 }}>{node.warning}</div>
+      ) : null}
+    </div>
   )
 }
 
@@ -501,13 +787,64 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
               </select>
             </label>
           )}
-          {node.system === 'electric' && (
+          {node.system === 'electric' && LOAD_KINDS.includes(node.kind) && (
+            <DeviceFields node={node} onPatch={patchNode} />
+          )}
+          {node.system === 'electric' && !LOAD_KINDS.includes(node.kind) && node.kind !== 'panel' && (
             <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
               Virtapiiri
-              <select data-testid="service-circuit" style={fieldStyle} value={node.circuit || 1} onChange={(event) => patchNode({ circuit: Number(event.target.value) })}>
-                {CIRCUITS.map((item) => <option key={item.id} value={item.id}>{item.id} {item.name}</option>)}
+              <select data-testid="service-circuit" style={fieldStyle} value={node.circuit || 1} onChange={(event) => patchNode({ circuit: Number(event.target.value), circuitMode: 'manual' })}>
+                {Array.from({ length: 16 }, (_, index) => index + 1).map((id) => <option key={id} value={id}>R{id}</option>)}
               </select>
             </label>
+          )}
+          {node.kind === 'water-point' && (
+            <div data-testid="water-fields">
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                Vesi
+                <select data-testid="water-supply" style={fieldStyle} value={node.supply === 'cold' ? 'cold' : 'both'} onChange={(event) => patchNode({ supply: event.target.value, flowManual: false })}>
+                  <option value="both">KV + LV</option>
+                  <option value="cold">Vain KV</option>
+                </select>
+              </label>
+              <NumberField testid="water-flow" label="Normivirtaama KV (l/s)" value={node.flowCold ?? 0} onCommit={(flowCold) => patchNode({ flowManual: true, flowCold })} />
+              {node.supply !== 'cold' && (
+                <NumberField testid="water-flow-hot" label="Normivirtaama LV (l/s)" value={node.flowHot ?? 0} onCommit={(flowHot) => patchNode({ flowManual: true, flowHot })} />
+              )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                <input data-testid="water-circ" type="checkbox" checked={Boolean(node.circulation)} onChange={(event) => patchNode({ circulation: event.target.checked })} />
+                Lämpimän veden kierto
+              </label>
+              <div data-testid="water-size" style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>
+                {`Haara PEX ${pexSize(node.supply === 'cold' ? node.flowCold : Math.max(node.flowCold || 0, node.flowHot || 0))}`}
+                {node.roomName ? ` · ${node.roomName}` : ''}
+              </div>
+            </div>
+          )}
+          {(node.kind === 'dhw-tank' || node.kind === 'buffer-tank') && (
+            <div data-testid="tank-fields">
+              <NumberField testid="tank-litres" label="Tilavuus (l)" step="10" value={node.litres || 300} onCommit={(litres) => patchNode({ litres })} />
+              {node.kind === 'dhw-tank' && (
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                  Lämmitys
+                  <select data-testid="tank-mode" style={fieldStyle} value={node.tankMode || 'electric'} onChange={(event) => patchNode({ tankMode: event.target.value })}>
+                    <option value="electric">Sähkövastus</option>
+                    <option value="source">Lämmönlähteestä</option>
+                  </select>
+                </label>
+              )}
+            </div>
+          )}
+          {node.kind === 'heat-source' && (
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+              Lämmönlähde
+              <select data-testid="source-kind" style={fieldStyle} value={node.source || 'district'} onChange={(event) => patchNode({ source: event.target.value, name: HEAT_SOURCES.find((item) => item.id === event.target.value)?.name })}>
+                {HEAT_SOURCES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+          )}
+          {node.kind === 'heater-rad' && (
+            <NumberField testid="radiator-power" label="Teho (W)" step="10" value={node.power || 0} onCommit={(power) => patchNode({ power })} />
           )}
           {node.size && (
             <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
@@ -558,12 +895,19 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
             </label>
           )}
           {run.system === 'electric' && (
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-              Virtapiiri
-              <select data-testid="service-circuit" style={fieldStyle} value={run.circuit || 1} onChange={(event) => patchRun({ circuit: Number(event.target.value) })}>
-                {CIRCUITS.map((item) => <option key={item.id} value={item.id}>{item.id} {item.name}</option>)}
-              </select>
-            </label>
+            <>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                <input data-testid="service-lock" type="checkbox" checked={Boolean(run.locked)} onChange={(event) => patchRun({ locked: event.target.checked })} />
+                Lukitse johto
+              </label>
+              {run.marking ? <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>{run.marking}</div> : null}
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                Virtapiiri
+                <select data-testid="service-circuit" style={fieldStyle} value={run.circuit || 1} onChange={(event) => patchRun({ circuit: Number(event.target.value) })}>
+                  {Array.from({ length: 16 }, (_, index) => index + 1).map((id) => <option key={id} value={id}>R{id}</option>)}
+                </select>
+              </label>
+            </>
           )}
         </>
       )}
