@@ -1728,7 +1728,7 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
             shadow-camera-bottom={-16}
           />
           {technical ? null : <directionalLight position={[-8, 7, -12]} intensity={0.28} />}
-          {technical ? null : <ContactShadows position={[0, 0.012, 0]} opacity={theme === 'dark' ? 0.45 : 0.28} scale={28} blur={2.2} far={8} />}
+          {technical ? null : <ContactShadows position={[0, 0.012, 0]} opacity={theme === 'dark' ? 0.18 : 0.28} scale={28} blur={2.2} far={8} />}
           <group userData={{ role: 'skip' }}>
             <Grid
               args={[1, 1]}
@@ -1747,7 +1747,7 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
           </group>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} userData={{ role: 'skip' }}>
             <planeGeometry args={[120, 120]} />
-            <meshBasicMaterial color={technical ? '#e8eef3' : theme === 'dark' ? '#23262c' : '#d9e0e8'} />
+            <meshBasicMaterial color={technical ? '#e8eef3' : theme === 'dark' ? '#6a7380' : '#d9e0e8'} />
           </mesh>
           <WallAssembly rooms={rooms} onSelect={onSelect} onContext={onContext} />
           {rooms.map((room) => (
