@@ -244,7 +244,7 @@ export function FixtureSymbol({ symbol, w, d, color, flues = 1 }) {
       )
     }
     const span = w + d
-    const step = 6
+    const step = 4
     const diagonals = []
     for (let i = 0; i <= span; i += step) diagonals.push(i)
     const flueW = count === 2 ? w * 0.22 : Math.min(w, d) * 0.34
