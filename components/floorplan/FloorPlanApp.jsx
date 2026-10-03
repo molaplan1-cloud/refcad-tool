@@ -6,32 +6,60 @@ import Link from 'next/link'
 import {
   FIXTURES,
   MATERIALS,
+  ROOF_TYPES,
   addFixture,
   addOpening,
   addWall,
-  duplicateFixture,
+  claddingAreas,
+  deleteOpening,
+  facadeSide,
+  deleteRoom,
+  deleteWall,
+  detectRoomAt,
   detectRooms,
+  dimensionChains,
+  dimensionRotation,
+  drawRoom,
   emptyPlan,
   exampleHouse,
+  familyHouse,
   formatArea,
   formatMm,
+  hitTest,
   materialOf,
   materialsList,
   moveFixture,
+  moveRoomLabel,
   nearestWall,
+  openingSymbol,
+  planBounds,
   pointInPolygon,
   removeFixture,
-  renameRoom,
+  roomLabelPoint,
   rotateFixture,
   segmentLength,
-  setRoofType,
-  setSurface,
-  viewLayout,
   snapDrawPoint,
+  snapRoomPoint,
+  viewLayout,
+  visibleRooms,
   wallQuads,
-  wallThickness,
   buildFloorPlanPdf,
 } from '@/lib/floorplan'
+import { FloorMenu, HouseSettings, SelectionPanel } from './FloorMenus'
+import FacadeView from './FacadeView'
+import { ServiceBar, ServiceDrawing, ServiceMenu } from './ServicesLayer'
+import {
+  PLACEABLES,
+  addServiceNode,
+  addServiceRun,
+  autoRouteAll,
+  buildServicePdf,
+  SERVICE_SYSTEMS,
+  ensureServices,
+  hitService,
+  layerVisible,
+  snapServicePoint,
+} from '@/lib/services'
 
 const HouseScene = dynamic(() => import('./HouseScene'), { ssr: false })
 
@@ -90,48 +118,96 @@ function sheetPixels(size, plan) {
   }
 }
 
-function along(wall, distance) {
-  const len = segmentLength(wall.a, wall.b) || 1
-  const t = distance / len
-  return {
-    x: wall.a.x + (wall.b.x - wall.a.x) * t,
-    z: wall.a.z + (wall.b.z - wall.a.z) * t,
-  }
+function RoomName({ item, label, X, Y }) {
+  const poly = item.polygon || []
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  poly.forEach((point) => {
+    const x = X(point.x)
+    const y = Y(point.z)
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+  })
+  const boxW = Math.max(16, maxX - minX - 8)
+  const boxH = Math.max(16, maxY - minY - 6)
+  const name = item.name || 'Huone'
+  const whole = boxW / Math.max(name.length * 0.58, 1)
+  const splitAt = whole >= 9.5 || name.length <= 8
+    ? name.length
+    : (name.indexOf('huone') > 2 ? name.indexOf('huone') : Math.ceil(name.length / 2))
+  const lines = splitAt < name.length ? [name.slice(0, splitAt), name.slice(splitAt)] : [name]
+  const longest = Math.max(...lines.map((line) => line.length), 1)
+  const font = Math.max(7.5, Math.min(13, boxW / (longest * 0.6), boxH / (lines.length + 1.2)))
+  const areaSize = Math.max(7, font - 1.5)
+  const cx = X(label.x)
+  const cy = Y(label.z)
+  const lineH = font + 1
+  const blockH = lines.length * lineH + areaSize + 3
+  const top = cy - blockH / 2 + font
+  return (
+    <>
+      {lines.map((line, index) => (
+        <text key={`${line}-${index}`} x={cx} y={top + index * lineH} textAnchor="middle" fontSize={font} fontWeight={700} fill="#1c1917" stroke="#fbfaf7" strokeWidth={3.2} paintOrder="stroke">{line}</text>
+      ))}
+      <text x={cx} y={top + lines.length * lineH + 1} textAnchor="middle" fontSize={areaSize} fill="#44403c" stroke="#fbfaf7" strokeWidth={3} paintOrder="stroke">{formatArea(item.area)}</text>
+    </>
+  )
 }
 
-function openingFigures(wall, opening) {
-  const len = segmentLength(wall.a, wall.b) || 1
-  const dx = (wall.b.x - wall.a.x) / len
-  const dz = (wall.b.z - wall.a.z) / len
-  const nx = -dz
-  const nz = dx
-  const from = opening.offset - opening.width / 2
-  const to = opening.offset + opening.width / 2
-  const hingeDist = opening.swing >= 0 ? from : to
-  const hinge = along(wall, hingeDist)
-  const sign = opening.swing >= 0 ? 1 : -1
-  const arc = []
-  for (let i = 0; i <= 8; i += 1) {
-    const t = (i / 8) * (Math.PI / 2)
-    arc.push({
-      x: hinge.x + dx * Math.cos(t) * opening.width * sign + nx * Math.sin(t) * opening.width,
-      z: hinge.z + dz * Math.cos(t) * opening.width * sign + nz * Math.sin(t) * opening.width,
-    })
-  }
-  const half = wallThickness(wall.kind) / 2
-  const jamb = (distance) => {
-    const p = along(wall, distance)
-    return [
-      { x: p.x + nx * half, z: p.z + nz * half },
-      { x: p.x - nx * half, z: p.z - nz * half },
-    ]
-  }
-  return { arc, leaf: arc[arc.length - 1], hinge, jambA: jamb(from), jambB: jamb(to), nx, nz, half, from, to }
+function DimLine({ dim, offset, X, Y }) {
+  const off = Number.isFinite(dim.offset) ? dim.offset : offset
+  const x1 = X(dim.x1 + (dim.nx || 0) * off)
+  const y1 = Y(dim.z1 + (dim.nz || 0) * off)
+  const x2 = X(dim.x2 + (dim.nx || 0) * off)
+  const y2 = Y(dim.z2 + (dim.nz || 0) * off)
+  const ang = Math.atan2(y2 - y1, x2 - x1)
+  const len = Math.hypot(x2 - x1, y2 - y1) || 1
+  const ux = (x2 - x1) / len
+  const uy = (y2 - y1) / len
+  const tick = 6
+  const tx = Math.cos(ang + Math.PI / 4) * tick
+  const ty = Math.sin(ang + Math.PI / 4) * tick
+  const vertical = Math.abs(x2 - x1) < Math.abs(y2 - y1)
+  const textW = Math.max(22, String(dim.label).length * 6.6)
+  const gap = len > textW + 16 ? textW : 0
+  const mx = (x1 + x2) / 2
+  const my = (y1 + y2) / 2
+  const labelX = mx + (gap ? 0 : -uy * 11)
+  const labelY = my + (gap ? 0 : ux * 11)
+  const ax1 = X(dim.ax ?? dim.x1)
+  const ay1 = Y(dim.az ?? dim.z1)
+  const ax2 = X(dim.bx ?? dim.x2)
+  const ay2 = Y(dim.bz ?? dim.z2)
+  return (
+    <g stroke="#292524" fill="#1c1917" strokeWidth={0.9}>
+      {Math.hypot(ax1 - x1, ay1 - y1) > 1.5 && <line x1={ax1} y1={ay1} x2={x1} y2={y1} stroke="#a8a29e" strokeWidth={0.55} />}
+      {Math.hypot(ax2 - x2, ay2 - y2) > 1.5 && <line x1={ax2} y1={ay2} x2={x2} y2={y2} stroke="#a8a29e" strokeWidth={0.55} />}
+      <line x1={x1} y1={y1} x2={mx - ux * gap / 2} y2={my - uy * gap / 2} />
+      <line x1={mx + ux * gap / 2} y1={my + uy * gap / 2} x2={x2} y2={y2} />
+      <line x1={x1 - tx} y1={y1 - ty} x2={x1 + tx} y2={y1 + ty} />
+      <line x1={x2 - tx} y1={y2 - ty} x2={x2 + tx} y2={y2 + ty} />
+      <text
+        x={labelX}
+        y={labelY}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fontSize={11}
+        stroke="none"
+        transform={vertical ? `rotate(${dimensionRotation(true)} ${labelX} ${labelY})` : undefined}
+      >
+        {dim.label}
+      </text>
+    </g>
+  )
 }
 
-function FixtureMark({ type, w, d }) {
-  const stroke = '#1c1917'
-  const sw = 1.2
+function FixtureMark({ type, w, d, color }) {
+  const stroke = color || '#1c1917'
+  const sw = 1.05
   const box = { fill: '#fff', stroke, strokeWidth: sw }
   if (type === 'toilet') {
     return (
@@ -230,33 +306,6 @@ function FixtureMark({ type, w, d }) {
   return <rect x={-w / 2} y={-d / 2} width={w} height={d} {...box} />
 }
 
-function Swatches({ group, value, onPick }) {
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {MATERIALS[group].map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          title={item.name}
-          aria-label={item.name}
-          aria-pressed={value === item.id}
-          onClick={() => onPick(item.id)}
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 6,
-            background: item.color,
-            border: value === item.id ? '2px solid #0f766e' : '1px solid #a8a29e',
-            cursor: 'pointer',
-            transform: 'none',
-            padding: 0,
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
 export default function FloorPlanApp() {
   const [plan, setPlan] = useState(() => emptyPlan())
   const [hydrated, setHydrated] = useState(false)
@@ -266,8 +315,19 @@ export default function FloorPlanApp() {
   const [cursor, setCursor] = useState(null)
   const [selectedRoom, setSelectedRoom] = useState(null)
   const [selectedFixture, setSelectedFixture] = useState(null)
+  const [pick, setPick] = useState(null)
+  const [panel, setPanel] = useState('materials')
   const [menu, setMenu] = useState(null)
+  const [roomShape, setRoomShape] = useState('rect')
+  const [poly, setPoly] = useState([])
+  const [partitions, setPartitions] = useState(true)
   const [view, setView] = useState('2d')
+  const [facadeSideId, setFacadeSideId] = useState('north')
+  const [svcSystem, setSvcSystem] = useState('iv')
+  const [svcKind, setSvcKind] = useState('valve-tulo')
+  const [svcTool, setSvcTool] = useState(null)
+  const [svcPoints, setSvcPoints] = useState([])
+  const [floorHeating, setFloorHeating] = useState(false)
   const [wallMode, setWallMode] = useState('solid')
   const [roofMode, setRoofMode] = useState('solid')
   const [fitToken, setFitToken] = useState(1)
@@ -275,6 +335,8 @@ export default function FloorPlanApp() {
   const history = useRef([])
   const dragBefore = useRef(null)
   const dragId = useRef(null)
+  const dragLabel = useRef(null)
+  const clip = useRef(null)
   const hostRef = useRef(null)
   const svgRef = useRef(null)
 
@@ -287,6 +349,7 @@ export default function FloorPlanApp() {
           setPlan({
             ...emptyPlan(),
             ...parsed,
+            services: ensureServices(parsed),
             rooms: detectRooms(parsed.walls, parsed.rooms || []),
           })
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
@@ -346,25 +409,137 @@ export default function FloorPlanApp() {
     }
   }, [sheet, layout])
 
-  const snappedCursor = cursor ? snapDrawPoint(cursor, draft, plan.walls) : null
+  const snappedCursor = cursor && (tool === 'exterior' || tool === 'interior') ? snapDrawPoint(cursor, draft, plan.walls) : null
+  const roomCursor = cursor && tool === 'room' ? snapRoomPoint(cursor, plan.walls) : null
+
+  const choose = (hit) => {
+    if (!hit || hit.kind === 'canvas') {
+      setPick(null)
+      setSelectedRoom(null)
+      setSelectedFixture(null)
+      return
+    }
+    setPick({ kind: hit.kind, id: hit.id })
+    setSelectedRoom(hit.kind === 'room' ? hit.id : null)
+    setSelectedFixture(hit.kind === 'fixture' ? hit.id : null)
+    if (hit.kind === 'fixture') {
+      const fixture = (plan.fixtures || []).find((item) => item.id === hit.id)
+      if (fixture) clip.current = { ...fixture }
+    }
+    setPanel('object')
+  }
 
   const onPointerMove = (event) => {
     if (view !== '2d' || !svgRef.current) return
     const world = toWorld(event)
     setCursor(world)
     if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z))
+    if (dragLabel.current) setPlan((current) => moveRoomLabel(current, dragLabel.current, world.x, world.z))
   }
 
   const onPointerUp = () => {
-    if (dragId.current && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+    if ((dragId.current || dragLabel.current) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
     dragId.current = null
+    dragLabel.current = null
     dragBefore.current = null
+  }
+
+  const closeRoom = (points) => {
+    if (!points || points.length < 3) return
+    const next = drawRoom(plan, points, { partitions, name: 'Huone', type: 'huone' })
+    commit(next)
+    const mid = points.reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 })
+    mid.x /= points.length
+    mid.z /= points.length
+    const created = (next.rooms || []).find((item) => pointInPolygon(mid.x, mid.z, item.polygon || []))
+    if (created) choose({ kind: 'room', id: created.id })
+    setDraft(null)
+    setPoly([])
+  }
+
+  const openServiceMenu = (event, service) => {
+    setMenu({ x: event.clientX, y: event.clientY, kind: 'service', service })
+  }
+
+  const finishServiceRun = () => {
+    if (svcPoints.length < 2) return
+    const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES.find((item) => item.mode === 'run')
+    commit(addServiceRun(plan, {
+      system: spec.system,
+      kind: spec.kind,
+      size: spec.size,
+      slope: spec.slope,
+      circuit: spec.circuit,
+      points: svcPoints,
+    }))
+    setSvcPoints([])
+  }
+
+  const onContextMenu = (event) => {
+    event.preventDefault()
+    const world = toWorld(event)
+    const serviceHit = hitService(plan, world)
+    if (serviceHit) {
+      openServiceMenu(event, serviceHit)
+      return
+    }
+    const hit = hitTest(plan, world)
+    setMenu({ x: event.clientX, y: event.clientY, kind: hit.kind, id: hit.id, at: world })
+    if (hit.kind !== 'canvas') choose(hit)
   }
 
   const onPointerDown = (event) => {
     if (view !== '2d' || event.button !== 0) return
     setMenu(null)
     const world = toWorld(event)
+    if (svcTool) {
+      const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES[0]
+      const point = snapServicePoint(world, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system })
+      if (svcTool === 'node') {
+        commit(addServiceNode(plan, {
+          system: spec.system,
+          kind: spec.kind,
+          role: spec.role,
+          flow: spec.flow,
+          size: spec.size,
+          circuit: spec.circuit,
+          name: spec.name,
+          x: point.x,
+          z: point.z,
+        }))
+        return
+      }
+      setSvcPoints((points) => {
+        const prev = points[points.length - 1]
+        if (prev && Math.hypot(prev.x - point.x, prev.z - point.z) < 0.05) return points
+        return [...points, { x: point.x, z: point.z }]
+      })
+      return
+    }
+    if (tool === 'room') {
+      const point = snapRoomPoint(world, plan.walls)
+      if (roomShape === 'poly') {
+        if (poly.length >= 3 && segmentLength(point, poly[0]) < 0.35) closeRoom(poly)
+        else setPoly((points) => [...points, point])
+      } else if (!draft) setDraft(point)
+      else {
+        closeRoom([
+          draft,
+          { x: point.x, z: draft.z },
+          point,
+          { x: draft.x, z: point.z },
+        ])
+      }
+      return
+    }
+    if (tool === 'detect') {
+      const room = (plan.rooms || []).find((item) => pointInPolygon(world.x, world.z, item.polygon || []))
+      if (room) {
+        commit(detectRoomAt(plan, world))
+        choose({ kind: 'room', id: room.id })
+      }
+      return
+    }
     if (tool === 'exterior' || tool === 'interior') {
       const point = snapDrawPoint(world, draft, plan.walls)
       if (!draft) setDraft(point)
@@ -386,9 +561,8 @@ export default function FloorPlanApp() {
       setPlacing(null)
       return
     }
-    const room = (plan.rooms || []).find((item) => pointInPolygon(world.x, world.z, item.polygon))
-    setSelectedRoom(room?.id || null)
-    setSelectedFixture(null)
+    const hit = hitTest(plan, world)
+    choose(hit.kind === 'canvas' ? null : hit)
   }
 
   useEffect(() => {
@@ -397,8 +571,24 @@ export default function FloorPlanApp() {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       if (event.key === 'Escape') {
         setDraft(null)
+        setPoly([])
         setPlacing(null)
         setMenu(null)
+        setSvcPoints([])
+        setSvcTool(null)
+      } else if (event.key === 'Enter' && svcTool === 'run' && svcPoints.length >= 2) {
+        finishServiceRun()
+      } else if (event.key === 'Enter' && tool === 'room' && poly.length >= 3) {
+        closeRoom(poly)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'wall') {
+        commit(deleteWall(plan, pick.id))
+        choose(null)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'opening') {
+        commit(deleteOpening(plan, pick.id))
+        choose(null)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && pick?.kind === 'room') {
+        commit(deleteRoom(plan, pick.id))
+        choose(null)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedFixture) {
         commit(removeFixture(plan, selectedFixture))
         setSelectedFixture(null)
@@ -410,16 +600,65 @@ export default function FloorPlanApp() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [commit, plan, selectedFixture, undo])
+  }, [commit, plan, selectedFixture, undo, tool, poly, pick, partitions, svcTool, svcPoints, svcKind])
 
-  const loadExample = () => {
-    const house = exampleHouse()
+  const loadHouse = (house, roomName) => {
     commit(house)
     setDraft(null)
-    setSelectedRoom(house.rooms.find((room) => room.name === 'Olohuone')?.id || house.rooms[0]?.id || null)
+    setPoly([])
+    const room = house.rooms.find((item) => item.name === roomName) || house.rooms[0]
+    setSelectedRoom(room?.id || null)
+    setPick(room ? { kind: 'room', id: room.id } : null)
     setSelectedFixture(null)
     setView('2d')
+    setPanel(room ? 'object' : 'materials')
     setFitToken((token) => token + 1)
+  }
+
+  const loadExample = () => loadHouse(exampleHouse(), 'Olohuone')
+
+  const loadFamily = () => loadHouse(familyHouse(), 'Eteinen')
+
+  const onMenuNavigate = (action) => {
+    if (action === 'close') {
+      setMenu(null)
+      return
+    }
+    if (action === 'house' || action === 'focus') {
+      setPanel(action === 'house' ? 'house' : 'object')
+      setMenu(null)
+      return
+    }
+    if (action === 'wall') {
+      setTool('exterior')
+      setPlacing(null)
+      setMenu(null)
+      return
+    }
+    if (action === 'room') {
+      setTool('room')
+      setRoomShape('rect')
+      setPlacing(null)
+      setMenu(null)
+      return
+    }
+    if (action === 'facade') {
+      const wall = (plan.walls || []).find((item) => item.id === menu?.id)
+      if (wall) setFacadeSideId(facadeSide(wall, planBounds(plan)))
+      setView('facade')
+      setMenu(null)
+    }
+    if (action === 'paste' && clip.current && menu?.at) {
+      const next = addFixture(plan, clip.current.type, menu.at.x, menu.at.z)
+      const fixture = next.fixtures[next.fixtures.length - 1]
+      if (fixture && clip.current.w) {
+        commit({
+          ...next,
+          fixtures: next.fixtures.map((item) => (item.id === fixture.id ? { ...item, ...clip.current, id: item.id, x: item.x, z: item.z } : item)),
+        })
+      } else commit(next)
+      setMenu(null)
+    }
   }
 
   const exportPdf = () => {
@@ -453,6 +692,7 @@ export default function FloorPlanApp() {
   }
 
   const room = (plan.rooms || []).find((item) => item.id === selectedRoom) || null
+  const shownRooms = visibleRooms(plan).filter((item) => item.showLabel !== false)
   const rows = materialsList(plan)
   const groups = []
   FIXTURES.forEach((item) => {
@@ -463,14 +703,28 @@ export default function FloorPlanApp() {
     }
     group.items.push(item)
   })
-  const totalArea = (plan.rooms || []).reduce((sum, item) => sum + item.area, 0)
+  const totalArea = visibleRooms(plan).reduce((sum, item) => sum + item.area, 0)
+  const dims = dimensionChains(plan)
+  const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
+  const sheetTitle = activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva'
   const liveEnd = draft && snappedCursor ? snappedCursor : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
-  const status = liveEnd
+  const spec = PLACEABLES.find((item) => item.id === svcKind)
+  const status = svcTool === 'run'
+    ? 'Linja: napsauta pisteet. Enter tai Valmis päättää. Escape peruuttaa.'
+    : svcTool === 'node'
+      ? `${spec?.name || 'Piste'}: napsauta paikka. Piste tarttuu verkkoon ja lähellä olevaan osaan.`
+    : liveEnd
     ? `Pituus ${formatMm(liveLength)} mm`
     : placing
       ? 'Napsauta pohjaan kalusteen paikka'
-      : tool === 'exterior'
+      : tool === 'room' && roomShape === 'poly'
+        ? 'Huone: napsauta kulmat. Sulje ensimmäiseen pisteeseen tai paina Enter.'
+        : tool === 'room'
+          ? 'Huone: vedä suorakulmio kahdella napsautuksella. Nurkat tarttuvat seiniin.'
+          : tool === 'detect'
+            ? 'Tunnista: napsauta seinien rajaamaa aluetta.'
+            : tool === 'exterior'
         ? 'Ulkoseinä: napsauta alkupiste ja loppupiste'
         : tool === 'interior'
           ? 'Väliseinä: napsauta alkupiste ja loppupiste'
@@ -478,15 +732,15 @@ export default function FloorPlanApp() {
             ? 'Ovi: napsauta seinää'
             : tool === 'window'
               ? 'Ikkuna: napsauta seinää'
-              : 'Valitse huone tai kaluste. Hiiren oikea painike avaa valikon.'
+              : 'Valitse huone tai kaluste. Vedä huoneen nimeä. Hiiren oikea painike avaa valikon.'
 
   const px = (metres) => metres * layout.scale * k
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
       <header style={{
-        display: 'flex', alignItems: 'center', gap: 8, height: 48, padding: '0 10px',
-        background: '#14181f', color: '#f5f5f4', flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 8, minHeight: 48, padding: '6px 10px',
+        background: '#14181f', color: '#f5f5f4', flexShrink: 0, flexWrap: 'wrap',
       }}>
         <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14 }}>RefCAD</Link>
         <Link href="/" style={{ color: '#a8a29e', textDecoration: 'none', fontSize: 12, fontWeight: 650 }}>Kylmätilat</Link>
@@ -502,10 +756,14 @@ export default function FloorPlanApp() {
           <button type="button" data-testid="tool-interior" style={textBtn(tool === 'interior')} onClick={() => { setTool('interior'); setPlacing(null) }}>Väliseinä</button>
           <button type="button" data-testid="tool-door" style={textBtn(tool === 'door')} onClick={() => { setTool('door'); setPlacing(null); setDraft(null) }}>Ovi</button>
           <button type="button" data-testid="tool-window" style={textBtn(tool === 'window')} onClick={() => { setTool('window'); setPlacing(null); setDraft(null) }}>Ikkuna</button>
+          <button type="button" data-testid="tool-room" style={textBtn(tool === 'room' && roomShape === 'rect')} onClick={() => { setTool('room'); setRoomShape('rect'); setPlacing(null); setPoly([]) }}>Huone</button>
+          <button type="button" data-testid="tool-room-poly" style={textBtn(tool === 'room' && roomShape === 'poly')} onClick={() => { setTool('room'); setRoomShape('poly'); setPlacing(null); setDraft(null) }}>Monikulmio</button>
+          <button type="button" data-testid="tool-detect" style={textBtn(tool === 'detect')} onClick={() => { setTool('detect'); setPlacing(null); setDraft(null); setPoly([]) }}>Tunnista</button>
         </div>
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
           <button type="button" data-testid="view-floor-2d" style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
           <button type="button" data-testid="view-floor-3d" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
+          <button type="button" data-testid="view-facade" style={textBtn(view === 'facade')} onClick={() => setView('facade')}>Julkisivu</button>
         </div>
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b' }}>
           <button type="button" style={textBtn(plan.paper !== 'a4')} onClick={() => setPlan({ ...plan, paper: 'a3' })}>A3</button>
@@ -513,10 +771,59 @@ export default function FloorPlanApp() {
         </div>
         <button type="button" title="Kumoa" onClick={undo} style={textBtn(false)}>Kumoa</button>
         <span style={{ flex: 1 }} />
+        <button type="button" data-testid="house-settings" onClick={() => { setPanel('house'); setMenu(null) }} style={textBtn(panel === 'house')}>Talon asetukset</button>
         <button type="button" data-testid="example-house" onClick={loadExample} style={textBtn(false)}>Esimerkkitalo</button>
+        <button type="button" data-testid="family-house" onClick={loadFamily} style={textBtn(false)}>Huoneisto</button>
         <button type="button" data-testid="export-floor-pdf" onClick={exportPdf} style={textBtn(false)}>PDF</button>
         <button type="button" data-testid="export-floor-png" onClick={exportPng} style={textBtn(false)}>PNG</button>
       </header>
+      <div style={{ height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', background: '#1c212b', color: '#e7e5e4', flexShrink: 0 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+          <input data-testid="room-partitions" type="checkbox" checked={partitions} onChange={(event) => setPartitions(event.target.checked)} />
+          Luo väliseinät (120 mm)
+        </label>
+        {tool === 'room' && roomShape === 'poly' && poly.length >= 3 && (
+          <button type="button" data-testid="close-room" style={textBtn(false)} onClick={() => closeRoom(poly)}>Sulje huone</button>
+        )}
+      </div>
+      <ServiceBar
+        plan={plan}
+        system={svcSystem}
+        kindId={svcKind}
+        tool={svcTool}
+        floorHeating={floorHeating}
+        drawing={svcTool === 'run' && svcPoints.length >= 2}
+        onSystem={(id) => {
+          setSvcSystem(id)
+          const next = PLACEABLES.find((item) => item.system === id && item.mode === (svcTool === 'run' ? 'run' : 'node'))
+          if (next) setSvcKind(next.id)
+        }}
+        onKind={setSvcKind}
+        onTool={(next) => {
+          setSvcTool(next)
+          setTool('select')
+          setPlacing(null)
+          setDraft(null)
+          setPoly([])
+          const current = PLACEABLES.find((item) => item.id === svcKind)
+          if (!current || current.system !== svcSystem || current.mode !== next) {
+            const match = PLACEABLES.find((item) => item.system === svcSystem && item.mode === next)
+            if (match) setSvcKind(match.id)
+          }
+        }}
+        onLayer={(id, visible) => setPlan((current) => {
+          const services = ensureServices(current)
+          return { ...current, services: { ...services, layers: { ...services.layers, [id]: visible } } }
+        })}
+        onRoute={() => {
+          commit(autoRouteAll(plan, { floorHeating }))
+          setSvcPoints([])
+          setView('2d')
+        }}
+        onFloorHeating={setFloorHeating}
+        onFinish={finishServiceRun}
+        onPdf={(id) => buildServicePdf(plan, id).save(`${(plan.name || 'talotekniikka').replace(/\s+/g, '-')}-${id}.pdf`)}
+      />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <aside style={{ width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}>
@@ -542,7 +849,9 @@ export default function FloorPlanApp() {
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ height: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>{status}</div>
-          {view === '2d' ? (
+          {view === 'facade' ? (
+            <FacadeView plan={plan} side={facadeSideId} onSide={setFacadeSideId} onApply={setPlan} onCommit={commit} />
+          ) : view === '2d' ? (
             <div ref={hostRef} style={{ flex: 1, minHeight: 0, background: '#d6d3d1' }}>
               <svg
                 ref={svgRef}
@@ -553,73 +862,74 @@ export default function FloorPlanApp() {
                 onPointerMove={onPointerMove}
                 onPointerDown={onPointerDown}
                 onPointerUp={onPointerUp}
-                onContextMenu={(event) => event.preventDefault()}
-                style={{ display: 'block', cursor: tool === 'select' && !placing ? 'default' : 'crosshair', touchAction: 'none' }}
+                onContextMenu={onContextMenu}
+                style={{ display: 'block', cursor: tool === 'select' && !placing && !svcTool ? 'default' : 'crosshair', touchAction: 'none' }}
               >
+                <defs>
+                  <pattern id="poche" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <rect width="5" height="5" fill="#241f1c" />
+                    <line x1="0" y1="0" x2="0" y2="5" stroke="#0c0a09" strokeWidth="1.35" />
+                  </pattern>
+                </defs>
                 <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.4} />
                 <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
-                {(plan.rooms || []).map((item) => (
+                {visibleRooms(plan).map((item) => (
                   <polygon
                     key={item.id}
                     points={item.polygon.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
                     fill={materialOf('floor', item.floorId).color}
                     fillOpacity={item.id === selectedRoom ? 0.78 : 0.5}
-                    stroke="none"
+                    stroke={item.id === selectedRoom ? '#0f766e' : 'none'}
+                    strokeWidth={1.2}
                   />
                 ))}
-                {(plan.walls || []).map((wall) => wallQuads(wall, plan.openings).map((quad, index) => (
-                  <polygon
-                    key={`${wall.id}-${index}`}
-                    points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
-                    fill={wall.kind === 'exterior' ? '#1c1917' : '#57534e'}
-                  />
-                )))}
+                {(plan.walls || []).map((wall) => wallQuads(wall, plan.openings, plan.walls, plan).map((quad, index) => {
+                  const interior = wall.kind === 'interior' || wall.kind === 'partition'
+                  const selected = pick?.kind === 'wall' && pick.id === wall.id
+                  return (
+                    <polygon
+                      key={`${wall.id}-${index}`}
+                      points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
+                      fill={wall.materialId
+                        ? materialOf(interior ? 'interior' : 'exterior', wall.materialId).color
+                        : (interior ? '#e7e5e4' : 'url(#poche)')}
+                      stroke={selected ? '#0f766e' : '#1c1917'}
+                      strokeWidth={interior ? 1.2 : 0.45}
+                      strokeLinejoin="miter"
+                    />
+                  )
+                }))}
                 {(plan.openings || []).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
                   if (!wall) return null
-                  const fig = openingFigures(wall, opening)
-                  if (opening.kind === 'window') {
-                    const glass = [0.45, -0.45].map((factor) => {
-                      const a = along(wall, fig.from)
-                      const b = along(wall, fig.to)
-                      return {
-                        x1: a.x + fig.nx * fig.half * factor,
-                        z1: a.z + fig.nz * fig.half * factor,
-                        x2: b.x + fig.nx * fig.half * factor,
-                        z2: b.z + fig.nz * fig.half * factor,
-                      }
-                    })
+                  const fig = openingSymbol(wall, opening)
+                  if (fig.kind === 'window') {
                     return (
-                      <g key={opening.id}>
-                        <line x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} stroke="#1c1917" strokeWidth={1} />
-                        <line x1={X(fig.jambB[0].x)} y1={Y(fig.jambB[0].z)} x2={X(fig.jambB[1].x)} y2={Y(fig.jambB[1].z)} stroke="#1c1917" strokeWidth={1} />
-                        {glass.map((line, index) => (
-                          <line key={index} x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} stroke="#0369a1" strokeWidth={1.2} />
+                      <g key={opening.id} stroke={pick?.kind === 'opening' && pick.id === opening.id ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
+                        {fig.glass.map((line, index) => (
+                          <line key={index} x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} />
                         ))}
+                        <line x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} />
+                        <line x1={X(fig.jambB[0].x)} y1={Y(fig.jambB[0].z)} x2={X(fig.jambB[1].x)} y2={Y(fig.jambB[1].z)} />
                       </g>
                     )
                   }
                   return (
-                    <g key={opening.id}>
-                      <polyline
-                        points={fig.arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
-                        fill="none"
-                        stroke="#1c1917"
-                        strokeWidth={0.9}
-                      />
-                      <line x1={X(fig.hinge.x)} y1={Y(fig.hinge.z)} x2={X(fig.leaf.x)} y2={Y(fig.leaf.z)} stroke="#1c1917" strokeWidth={1.15} />
+                    <g key={opening.id} stroke={pick?.kind === 'opening' && pick.id === opening.id ? '#0f766e' : '#1c1917'} strokeWidth={1.15} fill="none">
+                      <polyline points={fig.arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} />
+                      <line x1={X(fig.hinge.x)} y1={Y(fig.hinge.z)} x2={X(fig.leaf.x)} y2={Y(fig.leaf.z)} />
                     </g>
                   )
                 })}
                 {(plan.fixtures || []).map((fixture) => {
                   const tpl = FIXTURES.find((item) => item.id === fixture.type) || FIXTURES[0]
-                  const w = px(tpl.w)
-                  const d = px(tpl.d)
+                  const w = px(fixture.w || tpl.w)
+                  const d = px(fixture.d || tpl.d)
                   return (
                     <g
                       key={fixture.id}
-                      transform={`translate(${X(fixture.x)} ${Y(fixture.z)}) rotate(${fixture.rotation || 0})`}
-                      style={{ pointerEvents: tool === 'select' && !placing ? 'auto' : 'none' }}
+                      transform={`translate(${X(fixture.x)} ${Y(fixture.z)}) rotate(${fixture.rotation || 0})${fixture.mirror ? ' scale(-1 1)' : ''}`}
+                      style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none' }}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return
                         event.stopPropagation()
@@ -632,67 +942,152 @@ export default function FloorPlanApp() {
                       onContextMenu={(event) => {
                         event.preventDefault()
                         event.stopPropagation()
-                        setSelectedFixture(fixture.id)
-                        setMenu({ x: event.clientX, y: event.clientY, id: fixture.id })
+                        clip.current = { ...fixture }
+                        choose({ kind: 'fixture', id: fixture.id })
+                        setMenu({ x: event.clientX, y: event.clientY, kind: 'fixture', id: fixture.id, at: { x: fixture.x, z: fixture.z } })
                       }}
                     >
-                      <FixtureMark type={fixture.type} w={w} d={d} />
+                      <FixtureMark type={fixture.type} w={w} d={d} color={fixture.color} />
                       {fixture.id === selectedFixture && (
                         <rect x={-w / 2 - 3} y={-d / 2 - 3} width={w + 6} height={d + 6} fill="none" stroke="#0f766e" strokeWidth={1.4} />
                       )}
                     </g>
                   )
                 })}
-                {(plan.rooms || []).map((item) => (
-                  <g key={`label-${item.id}`} style={{ pointerEvents: 'none' }}>
-                    <text data-testid="room-label" data-name={item.name} x={X(item.cx)} y={Y(item.cz) - 2} textAnchor="middle" fontSize={13} fontWeight={700} fill="#1c1917">{item.name}</text>
-                    <text x={X(item.cx)} y={Y(item.cz) + 14} textAnchor="middle" fontSize={11} fill="#44403c">{formatArea(item.area)}</text>
-                  </g>
-                ))}
                 {plan.walls.length > 0 && (
-                  <g style={{ pointerEvents: 'none' }}>
-                    <line x1={X(layout.building.minX)} y1={Y(layout.building.maxZ) + 22} x2={X(layout.building.maxX)} y2={Y(layout.building.maxZ) + 22} stroke="#44403c" strokeWidth={0.8} />
-                    <line x1={X(layout.building.minX)} y1={Y(layout.building.maxZ) + 16} x2={X(layout.building.minX)} y2={Y(layout.building.maxZ) + 28} stroke="#44403c" strokeWidth={0.8} />
-                    <line x1={X(layout.building.maxX)} y1={Y(layout.building.maxZ) + 16} x2={X(layout.building.maxX)} y2={Y(layout.building.maxZ) + 28} stroke="#44403c" strokeWidth={0.8} />
-                    <text x={(X(layout.building.minX) + X(layout.building.maxX)) / 2} y={Y(layout.building.maxZ) + 36} textAnchor="middle" fontSize={11} fill="#1c1917">{formatMm(layout.worldW)}</text>
-                    <line x1={X(layout.building.maxX) + 22} y1={Y(layout.building.minZ)} x2={X(layout.building.maxX) + 22} y2={Y(layout.building.maxZ)} stroke="#44403c" strokeWidth={0.8} />
-                    <line x1={X(layout.building.maxX) + 16} y1={Y(layout.building.minZ)} x2={X(layout.building.maxX) + 28} y2={Y(layout.building.minZ)} stroke="#44403c" strokeWidth={0.8} />
-                    <line x1={X(layout.building.maxX) + 16} y1={Y(layout.building.maxZ)} x2={X(layout.building.maxX) + 28} y2={Y(layout.building.maxZ)} stroke="#44403c" strokeWidth={0.8} />
-                    <text x={X(layout.building.maxX) + 34} y={(Y(layout.building.minZ) + Y(layout.building.maxZ)) / 2} textAnchor="middle" fontSize={11} fill="#1c1917" transform={`rotate(90 ${X(layout.building.maxX) + 34} ${(Y(layout.building.minZ) + Y(layout.building.maxZ)) / 2})`}>{formatMm(layout.worldH)}</text>
+                  <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
+                    {dims.rooms.map((dim, index) => <DimLine key={`room-${index}-${dim.label}`} dim={dim} offset={0} X={X} Y={Y} />)}
+                    {dims.chains.map((dim, index) => <DimLine key={`chain-${index}-${dim.label}`} dim={dim} offset={0.48} X={X} Y={Y} />)}
+                    {dims.overall.map((dim, index) => <DimLine key={`overall-${index}`} dim={dim} offset={0.82} X={X} Y={Y} />)}
                   </g>
                 )}
-                {liveEnd && (
+                {liveEnd && tool !== 'room' && (
                   <g style={{ pointerEvents: 'none' }}>
                     <line x1={X(draft.x)} y1={Y(draft.z)} x2={X(liveEnd.x)} y2={Y(liveEnd.z)} stroke="#0f766e" strokeWidth={1.4} strokeDasharray="5 4" />
                     <text x={(X(draft.x) + X(liveEnd.x)) / 2} y={(Y(draft.z) + Y(liveEnd.z)) / 2 - 8} textAnchor="middle" fontSize={12} fontWeight={700} fill="#0f766e">{formatMm(liveLength)}</text>
                   </g>
                 )}
+                {tool === 'room' && roomShape === 'rect' && draft && roomCursor && (
+                  <polygon
+                    points={[
+                      [draft.x, draft.z],
+                      [roomCursor.x, draft.z],
+                      [roomCursor.x, roomCursor.z],
+                      [draft.x, roomCursor.z],
+                    ].map(([x, z]) => `${X(x)},${Y(z)}`).join(' ')}
+                    fill="#0f766e22"
+                    stroke="#0f766e"
+                    strokeWidth={1.2}
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
+                {tool === 'room' && roomShape === 'poly' && poly.length > 0 && (
+                  <polyline
+                    points={[...poly, ...(roomCursor ? [roomCursor] : [])].map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
+                    fill="none"
+                    stroke="#0f766e"
+                    strokeWidth={1.2}
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
+                <g style={{ pointerEvents: 'none' }} data-testid="north-arrow">
+                  {(() => {
+                    const ax = sheet.x + sheet.w - 52
+                    const ay = sheet.y + 48
+                    const metres = layout.worldW >= 8 && layout.scale * 5 <= layout.title.w - 8 ? 5 : 2
+                    const bar = metres * layout.scale * k
+                    const bx = sheet.x + layout.title.x * k
+                    const by = sheet.y + layout.title.y * k - 36
+                    return (
+                      <g>
+                        <circle cx={ax} cy={ay} r={15} fill="#fff" stroke="#1c1917" strokeWidth={0.8} />
+                        <polygon points={`${ax},${ay - 10} ${ax + 4},${ay + 5} ${ax},${ay + 2} ${ax - 4},${ay + 5}`} fill="#1c1917" />
+                        <text x={ax} y={ay - 20} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1c1917">N</text>
+                        <g data-testid="scale-bar">
+                          <text x={bx} y={by - 5} fontSize={11} fill="#1c1917">0</text>
+                          <text x={bx + bar} y={by - 5} textAnchor="end" fontSize={11} fill="#1c1917">{metres} m</text>
+                          {Array.from({ length: metres }, (_, index) => (
+                            <rect key={index} x={bx + (bar / metres) * index} y={by} width={bar / metres} height={7} fill={index % 2 ? '#fbfaf7' : '#1c1917'} stroke="#1c1917" strokeWidth={0.6} />
+                          ))}
+                        </g>
+                      </g>
+                    )
+                  })()}
+                </g>
                 <g style={{ pointerEvents: 'none' }}>
                   {(() => {
                     const tx = sheet.x + (layout.title.x * k)
                     const ty = sheet.y + (layout.title.y * k)
                     const tw = layout.title.w * k
                     const th = layout.title.h * k
+                    const roofName = (ROOF_TYPES.find((item) => item.id === plan.roofType) || ROOF_TYPES[0]).name
                     const lines = [
                       plan.name || 'Omakotitalo',
-                      `Mittakaava 1:${Math.round(1000 / layout.scale)}`,
+                      `Mittakaava 1:${layout.ratio}`,
                       plan.paper === 'a4' ? 'A4 vaaka' : 'A3 vaaka',
-                      plan.roofType === 'flat' ? 'Tasakatto' : 'Harjakatto',
-                      `Huoneita ${(plan.rooms || []).length}`,
+                      roofName,
+                      `Huoneita ${visibleRooms(plan).length}`,
                       `Pinta-ala ${formatArea(totalArea)}`,
                     ]
+                    const header = Math.min(22, th * 0.28)
+                    const top = ty + header + 12
+                    const bottom = ty + th - 8
+                    const step = lines.length > 1 ? (bottom - top) / (lines.length - 1) : 0
                     return (
-                      <g>
+                      <g data-testid="title-block">
                         <rect x={tx} y={ty} width={tw} height={th} fill="#fff" stroke="#1c1917" strokeWidth={1} />
-                        <line x1={tx} y1={ty + th * 0.22} x2={tx + tw} y2={ty + th * 0.22} stroke="#1c1917" strokeWidth={0.7} />
-                        <text x={tx + 8} y={ty + th * 0.15} fontSize={13} fontWeight={750} fill="#1c1917">Pohjakuva</text>
+                        <line x1={tx} y1={ty + header} x2={tx + tw} y2={ty + header} stroke="#1c1917" strokeWidth={0.7} />
+                        <text x={tx + 8} y={ty + header * 0.68} fontSize={13} fontWeight={750} fill="#1c1917">{sheetTitle}</text>
                         {lines.map((line, index) => (
-                          <text key={line} x={tx + 8} y={ty + th * 0.36 + index * 11} fontSize={10} fill="#292524">{line}</text>
+                          <text key={`${index}-${line}`} x={tx + 8} y={top + step * index} fontSize={10} fill="#292524">{line}</text>
                         ))}
                       </g>
                     )
                   })()}
                 </g>
+                <ServiceDrawing
+                  plan={plan}
+                  X={X}
+                  Y={Y}
+                  sheet={sheet}
+                  legendBox={{
+                    x: sheet.x + layout.title.x * k,
+                    y: sheet.y + 70,
+                    w: layout.title.w * k,
+                  }}
+                  interactive={!svcTool}
+                  preview={svcTool === 'run' ? { points: svcPoints, cursor: cursor ? snapServicePoint(cursor, plan, { mode: 'free', system: svcSystem }) : null } : null}
+                  onContext={openServiceMenu}
+                />
+                {shownRooms.map((item) => {
+                  const label = roomLabelPoint(item, plan.fixtures, plan.openings, plan.walls)
+                  return (
+                    <g
+                      key={`label-${item.id}`}
+                      data-testid="room-label"
+                      data-name={item.name}
+                      onContextMenu={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        const world = toWorld(event)
+                        choose({ kind: 'room', id: item.id })
+                        setMenu({ x: event.clientX, y: event.clientY, kind: 'room', id: item.id, at: world })
+                      }}
+                      style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) return
+                        event.stopPropagation()
+                        setSelectedRoom(item.id)
+                        setSelectedFixture(null)
+                        dragLabel.current = item.id
+                        dragBefore.current = plan
+                      }}
+                    >
+                      <rect x={X(label.x) - 28} y={Y(label.z) - 16} width={56} height={34} fill="transparent" />
+                      <RoomName item={item} label={label} X={X} Y={Y} />
+                    </g>
+                  )
+                })}
                 {plan.walls.length === 0 && (
                   <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">Piirrä ulkoseinät tai avaa esimerkkitalo</text>
                 )}
@@ -720,37 +1115,14 @@ export default function FloorPlanApp() {
         </div>
 
         <aside data-testid="materials-panel" style={{ width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', marginBottom: 8 }}>PINNAT</div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Kattomuoto</div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-            <button type="button" style={{ ...sideBtn(plan.roofType !== 'flat'), width: 'auto', padding: '6px 10px' }} onClick={() => setPlan(setRoofType(plan, 'gable'))}>Harjakatto</button>
-            <button type="button" style={{ ...sideBtn(plan.roofType === 'flat'), width: 'auto', padding: '6px 10px' }} onClick={() => setPlan(setRoofType(plan, 'flat'))}>Tasakatto</button>
-          </div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Ulkoseinä</div>
-          <Swatches group="exterior" value={plan.exteriorId} onPick={(id) => commit(setSurface(plan, null, 'exterior', id))} />
-          <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{materialOf('exterior', plan.exteriorId).name}</div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Katto</div>
-          <Swatches group="roof" value={plan.roofId} onPick={(id) => commit(setSurface(plan, null, 'roof', id))} />
-          <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{materialOf('roof', plan.roofId).name}</div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Huone</div>
-          {room ? (
-            <div>
-              <input
-                aria-label="Huoneen nimi"
-                value={room.name}
-                onChange={(event) => setPlan(renameRoom(plan, room.id, event.target.value))}
-                style={{ width: '100%', marginBottom: 8, padding: '6px 8px', borderRadius: 8, border: '1px solid #d6d3d1', fontSize: 13 }}
-              />
-              <div style={{ fontSize: 12, color: '#57534e', marginBottom: 8 }}>{formatArea(room.area)}</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Lattia</div>
-              <Swatches group="floor" value={room.floorId} onPick={(id) => commit(setSurface(plan, room.id, 'floor', id))} />
-              <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 10px' }}>{materialOf('floor', room.floorId).name}</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Sisäseinä</div>
-              <Swatches group="interior" value={room.interiorId} onPick={(id) => commit(setSurface(plan, room.id, 'interior', id))} />
-              <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{materialOf('interior', room.interiorId).name}</div>
-            </div>
+          <button type="button" data-testid="open-house-panel" style={{ ...sideBtn(panel === 'house'), marginBottom: 10 }} onClick={() => setPanel(panel === 'house' ? 'object' : 'house')}>Talon asetukset</button>
+          {panel === 'house' ? (
+            <HouseSettings plan={plan} onApply={setPlan} />
           ) : (
-            <div style={{ fontSize: 12, color: '#78716c', marginBottom: 12 }}>Valitse huone pohjasta.</div>
+            <SelectionPanel plan={plan} selection={pick} onApply={setPlan} onCommit={commit} />
+          )}
+          {pick?.kind === 'room' && room && (
+            <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>
           )}
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>MATERIAALILUETTELO</div>
           {rows.length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>Ei pintoja vielä.</div>}
@@ -758,7 +1130,7 @@ export default function FloorPlanApp() {
             <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
               <span style={{ width: 14, height: 14, borderRadius: 3, background: row.color, border: '1px solid #a8a29e', flexShrink: 0 }} />
               <span style={{ flex: 1 }}>{row.groupLabel}: {row.name}</span>
-              <span style={{ color: '#78716c' }}>{row.count}</span>
+              <span style={{ color: '#78716c' }}>{row.area ? formatArea(row.area) : row.count}</span>
             </div>
           ))}
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '14px 0 8px' }}>SELITE</div>
@@ -778,29 +1150,22 @@ export default function FloorPlanApp() {
               ))}
             </div>
           ))}
+          {claddingAreas(plan).length > 0 && (
+            <div data-testid="facade-area-legend" style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>Julkisivu</div>
+              {claddingAreas(plan).map((item) => (
+                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
+                  <span style={{ width: 12, height: 12, background: item.color, border: '1px solid #d6d3d1' }} />
+                  <span style={{ flex: 1 }}>{item.group}: {item.name}</span>
+                  <span>{formatArea(item.area)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </aside>
       </div>
-      {menu && (
-        <div
-          style={{ position: 'fixed', left: menu.x, top: menu.y, zIndex: 50, background: '#1c212b', color: '#f5f5f4', borderRadius: 8, padding: 4, minWidth: 140, boxShadow: '0 12px 32px rgba(0,0,0,0.28)' }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          {[
-            ['Kierrä', () => commit(rotateFixture(plan, menu.id))],
-            ['Monista', () => commit(duplicateFixture(plan, menu.id))],
-            ['Poista', () => { commit(removeFixture(plan, menu.id)); setSelectedFixture(null) }],
-          ].map(([label, run]) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => { run(); setMenu(null) }}
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', background: 'transparent', color: '#f5f5f4', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none' }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
+      <FloorMenu menu={menu} plan={plan} onApply={setPlan} onCommit={commit} onNavigate={onMenuNavigate} />
+      <ServiceMenu menu={menu} plan={plan} onApply={setPlan} onClose={() => setMenu(null)} />
     </div>
   )
 }
