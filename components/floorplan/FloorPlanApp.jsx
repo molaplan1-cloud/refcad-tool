@@ -396,6 +396,7 @@ export default function FloorPlanApp() {
   const hostRef = useRef(null)
   const svgRef = useRef(null)
   const panRef = useRef(null)
+  const dragGrab = useRef(null)
   const spaceRef = useRef(false)
   const suppressMenu = useRef(false)
   const altRef = useRef(false)
@@ -912,14 +913,20 @@ export default function FloorPlanApp() {
   }
 
   const onFixtureDrag3d = (id, spot, phase) => {
-    if (!dragBefore.current) dragBefore.current = plan
+    const fixture = (plan.fixtures || []).find((item) => item.id === id)
+    if (!dragGrab.current && fixture) {
+      dragBefore.current = plan
+      dragGrab.current = { id, ox: fixture.x - spot.x, oz: fixture.z - spot.z }
+    }
+    const grab = dragGrab.current?.id === id ? dragGrab.current : { ox: 0, oz: 0 }
     const radius = Math.max(12 / Math.max(spot.ppm, 0.001), 0.45)
-    setPlan((current) => moveFixture(current, id, spot.x, spot.z, radius))
+    setPlan((current) => moveFixture(current, id, spot.x + grab.ox, spot.z + grab.oz, radius))
     setSelectedFixture(id)
     setPick({ kind: 'fixture', id })
     if (phase === 'end') {
-      history.current = [...history.current, dragBefore.current].slice(-40)
+      if (dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
       dragBefore.current = null
+      dragGrab.current = null
     }
   }
 

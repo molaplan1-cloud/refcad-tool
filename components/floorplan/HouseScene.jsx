@@ -904,6 +904,13 @@ export default function HouseScene({
       {drawMode && cursor && <FloorCursor point={cursor} ppm={cursorPpm} kind={snapKind} />}
       {draft && liveEnd && (
         <group>
+          <mesh
+            position={[(draft.x + liveEnd.x) / 2, 0.07, (draft.z + liveEnd.z) / 2]}
+            rotation={[0, Math.atan2(liveEnd.x - draft.x, liveEnd.z - draft.z), 0]}
+          >
+            <boxGeometry args={[0.08, 0.05, Math.max(0.05, Math.hypot(liveEnd.x - draft.x, liveEnd.z - draft.z))]} />
+            <meshBasicMaterial color="#0f766e" depthTest={false} />
+          </mesh>
           <Line points={[[draft.x, 0.08, draft.z], [liveEnd.x, 0.08, liveEnd.z]]} color="#0f766e" lineWidth={2} />
           <Html position={[(draft.x + liveEnd.x) / 2, 0.35, (draft.z + liveEnd.z) / 2]} center zIndexRange={[30, 0]} style={{ pointerEvents: 'none' }}>
             <div data-testid="wall-length-3d" style={{ background: '#042f2e', color: '#ccfbf1', fontWeight: 700, fontSize: 13, padding: '3px 7px', borderRadius: 6, whiteSpace: 'nowrap' }}>{liveLabel}</div>
