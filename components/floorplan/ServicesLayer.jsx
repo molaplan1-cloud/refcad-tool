@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { FUSE_SERIES } from '@/lib/electric'
+import { HEAT_SOURCES, pexSize } from '@/lib/hydronic'
 import {
   CIRCUITS,
   PLACEABLES,
@@ -63,6 +64,10 @@ export function ServiceBar({
   onRewire,
   onSchedule,
   onDiagram,
+  onRewireWater,
+  onRewireHeat,
+  onHeatTable,
+  onHeatSchematic,
   onFloorHeating,
   onFinish,
   onPdf,
@@ -114,6 +119,16 @@ export function ServiceBar({
           <button type="button" data-testid="rewire-electric" style={barBtn(false)} onClick={onRewire}>Johdota</button>
           <button type="button" data-testid="open-schedule" style={barBtn(false)} onClick={onSchedule}>Ryhmäluettelo</button>
           <button type="button" data-testid="open-diagram" style={barBtn(false)} onClick={onDiagram}>Pääkaavio</button>
+        </>
+      )}
+      {system === 'water' && (
+        <button type="button" data-testid="rewire-water" style={barBtn(false)} onClick={onRewireWater}>Johdota käyttövesi</button>
+      )}
+      {system === 'heat' && (
+        <>
+          <button type="button" data-testid="rewire-heat" style={barBtn(false)} onClick={onRewireHeat}>Johdota lämmitys</button>
+          <button type="button" data-testid="open-heat-table" style={barBtn(false)} onClick={onHeatTable}>Piiritaulukko</button>
+          <button type="button" data-testid="open-heat-schematic" style={barBtn(false)} onClick={onHeatSchematic}>Periaatekaavio</button>
         </>
       )}
       {SERVICE_SYSTEMS.map((item) => (
@@ -316,12 +331,62 @@ function NodeSymbol({ node }) {
       </g>
     )
   }
+  if (node.kind === 'water-point') {
+    const both = node.supply !== 'cold'
+    return (
+      <g>
+        <circle r="6" fill="#fff" stroke={both ? '#dc2626' : '#1d4ed8'} strokeWidth="1.4" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1c1917">{both ? 'KL' : 'KV'}</text>
+      </g>
+    )
+  }
+  if (node.kind === 'dhw-tank' || node.kind === 'buffer-tank') {
+    return (
+      <g>
+        <rect x={-11} y={-8} width={22} height={16} rx="3" fill="#fff" stroke="#dc2626" strokeWidth="1.3" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#dc2626">{node.kind === 'buffer-tank' ? 'PV' : 'LV'}</text>
+      </g>
+    )
+  }
+  if (node.kind === 'kv-manifold' || node.kind === 'lv-manifold' || node.kind === 'floor-manifold') {
+    const label = node.kind === 'floor-manifold' ? 'LJT' : node.kind === 'lv-manifold' ? 'LV' : 'KV'
+    return (
+      <g>
+        <rect x={-12} y={-5} width={24} height={10} fill="#fff" stroke="#1d4ed8" strokeWidth="1.2" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1d4ed8">{label}</text>
+      </g>
+    )
+  }
+  if (node.kind === 'heat-source' || node.kind === 'air-air') {
+    return (
+      <g>
+        <rect x={-12} y={-8} width={24} height={16} fill="#fff7ed" stroke="#c2410c" strokeWidth="1.3" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#c2410c">{node.kind === 'air-air' ? 'ILP' : 'LL'}</text>
+      </g>
+    )
+  }
+  if (node.kind === 'heater-rad') {
+    return (
+      <g>
+        <rect x={-9} y={-6} width={18} height={12} fill="#fff" stroke="#dc2626" strokeWidth="1.2" />
+        <path d="M-5,-6 V6 M-1,-6 V6 M3,-6 V6" stroke="#dc2626" strokeWidth="0.7" />
+      </g>
+    )
+  }
+  if (node.kind === 'thermostat' || node.kind === 'actuator') {
+    return (
+      <g>
+        <rect x={-6} y={-6} width={12} height={12} fill="#fff" stroke="#0f766e" strokeWidth="1.1" />
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0f766e">{node.kind === 'thermostat' ? 'T' : 'A'}</text>
+      </g>
+    )
+  }
   return <circle r="4" fill={color} />
 }
 
 function cableMark(run) {
-  if (run.system !== 'electric') return ''
-  if (run.showMark || run.locked) return run.marking || ''
+  if (!run.marking || !run.showMark) return ''
+  if (run.system === 'electric' || run.system === 'water' || run.system === 'heat') return run.marking
   return ''
 }
 
@@ -361,7 +426,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const services = ensureServices(plan)
   const visibleRuns = services.runs.filter((run) => layerVisible(plan, run.system))
   const visibleNodes = services.nodes.filter((node) => layerVisible(plan, node.system))
-  const order = { drain: 0, water: 1, electric: 2, iv: 3 }
+  const order = { drain: 0, water: 1, heat: 2, electric: 3, iv: 4 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
   const drawn = runs.map((run) => ({ run, points: shiftPoints(run.points, run.system, multi) }))
@@ -696,6 +761,54 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
                 {CIRCUITS.map((item) => <option key={item.id} value={item.id}>{item.id} {item.name}</option>)}
               </select>
             </label>
+          )}
+          {node.kind === 'water-point' && (
+            <div data-testid="water-fields">
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                Vesi
+                <select data-testid="water-supply" style={fieldStyle} value={node.supply === 'cold' ? 'cold' : 'both'} onChange={(event) => patchNode({ supply: event.target.value, flowManual: false })}>
+                  <option value="both">KV + LV</option>
+                  <option value="cold">Vain KV</option>
+                </select>
+              </label>
+              <NumberField testid="water-flow" label="Normivirtaama KV (l/s)" value={node.flowCold ?? 0} onCommit={(flowCold) => patchNode({ flowManual: true, flowCold })} />
+              {node.supply !== 'cold' && (
+                <NumberField testid="water-flow-hot" label="Normivirtaama LV (l/s)" value={node.flowHot ?? 0} onCommit={(flowHot) => patchNode({ flowManual: true, flowHot })} />
+              )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                <input data-testid="water-circ" type="checkbox" checked={Boolean(node.circulation)} onChange={(event) => patchNode({ circulation: event.target.checked })} />
+                Lämpimän veden kierto
+              </label>
+              <div data-testid="water-size" style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>
+                {`Haara PEX ${pexSize(node.supply === 'cold' ? node.flowCold : Math.max(node.flowCold || 0, node.flowHot || 0))}`}
+                {node.roomName ? ` · ${node.roomName}` : ''}
+              </div>
+            </div>
+          )}
+          {(node.kind === 'dhw-tank' || node.kind === 'buffer-tank') && (
+            <div data-testid="tank-fields">
+              <NumberField testid="tank-litres" label="Tilavuus (l)" step="10" value={node.litres || 300} onCommit={(litres) => patchNode({ litres })} />
+              {node.kind === 'dhw-tank' && (
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+                  Lämmitys
+                  <select data-testid="tank-mode" style={fieldStyle} value={node.tankMode || 'electric'} onChange={(event) => patchNode({ tankMode: event.target.value })}>
+                    <option value="electric">Sähkövastus</option>
+                    <option value="source">Lämmönlähteestä</option>
+                  </select>
+                </label>
+              )}
+            </div>
+          )}
+          {node.kind === 'heat-source' && (
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+              Lämmönlähde
+              <select data-testid="source-kind" style={fieldStyle} value={node.source || 'district'} onChange={(event) => patchNode({ source: event.target.value, name: HEAT_SOURCES.find((item) => item.id === event.target.value)?.name })}>
+                {HEAT_SOURCES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+          )}
+          {node.kind === 'heater-rad' && (
+            <NumberField testid="radiator-power" label="Teho (W)" step="10" value={node.power || 0} onCommit={(power) => patchNode({ power })} />
           )}
           {node.size && (
             <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
