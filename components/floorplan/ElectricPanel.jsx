@@ -113,10 +113,34 @@ export function ScheduleTable({ report }) {
             </tr>
           )}
           {circuits.map((circuit) => (
-            <tr key={circuit.id} data-testid={`circuit-row-${circuit.id}`} style={{ background: circuit.warning ? '#fef2f2' : 'transparent' }}>
+            <tr
+              key={circuit.id}
+              data-testid={`circuit-row-${circuit.id}`}
+              style={{ background: circuit.warning ? '#fef2f2' : 'transparent' }}
+              onDragOver={(event) => { if (onAssign) event.preventDefault() }}
+              onDrop={(event) => {
+                const deviceId = event.dataTransfer.getData('application/x-refcad-device')
+                if (deviceId && onAssign) onAssign(deviceId, circuit.id)
+              }}
+            >
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4', fontWeight: 700 }}>R{circuit.id}</td>
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{circuit.description}</td>
-              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{(circuit.devices || []).join(', ')}</td>
+              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>
+                {(circuit.members || []).length ? circuit.members.map((member) => (
+                  <span
+                    key={member.id}
+                    draggable
+                    data-testid={`circuit-device-${member.id}`}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('application/x-refcad-device', member.id)
+                      event.dataTransfer.effectAllowed = 'move'
+                    }}
+                    style={{ display: 'inline-block', margin: '0 4px 4px 0', padding: '2px 6px', border: '1px solid #d6d3d1', borderRadius: 6, cursor: 'grab', background: '#fff' }}
+                  >
+                    {member.room ? `${member.room}: ` : ''}{member.name}
+                  </span>
+                )) : (circuit.devices || []).join(', ')}
+              </td>
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{circuit.voltage ? `${circuit.voltage} V` : '—'}</td>
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{circuit.phase}</td>
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{fmtPower(circuit.power)}</td>
@@ -138,7 +162,7 @@ export function ScheduleTable({ report }) {
   )
 }
 
-export function ElectricPanel({ plan, mode, onMode, onClose, onPrint }) {
+export function ElectricPanel({ plan, mode, onMode, onClose, onPrint, onAssign }) {
   const report = electricSummary(plan)
   return (
     <div

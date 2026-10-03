@@ -68,6 +68,7 @@ import {
   deleteServiceRun,
   autoRouteAll,
   applyHeating,
+  assignDeviceCircuit,
   refreshHeat,
   buildElectricPdf,
   buildHydronicPdf,
@@ -1808,6 +1809,7 @@ export default function FloorPlanApp() {
               onMode={setElectricView}
               onClose={() => setElectricView(null)}
               onPrint={() => buildElectricPdf(plan).save(`${(plan.name || 'sahko').replace(/\s+/g, '-')}-sahko.pdf`)}
+              onAssign={(deviceId, circuitId) => commit(assignDeviceCircuit(plan, deviceId, circuitId))}
             />
           )}
           {heatView && (
