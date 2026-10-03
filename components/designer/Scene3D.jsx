@@ -9,10 +9,17 @@ import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
 import { condenserFanSpec } from '@/lib/fanGuard'
 import { pipeSupports } from '@/lib/pipeTopology'
 import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
+import { dimensionCentroid, roomDimensionSpec, technicalTagPosition } from '@/lib/sceneDims'
 
 const SceneTheme = createContext(null)
 
 const PALETTES = {
+  technical: {
+    id: 'technical', flat: true, bg: '#f3f5f7', gridCell: '#e7ebf0', gridSection: '#d5dbe3',
+    wall: '#b7bec6', wallOpacity: 0.12, edge: '#1a1d21', floor: '#b7bec6', floorOpacity: 0.12,
+    ceilingOpacity: 0.1, equip: '#f4f7fb', hintBg: 'rgba(255,255,255,0.94)', hintFg: '#1f2937', hintBorder: '#cfd4dc',
+    tick: '#1a1d21',
+  },
   dark: {
     id: 'dark', bg: '#1a1c1f', gridCell: '#2c3138', gridSection: '#3c4450',
     wall: '#d5dde6', wallOpacity: 0.22, edge: '#f4f7fb', floor: '#c5c8cc', floorOpacity: 1,
@@ -26,6 +33,12 @@ const PALETTES = {
     tick: '#64748b',
   },
 }
+
+const THEME_ORDER = [
+  ['technical', 'Tekninen'],
+  ['dark', 'Tumma'],
+  ['light', 'Vaalea'],
+]
 
 function usePalette() {
   return useContext(SceneTheme) || PALETTES.dark
@@ -192,7 +205,9 @@ function DoorNumber({ room, number, h }) {
   if (!inside) return null
   return (
     <Html position={[0, h * 0.58, 0.1]} center sprite zIndexRange={[12, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
-      <div style={{ color: palette.id === 'dark' ? '#f8fafc' : '#1c1917', fontWeight: 700, fontSize: 16, textShadow: '0 1px 2px rgba(0,0,0,0.45)' }}>{number}</div>
+      <div style={palette.flat
+        ? { color: '#1a1d21', fontWeight: 700, fontSize: 15, fontFamily: '"Liberation Sans", Arial, sans-serif' }
+        : { color: palette.id === 'dark' ? '#f8fafc' : '#1c1917', fontWeight: 700, fontSize: 16, textShadow: '0 1px 2px rgba(0,0,0,0.45)' }}>{number}</div>
     </Html>
   )
 }
@@ -820,7 +835,8 @@ function BoxEquipment({ room, eq, onSelect, onContext, color }) {
   )
 }
 
-function tagPosition(room) {
+function tagPosition(room, technical, centroid) {
+  if (technical) return technicalTagPosition(room, centroid)
   const pts = outlineOf(room)
   let best = pts[0]
   pts.forEach((point) => {
@@ -868,6 +884,24 @@ function FloorTicks({ room, color }) {
   )
 }
 
+function PanelJoints({ room, color }) {
+  const geom = useMemo(() => {
+    const positions = []
+    seamList(room).forEach((seam) => {
+      positions.push(seam.x, 0.04, seam.z, seam.x, (room.height || 3) - 0.04, seam.z)
+    })
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    return geometry
+  }, [room])
+  if (!geom.getAttribute('position')?.count) return null
+  return (
+    <lineSegments geometry={geom} userData={{ role: 'skip' }}>
+      <lineBasicMaterial color={color} />
+    </lineSegments>
+  )
+}
+
 function PerimeterTrim({ room, y, size, color, inset }) {
   const bars = useMemo(() => {
     const pts = insetOrthogonal(outlineOf(room), Math.max(0.04, room.wallThickness || 0.1) + (inset || 0)) || []
@@ -888,7 +922,7 @@ function PerimeterTrim({ room, y, size, color, inset }) {
   ))
 }
 
-function RoomMesh({ room, selected, onSelect, onContext }) {
+function RoomMesh({ room, selected, onSelect, onContext, centroid }) {
   const palette = usePalette()
   const shell = useMemo(() => shellGeometry(room), [room])
   const floor = useMemo(() => {
@@ -903,6 +937,7 @@ function RoomMesh({ room, selected, onSelect, onContext }) {
     <group>
       <mesh
         geometry={shell}
+        userData={{ role: 'panel' }}
         castShadow
         receiveShadow
         onClick={(event) => {
@@ -912,30 +947,38 @@ function RoomMesh({ room, selected, onSelect, onContext }) {
         onContextMenu={(event) => openMenu(event, onContext, room.id, 'room')}
       >
         <meshStandardMaterial color={palette.wall} roughness={0.78} metalness={0.02} side={THREE.FrontSide} />
-        <Edges threshold={12} color={selected ? '#ffffff' : palette.edge} />
+        {palette.flat ? null : <Edges threshold={12} color={selected ? '#ffffff' : palette.edge} />}
       </mesh>
-      <mesh geometry={floor} position={[0, 0.02, 0]} receiveShadow>
+      <mesh geometry={floor} position={[0, 0.02, 0]} receiveShadow userData={{ role: 'panel' }}>
         <meshStandardMaterial color={palette.floor} roughness={0.94} metalness={0.02} />
       </mesh>
-      <PerimeterTrim room={room} y={0.055} size={0.018} color={isRefrigerated(room.type) ? (room.color || '#64748b') : '#94a3b8'} inset={0.015} />
-      <PerimeterTrim room={room} y={0.09} size={0.045} color={palette.id === 'dark' ? '#8b95a1' : '#cbd5e1'} inset={0.0} />
-      <PerimeterTrim room={room} y={room.height - 0.06} size={0.04} color={palette.id === 'dark' ? '#8b95a1' : '#cbd5e1'} inset={0.0} />
-      {seamList(room).map((seam, index) => (
-        <mesh key={`seam-${index}`} position={[seam.x, room.height / 2, seam.z]} rotation={[0, seam.yaw, 0]}>
-          <boxGeometry args={[0.012, room.height * 0.96, 0.01]} />
-          <meshStandardMaterial color={palette.id === 'dark' ? '#d5dde6' : '#64748b'} roughness={0.5} />
-        </mesh>
-      ))}
-      <mesh geometry={ceiling} position={[0, room.height - 0.04, 0]}>
-        <meshStandardMaterial color={palette.wall} transparent opacity={palette.ceilingOpacity} roughness={0.08} depthWrite={false} side={THREE.DoubleSide} />
-        <Edges threshold={20} color={palette.edge} />
+      {palette.flat ? <PanelJoints room={room} color={palette.edge} /> : (
+        <>
+          <PerimeterTrim room={room} y={0.055} size={0.018} color={isRefrigerated(room.type) ? (room.color || '#64748b') : '#94a3b8'} inset={0.015} />
+          <PerimeterTrim room={room} y={0.09} size={0.045} color={palette.id === 'dark' ? '#8b95a1' : '#cbd5e1'} inset={0.0} />
+          <PerimeterTrim room={room} y={room.height - 0.06} size={0.04} color={palette.id === 'dark' ? '#8b95a1' : '#cbd5e1'} inset={0.0} />
+          {seamList(room).map((seam, index) => (
+            <mesh key={`seam-${index}`} position={[seam.x, room.height / 2, seam.z]} rotation={[0, seam.yaw, 0]}>
+              <boxGeometry args={[0.012, room.height * 0.96, 0.01]} />
+              <meshStandardMaterial color={palette.id === 'dark' ? '#d5dde6' : '#64748b'} roughness={0.5} />
+            </mesh>
+          ))}
+          <FloorTicks room={room} color={palette.tick} />
+        </>
+      )}
+      <mesh geometry={ceiling} position={[0, room.height - 0.04, 0]} userData={{ role: 'panel' }}>
+        <meshStandardMaterial color={palette.wall} transparent opacity={palette.flat ? palette.wallOpacity : palette.ceilingOpacity} roughness={0.08} depthWrite={false} side={THREE.DoubleSide} />
+        {palette.flat ? null : <Edges threshold={20} color={palette.edge} />}
       </mesh>
-      <FloorTicks room={room} color={palette.tick} />
-      <Html position={tagPosition(room)} center zIndexRange={[20, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'stretch', background: '#1b1e22', color: '#f4f6f8', borderRadius: 8, overflow: 'hidden', fontSize: 12, fontWeight: 650, boxShadow: '0 6px 16px rgba(0,0,0,0.28)' }}>
-          <span style={{ width: 4, background: '#3b82f6' }} />
-          <span style={{ padding: '4px 10px' }}>{room.name || room.label || 'Huone'}</span>
-        </div>
+      <Html position={tagPosition(room, palette.flat, centroid)} center zIndexRange={[20, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
+        {palette.flat ? (
+          <div style={{ background: '#ffffff', color: '#1a1d21', border: '1px solid #1a1d21', fontSize: 12, fontWeight: 650, fontFamily: '"Liberation Sans", Arial, sans-serif', letterSpacing: '0.01em', padding: '2px 7px', lineHeight: 1.3 }}>{room.name || room.label || 'Huone'}</div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'stretch', background: '#1b1e22', color: '#f4f6f8', borderRadius: 8, overflow: 'hidden', fontSize: 12, fontWeight: 650, boxShadow: '0 6px 16px rgba(0,0,0,0.28)' }}>
+            <span style={{ width: 4, background: '#3b82f6' }} />
+            <span style={{ padding: '4px 10px' }}>{room.name || room.label || 'Huone'}</span>
+          </div>
+        )}
       </Html>
       {(room.equipment || []).map((eq) => {
         if (eq.category === 'door') return <DoorMesh key={eq.id} room={room} eq={eq} onSelect={onSelect} onContext={onContext} />
@@ -1138,7 +1181,7 @@ function SmoothTube({ encoded, radius, color, metalness = 0.25, roughness = 0.4 
   useEffect(() => () => geom?.dispose(), [geom])
   if (!geom) return null
   return (
-    <mesh geometry={geom} castShadow>
+    <mesh geometry={geom} castShadow userData={{ role: 'pipe' }}>
       <meshStandardMaterial color={color} metalness={metalness} roughness={roughness} />
     </mesh>
   )
@@ -1351,6 +1394,173 @@ function PipeRuns({ rooms, pipes }) {
   )
 }
 
+function roleOf(obj) {
+  let node = obj
+  while (node) {
+    if (node.userData?.role) return node.userData.role
+    node = node.parent
+  }
+  return 'equip'
+}
+
+function technicalMaterial(role, source, palette) {
+  if (role === 'pipe') {
+    const color = source?.color ? source.color.clone() : new THREE.Color('#64748b')
+    return new THREE.MeshLambertMaterial({ color, flatShading: true })
+  }
+  if (role === 'panel') {
+    return new THREE.MeshLambertMaterial({
+      color: palette.wall,
+      flatShading: true,
+      transparent: true,
+      opacity: palette.wallOpacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+  }
+  return new THREE.MeshLambertMaterial({ color: palette.equip, flatShading: true })
+}
+
+function StylePass() {
+  const palette = usePalette()
+  const scene = useThree((state) => state.scene)
+  const mounted = useRef(new Map())
+  const edgeMat = useRef(null)
+  useEffect(() => () => {
+    mounted.current.forEach((rec) => {
+      rec.lines.removeFromParent()
+      rec.lines.geometry.dispose()
+      rec.mat.dispose()
+    })
+    mounted.current.clear()
+    edgeMat.current?.dispose()
+    edgeMat.current = null
+  }, [])
+  useEffect(() => {
+    if (!palette.flat) {
+      mounted.current.forEach((rec) => {
+        rec.lines.removeFromParent()
+        rec.lines.geometry.dispose()
+        rec.mat.dispose()
+      })
+      mounted.current.clear()
+    }
+    if (edgeMat.current) edgeMat.current.color.set(palette.edge)
+  }, [palette.flat, palette.edge])
+  useFrame(() => {
+    if (!palette.flat) return
+    if (!edgeMat.current) edgeMat.current = new THREE.LineBasicMaterial({ color: palette.edge })
+    const seen = new Set()
+    scene.traverse((obj) => {
+      if (!obj.isMesh || obj.isInstancedMesh) return
+      const role = roleOf(obj)
+      if (role === 'skip') return
+      seen.add(obj)
+      let rec = mounted.current.get(obj)
+      if (!rec || rec.role !== role) {
+        if (rec) {
+          rec.lines.removeFromParent()
+          rec.lines.geometry.dispose()
+          rec.mat.dispose()
+        }
+        rec = { role, mat: technicalMaterial(role, obj.material, palette), lines: null, geom: null }
+        mounted.current.set(obj, rec)
+      }
+      if (obj.material !== rec.mat) {
+        if (role === 'pipe' && obj.material?.color) rec.mat.color.copy(obj.material.color)
+        obj.material = rec.mat
+      }
+      obj.castShadow = false
+      obj.receiveShadow = false
+      if (role === 'panel') obj.renderOrder = 2
+      const threshold = role === 'pipe' ? 26 : role === 'panel' ? 18 : 24
+      if (!rec.lines || rec.geom !== obj.geometry || rec.threshold !== threshold) {
+        if (rec.lines) {
+          rec.lines.removeFromParent()
+          rec.lines.geometry.dispose()
+        }
+        const edges = new THREE.EdgesGeometry(obj.geometry, threshold)
+        const lines = new THREE.LineSegments(edges, edgeMat.current)
+        lines.userData.role = 'skip'
+        lines.matrixAutoUpdate = false
+        lines.matrixWorldAutoUpdate = false
+        lines.renderOrder = 4
+        lines.raycast = () => {}
+        scene.add(lines)
+        rec.lines = lines
+        rec.geom = obj.geometry
+        rec.threshold = threshold
+      }
+      obj.updateWorldMatrix(true, false)
+      rec.lines.matrix.copy(obj.matrixWorld)
+      rec.lines.matrixWorld.copy(obj.matrixWorld)
+      rec.lines.visible = obj.visible
+    })
+    mounted.current.forEach((rec, obj) => {
+      if (seen.has(obj)) return
+      rec.lines.removeFromParent()
+      rec.lines.geometry.dispose()
+      rec.mat.dispose()
+      mounted.current.delete(obj)
+    })
+  })
+  return null
+}
+
+function cadTagStyle(color) {
+  return {
+    background: '#ffffff',
+    color,
+    border: `1px solid ${color}`,
+    fontSize: 11,
+    fontWeight: 650,
+    fontFamily: '"Liberation Sans", Arial, sans-serif',
+    padding: '1px 5px',
+    lineHeight: 1.25,
+    letterSpacing: '0.02em',
+    whiteSpace: 'nowrap',
+  }
+}
+
+function RoomDimensions({ rooms, color }) {
+  const specs = useMemo(() => {
+    const centroid = dimensionCentroid(rooms)
+    const list = (rooms || []).filter((room) => room && room.type !== 'yard')
+    if (!list.length) return []
+    return list.map((room) => roomDimensionSpec(room, centroid))
+  }, [rooms])
+  const geom = useMemo(() => {
+    const positions = specs.flatMap((spec) => spec.segments)
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    return geometry
+  }, [specs])
+  useEffect(() => () => geom.dispose(), [geom])
+  if (!specs.length) return null
+  return (
+    <group userData={{ role: 'skip' }}>
+      <lineSegments geometry={geom}>
+        <lineBasicMaterial color={color} />
+      </lineSegments>
+      {specs.flatMap((spec) => spec.labels.map((label) => (
+        <Html key={label.key} position={[label.x, label.y, label.z]} center sprite zIndexRange={[18, 0]} wrapperClass="refcad-float" style={{ pointerEvents: 'none' }}>
+          <span style={cadTagStyle(color)}>{label.text}</span>
+        </Html>
+      )))}
+    </group>
+  )
+}
+
+function ToneMap({ theme }) {
+  const gl = useThree((state) => state.gl)
+  useEffect(() => {
+    gl.toneMapping = theme === 'technical' ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping
+    gl.toneMappingExposure = theme === 'dark' ? 1.08 : 1
+    gl.shadowMap.enabled = theme !== 'technical'
+  }, [gl, theme])
+  return null
+}
+
 function ViewBridge({ rigRef, onHeading }) {
   const { camera, controls } = useThree()
   const last = useRef(999)
@@ -1393,10 +1603,12 @@ function compassMark(label, heading, extra, color) {
 }
 
 export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onContext, unitSystem }) {
-  const [theme, setTheme] = useState('dark')
+  const [theme, setTheme] = useState('technical')
+  const [dims, setDims] = useState(true)
   const [heading, setHeading] = useState(0)
   const rigRef = useRef(null)
-  const palette = PALETTES[theme]
+  const palette = PALETTES[theme] || PALETTES.technical
+  const technical = palette.flat === true
   const roundBtn = {
     width: 28, height: 28, borderRadius: 14, border: `1px solid ${palette.hintBorder}`,
     background: palette.hintBg, color: palette.hintFg, cursor: 'pointer',
@@ -1407,16 +1619,18 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
         <Canvas
           shadows
           camera={{ position: [18, 14, 18], fov: 38, near: 0.08, far: 500 }}
-          gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: theme === 'dark' ? 1.08 : 1 }}
+          gl={{ antialias: true, toneMapping: technical ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping, toneMappingExposure: theme === 'dark' ? 1.08 : 1 }}
           onPointerMissed={() => onSelect(null)}
         >
+          <ToneMap theme={theme} />
+          <StylePass />
           <color attach="background" args={[palette.bg]} />
-          <hemisphereLight args={[theme === 'dark' ? '#d5dee8' : '#ffffff', theme === 'dark' ? '#2a3038' : '#94a3b8', 0.55]} />
-          <ambientLight intensity={theme === 'dark' ? 0.28 : 0.42} />
+          <hemisphereLight args={[technical ? '#f7f8fa' : theme === 'dark' ? '#d5dee8' : '#ffffff', technical ? '#e6e9ee' : theme === 'dark' ? '#2a3038' : '#94a3b8', technical ? 0.3 : 0.55]} />
+          <ambientLight intensity={technical ? 0.86 : theme === 'dark' ? 0.28 : 0.42} />
           <directionalLight
             position={[12, 18, 8]}
-            intensity={theme === 'dark' ? 1.35 : 1.15}
-            castShadow
+            intensity={technical ? 0.18 : theme === 'dark' ? 1.35 : 1.15}
+            castShadow={!technical}
             shadow-mapSize-width={2048}
             shadow-mapSize-height={2048}
             shadow-bias={-0.0004}
@@ -1427,38 +1641,42 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
             shadow-camera-top={16}
             shadow-camera-bottom={-16}
           />
-          <directionalLight position={[-8, 7, -12]} intensity={0.28} />
-          <ContactShadows position={[0, 0.012, 0]} opacity={theme === 'dark' ? 0.45 : 0.28} scale={28} blur={2.2} far={8} />
-          <Grid
-            args={[1, 1]}
-            position={[0, 0.004, 0]}
-            cellSize={1}
-            cellThickness={0.6}
-            cellColor={palette.gridCell}
-            sectionSize={5}
-            sectionThickness={1.15}
-            sectionColor={palette.gridSection}
-            fadeDistance={55}
-            fadeStrength={1.5}
-            infiniteGrid
-            side={THREE.DoubleSide}
-          />
+          {technical ? null : <directionalLight position={[-8, 7, -12]} intensity={0.28} />}
+          {technical ? null : <ContactShadows position={[0, 0.012, 0]} opacity={theme === 'dark' ? 0.45 : 0.28} scale={28} blur={2.2} far={8} />}
+          <group userData={{ role: 'skip' }}>
+            <Grid
+              args={[1, 1]}
+              position={[0, 0.004, 0]}
+              cellSize={1}
+              cellThickness={technical ? 0.35 : 0.6}
+              cellColor={palette.gridCell}
+              sectionSize={5}
+              sectionThickness={technical ? 0.55 : 1.15}
+              sectionColor={palette.gridSection}
+              fadeDistance={technical ? 42 : 55}
+              fadeStrength={1.5}
+              infiniteGrid
+              side={THREE.DoubleSide}
+            />
+          </group>
           {rooms.map((room) => (
             room.type === 'yard' ? (
               <mesh
                 key={room.id}
+                userData={{ role: 'panel' }}
                 position={[room.x, 0.03, room.z]}
                 onClick={(event) => { event.stopPropagation(); onSelect(room.id) }}
                 onContextMenu={(event) => openMenu(event, onContext, room.id, 'room')}
               >
                 <boxGeometry args={[room.width, 0.04, room.depth]} />
-                <meshStandardMaterial color={theme === 'dark' ? '#2a3328' : '#d9e7c4'} transparent opacity={0.45} />
+                <meshStandardMaterial color={technical ? palette.wall : theme === 'dark' ? '#2a3328' : '#d9e7c4'} transparent opacity={technical ? palette.wallOpacity : 0.45} />
               </mesh>
             ) : (
-              <RoomMesh key={room.id} room={room} selected={room.id === selectedId} onSelect={onSelect} onContext={onContext} />
+              <RoomMesh key={room.id} room={room} centroid={dimensionCentroid(rooms)} selected={room.id === selectedId} onSelect={onSelect} onContext={onContext} />
             )
           ))}
           <PipeRuns rooms={rooms} pipes={pipes} />
+          {dims ? <RoomDimensions rooms={rooms} color={palette.edge} /> : null}
           <OrbitControls
             makeDefault
             enableDamping
@@ -1480,14 +1698,37 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
           </div>
           <button type="button" data-testid="scene-yaw-right" aria-label="Kierrä oikealle" style={roundBtn} onClick={() => rigRef.current?.yaw(-Math.PI / 6)}>↻</button>
         </div>
-        <button
-          type="button"
-          data-testid="scene-theme"
-          onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
-          style={{ position: 'absolute', right: 12, bottom: 10, zIndex: 5, ...roundBtn, width: 'auto', padding: '0 10px', borderRadius: 8 }}
-        >
-          {theme === 'dark' ? 'Vaalea' : 'Tumma'}
-        </button>
+        <div style={{ position: 'absolute', right: 12, bottom: 10, zIndex: 5, display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            data-testid="scene-dims"
+            aria-pressed={dims}
+            onClick={() => setDims((current) => !current)}
+            style={{ ...roundBtn, width: 'auto', padding: '0 10px', borderRadius: 8, fontWeight: dims ? 700 : 500 }}
+          >
+            Mitat
+          </button>
+          {THEME_ORDER.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              data-testid={id === 'technical' ? 'scene-theme' : `scene-theme-${id}`}
+              aria-pressed={theme === id}
+              onClick={() => setTheme(id)}
+              style={{
+                ...roundBtn,
+                width: 'auto',
+                padding: '0 10px',
+                borderRadius: 8,
+                fontWeight: theme === id ? 700 : 500,
+                background: theme === id ? '#1a1d21' : palette.hintBg,
+                color: theme === id ? '#f8fafc' : palette.hintFg,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div style={{
           position: 'absolute', left: 12, bottom: 10, padding: '6px 10px',
           background: palette.hintBg, border: `1px solid ${palette.hintBorder}`, borderRadius: 8,
