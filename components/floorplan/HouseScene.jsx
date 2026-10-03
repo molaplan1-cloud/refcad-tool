@@ -100,12 +100,7 @@ function finishTexture(group, id) {
     }
   }
   const tex = new THREE.CanvasTexture(canvas)
-  tex.wrapS = THREE.RepeatWrapping
-  tex.wrapT = THREE.RepeatWrapping
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.generateMipmaps = false
-  tex.minFilter = THREE.LinearFilter
-  tex.magFilter = THREE.LinearFilter
+  bindTexture(tex, { color: true })
   textureCache.set(key, tex)
   return tex
 }
@@ -200,14 +195,65 @@ function paintCanvas(look) {
     ctx.fillStyle = 'rgba(80,60,40,0.12)'
     for (let i = 0; i < 40; i += 1) ctx.fillRect((i * 37) % 128, (i * 19) % 128, 2, 2)
   }
-  const tex = new THREE.CanvasTexture(canvas)
+  const tex = bindTexture(new THREE.CanvasTexture(canvas), { color: true })
+  return tex
+}
+
+function bindTexture(tex, { color = false, anisotropy = 8 } = {}) {
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.generateMipmaps = false
-  tex.minFilter = THREE.LinearFilter
+  if (color) tex.colorSpace = THREE.SRGBColorSpace
+  tex.generateMipmaps = true
+  tex.minFilter = THREE.LinearMipmapLinearFilter
   tex.magFilter = THREE.LinearFilter
+  tex.anisotropy = anisotropy
+  tex.needsUpdate = true
   return tex
+}
+
+function brickMaps(look) {
+  const moduleW = 0.285
+  const moduleH = 0.085
+  const cols = 4
+  const rows = 8
+  const worldW = cols * moduleW
+  const worldH = rows * moduleH
+  const width = 1024
+  const height = Math.round(width * (worldH / worldW))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#5e5954'
+  ctx.fillRect(0, 0, width, height)
+  const stepX = width / cols
+  const stepY = height / rows
+  const brickW = stepX * (275 / 285)
+  const brickH = stepY * (75 / 85)
+  const ox = (stepX - brickW) / 2
+  const oy = (stepY - brickH) / 2
+  const bump = document.createElement('canvas')
+  bump.width = width
+  bump.height = height
+  const bctx = bump.getContext('2d')
+  bctx.fillStyle = '#3a3a3a'
+  bctx.fillRect(0, 0, width, height)
+  bctx.fillStyle = '#d0d0d0'
+  for (let row = 0; row < rows; row += 1) {
+    const shift = row % 2 ? stepX / 2 : 0
+    for (let col = -1; col <= cols; col += 1) {
+      const tone = 0.93 + ((row * 5 + col * 3) % 7) * 0.018
+      ctx.fillStyle = shadeHex(look.color || '#9c341f', tone)
+      const x = col * stepX + shift + ox
+      const y = row * stepY + oy
+      ctx.fillRect(x, y, brickW, brickH)
+      bctx.fillRect(x, y, brickW, brickH)
+    }
+  }
+  const map = bindTexture(new THREE.CanvasTexture(canvas), { color: true })
+  const bumpMap = bindTexture(new THREE.CanvasTexture(bump))
+  map.userData = { bump: bumpMap, worldW, worldH }
+  return map
 }
 
 function shadeHex(hex, tone) {
@@ -219,15 +265,93 @@ function shadeHex(hex, tone) {
 
 function repeatedCladding(look, span, height) {
   const board = Math.max(0.07, (look.boardWidthMm || 145) / 1000)
-  const unitX = look.pattern === 'brick' ? 0.52 : look.pattern === 'boards-v' || look.pattern === 'batten' ? board * 4 : look.pattern === 'seam' || look.pattern === 'corrugated' ? 0.42 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.56 : 0.6
-  const unitY = look.pattern === 'brick' ? 0.26 : look.pattern === 'boards-h' ? board * 4 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.36 : look.pattern === 'seam' ? 0.8 : 0.4
+  const brick = look.pattern === 'brick'
+  const unitX = brick ? 1.14 : look.pattern === 'boards-v' || look.pattern === 'batten' ? board * 4 : look.pattern === 'seam' || look.pattern === 'corrugated' ? 0.8 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.64 : 0.6
+  const unitY = brick ? 0.68 : look.pattern === 'boards-h' ? board * 4 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.36 : look.pattern === 'seam' ? 0.8 : 0.4
   const rx = Math.max(0.5, Math.round((span / unitX) * 4) / 4)
   const ry = Math.max(0.5, Math.round((height / unitY) * 4) / 4)
   const key = `clad-repeat:${look.pattern}:${look.color}:${look.mortar}:${look.painted ? 1 : 0}:${look.boardWidthMm}:${rx}:${ry}`
   if (textureCache.has(key)) return textureCache.get(key)
-  const tex = paintCanvas(look)
+  const tex = brick ? brickMaps(look) : paintCanvas(look)
   tex.repeat.set(rx, ry)
+  if (tex.userData?.bump) tex.userData.bump.repeat.set(rx, ry)
   tex.needsUpdate = true
+  textureCache.set(key, tex)
+  return tex
+}
+
+function GroundShade({ cx, cz, w, h }) {
+  const map = useMemo(() => groundShade(), [])
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.008, cz]} raycast={noopRaycast}>
+      <planeGeometry args={[w, h]} />
+      <meshBasicMaterial map={map} transparent depthWrite={false} />
+    </mesh>
+  )
+}
+
+function groundShade() {
+  const key = 'ground-shade'
+  if (textureCache.has(key)) return textureCache.get(key)
+  const canvas = document.createElement('canvas')
+  canvas.width = 256
+  canvas.height = 256
+  const ctx = canvas.getContext('2d')
+  const fade = ctx.createRadialGradient(128, 128, 36, 128, 128, 124)
+  fade.addColorStop(0, 'rgba(55,48,40,0.38)')
+  fade.addColorStop(0.62, 'rgba(55,48,40,0.16)')
+  fade.addColorStop(1, 'rgba(55,48,40,0)')
+  ctx.fillStyle = fade
+  ctx.fillRect(0, 0, 256, 256)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.needsUpdate = true
+  textureCache.set(key, tex)
+  return tex
+}
+
+function roofSurface(finish) {
+  const seam = finish.pattern === 'seam' || finish.pattern === 'corrugated'
+  const key = `roof-surface:${finish.pattern}:${finish.color}:${seam ? 'seam' : 'tile'}`
+  if (textureCache.has(key)) return textureCache.get(key)
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 512
+  const ctx = canvas.getContext('2d')
+  const base = finish.color || '#7f1d1d'
+  ctx.fillStyle = base
+  ctx.fillRect(0, 0, 512, 512)
+  if (seam) {
+    for (let x = 0; x < 512; x += 128) {
+      ctx.fillStyle = shadeHex(base, 0.68)
+      ctx.fillRect(x, 0, 14, 512)
+      ctx.fillStyle = shadeHex(base, 1.16)
+      ctx.fillRect(x + 14, 0, 5, 512)
+    }
+  } else {
+    const tileW = 128
+    const tileH = 80
+    for (let row = 0, y = 0; y < 520; row += 1, y += tileH) {
+      const shift = row % 2 ? tileW / 2 : 0
+      ctx.fillStyle = shadeHex(base, 0.62)
+      ctx.fillRect(0, y + tileH - 6, 512, 6)
+      for (let x = -tileW + shift; x < 512; x += tileW) {
+        ctx.fillStyle = shadeHex(base, 0.94 + ((row + x) % 5) * 0.02)
+        ctx.fillRect(x + 3, y + 4, tileW - 8, tileH - 12)
+        ctx.strokeStyle = shadeHex(base, 0.5)
+        ctx.lineWidth = 2
+        ctx.strokeRect(x + 3, y + 4, tileW - 8, tileH - 12)
+        ctx.strokeStyle = shadeHex(base, 1.15)
+        ctx.beginPath()
+        ctx.moveTo(x + 8, y + 10)
+        ctx.quadraticCurveTo(x + tileW / 2, y, x + tileW - 8, y + 10)
+        ctx.stroke()
+      }
+    }
+  }
+  const tex = bindTexture(new THREE.CanvasTexture(canvas), { color: true })
+  const world = seam ? 1.6 : 1.28
+  tex.repeat.set(1 / world, 1 / world)
   textureCache.set(key, tex)
   return tex
 }
@@ -276,7 +400,7 @@ function outlineScale(args, mark) {
   return args.map((size) => (Math.max(size, 0.02) + pad * 2) / Math.max(size, 0.02))
 }
 
-function Solid({ args, position, rotation, color, map, opacity = 1, edges = true, pick, mark, realistic = false, roughness = 0.82 }) {
+function Solid({ args, position, rotation, color, map, bump = null, opacity = 1, edges = true, pick, mark, realistic = false, roughness = 0.82 }) {
   const transparent = opacity < 0.98
   const face = mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#ccfbf1' : color
   const edge = mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : '#1e293b'
@@ -295,6 +419,8 @@ function Solid({ args, position, rotation, color, map, opacity = 1, edges = true
         emissive={mark === 'selected' ? '#115e59' : '#000000'}
         emissiveIntensity={mark === 'selected' ? 0.35 : 0}
         map={mark || transparent ? null : map || null}
+        bumpMap={mark || transparent ? null : bump}
+        bumpScale={bump ? 0.04 : 0}
         roughness={realistic ? roughness : 1}
         metalness={0.02}
         transparent={transparent}
@@ -369,6 +495,7 @@ function WallMesh({ plan, mode, selected, hovered }) {
                 rotation={[0, yaw, 0]}
                 color={faceColor}
                 map={realistic && wall.kind === 'exterior' ? map : null}
+                bump={realistic && wall.kind === 'exterior' ? map?.userData?.bump || null : null}
                 opacity={opacity}
                 pick={pick}
                 mark={mark}
@@ -522,12 +649,27 @@ function FloorMesh({ room, translucent, selected, hovered }) {
 
 function roofGeometry(model) {
   const positions = []
+  const normals = []
+  const uvs = []
   roofFaces(model).forEach((face) => {
-    face.forEach((point) => positions.push(point[0], point[1], point[2]))
+    const a = new THREE.Vector3(...face[0])
+    const b = new THREE.Vector3(...face[1])
+    const c = new THREE.Vector3(...face[2])
+    const normal = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a)).normalize()
+    const tangent = Math.abs(normal.y) > 0.2
+      ? new THREE.Vector3(1, 0, 0).addScaledVector(normal, -normal.x).normalize()
+      : new THREE.Vector3(0, 1, 0).addScaledVector(normal, -normal.y).normalize()
+    const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize()
+    ;[a, b, c].forEach((point) => {
+      positions.push(point.x, point.y, point.z)
+      normals.push(normal.x, normal.y, normal.z)
+      uvs.push(point.dot(tangent), point.dot(bitangent))
+    })
   })
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
-  geometry.computeVertexNormals()
+  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3))
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2))
   return geometry
 }
 
@@ -586,7 +728,7 @@ function RoofMesh({ plan, mode, selected, hovered }) {
   const finish = roofLook(plan)
   const realistic = finishesOf(plan).sceneStyle !== 'technical' && mode === 'solid'
   const ghost = mode === 'ghost'
-  const map = realistic ? repeatedCladding({ ...finish, painted: false, mortar: '#00000055', boardWidthMm: 200 }, Math.max(1, model.maxX - model.minX), Math.max(1, model.rise + 1)) : null
+  const map = realistic ? roofSurface(finish) : null
   const key = [model.type, model.minX, model.maxX, model.minZ, model.maxZ, model.rise, model.overhang, model.alongX, model.wallHeight].join(':')
   const geom = useMemo(() => roofGeometry(roofModel(plan)), [key])
   const edgeSpecs = useMemo(() => roofEdgeSpecs(roofModel(plan)), [key])
@@ -1422,17 +1564,19 @@ export default function HouseScene({
       gl={{ antialias: true }}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.ACESFilmicToneMapping
-        gl.toneMappingExposure = 1.12
-        gl.shadowMap.enabled = false
+        gl.toneMappingExposure = 1.05
+        gl.shadowMap.enabled = true
+        gl.shadowMap.type = THREE.PCFSoftShadowMap
         gl.setClearColor('#d9e3ee')
       }}
     >
       <color attach="background" args={['#d9e3ee']} />
-      <hemisphereLight args={['#fff8ef', '#d7c8b4', 0.85]} />
-      <ambientLight intensity={0.42} />
-      <directionalLight position={[12, 18, 10]} intensity={1.55} />
-      <directionalLight position={[-8, 6, -4]} intensity={0.35} />
-      <ContactShadows position={[cx, 0.01, cz]} opacity={0.28} scale={Math.max(18, span * 1.15)} blur={2.4} far={5} />
+      <hemisphereLight args={['#f3eee4', '#b7aa96', 0.32]} />
+      <ambientLight intensity={0.1} />
+      <directionalLight position={[16, 14, 7]} intensity={1.85} />
+      <directionalLight position={[-8, 6, -6]} intensity={0.12} />
+      <ContactShadows position={[cx, 0.012, cz]} opacity={0.58} scale={Math.max(22, span * 1.35)} blur={2.4} far={7} />
+      <GroundShade cx={cx} cz={cz} w={Math.max(house.maxX - house.minX + 1.4, 8)} h={Math.max(house.maxZ - house.minZ + 1.4, 8)} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.02, cz]} raycast={noopRaycast}>
         <planeGeometry args={[Math.max(24, span * 1.4), Math.max(24, span * 1.4)]} />
         <meshBasicMaterial color="#efe8d8" transparent={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground')} opacity={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground') ? 0.35 : 1} depthWrite={!(yardHasUnderground(plan.yard) && layerVisible(plan, 'ground'))} />

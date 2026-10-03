@@ -461,6 +461,49 @@ function CableMark({ points, text, X, Y, show = true, side = 1, along = 0.5, gap
   )
 }
 
+function Jakotukki({ node, count, X, Y }) {
+  const n = Math.max(1, count)
+  const pitch = 0.2
+  const span = pitch * Math.max(0, n - 1)
+  const bar = 0.1
+  const stub = 0.16
+  const px = (metres) => X(node.x + metres) - X(node.x)
+  const pz = (metres) => Y(node.z + metres) - Y(node.z)
+  const z0 = -span / 2
+  return (
+    <g data-testid="jakotukki">
+      <rect
+        x={px(-bar / 2)}
+        y={pz(z0 - 0.07)}
+        width={Math.abs(px(bar))}
+        height={Math.abs(pz(span + 0.14))}
+        fill="#fff"
+        stroke="#1d4ed8"
+        strokeWidth={1.15}
+      />
+      {Array.from({ length: n }, (_, index) => {
+        const z = z0 + index * pitch
+        return (
+          <g key={index}>
+            <line x1={px(bar / 2)} y1={pz(z)} x2={px(bar / 2 + stub)} y2={pz(z)} stroke="#c2410c" strokeWidth={1.15} />
+            <rect
+              data-testid="actuator-tag"
+              x={px(bar / 2 + stub) - 2.6}
+              y={pz(z) - 2.6}
+              width={5.2}
+              height={5.2}
+              rx={0.8}
+              fill="#fff"
+              stroke="#0f766e"
+              strokeWidth={0.7}
+            />
+          </g>
+        )
+      })}
+    </g>
+  )
+}
+
 function LoopTag({ points, label, X, Y }) {
   if (!points?.length || label == null) return null
   const cx = points.reduce((sum, point) => sum + point.x, 0) / points.length
@@ -490,11 +533,21 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const services = ensureServices(plan)
   const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run) && (!siteMode || siteRun(plan, run)))
   const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
+  const manifold = visibleNodes.find((node) => node.system === 'heat' && node.kind === 'floor-manifold')
+  const loopCount = services.runs.filter((run) => run.system === 'heat' && (run.kind === 'floorheat' || run.role === 'loop')).length
+  const drawnNodes = visibleNodes.filter((node) => {
+    if (!manifold || node.system !== 'heat') return true
+    if (node.kind === 'actuator') return false
+    if (node.kind !== 'heat-source' && node.kind !== 'thermostat') return true
+    return Math.hypot(node.x - manifold.x, node.z - manifold.z) > 1.25
+  })
   const order = { drain: 0, water: 1, heat: 2, electric: 3, iv: 4 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
   const drawn = runs.map((run) => ({ run, points: shiftPoints(run.points, run.system, multi, run.kind) }))
-  const fittings = collectFittings(drawn.map((item) => ({ ...item.run, points: item.points })))
+  const fittings = collectFittings(drawn
+    .filter(({ run }) => run.kind !== 'floorheat' && run.kind !== 'efloor' && run.role !== 'loop')
+    .map((item) => ({ ...item.run, points: item.points })))
   const legend = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
   const open = (event, hit) => {
     event.preventDefault()
@@ -551,12 +604,12 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               fill="none"
               stroke={color}
               strokeWidth={width}
-              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : (run.kind === 'floorheat' || run.role === 'loop' ? '3 2' : dashed ? '6 4' : undefined)}
+              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : (run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? '3.2 1.8' : dashed ? '6 4' : undefined)}
               data-wire-role={run.role || ''}
               data-heat-kind={run.system === 'heat' ? run.kind : undefined}
               data-testid={run.kind === 'collector' ? 'collector-pipe' : (String(run.linkedFrom || '').includes(':sewer') ? 'sewer-line' : (run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined))}
               strokeLinejoin="round"
-              strokeLinecap="round"
+              strokeLinecap={run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? 'butt' : 'round'}
               style={{ pointerEvents: 'none' }}
             />
             <polyline
@@ -663,7 +716,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               fontWeight="650"
               fill="#1c1917"
               stroke="#fbfaf7"
-              strokeWidth="2.4"
+              strokeWidth="1.5"
               paintOrder="stroke"
             >
               {item.text}
@@ -690,7 +743,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
       {fittings.tees.map((point, index) => (
         <circle key={`tee-${index}`} cx={X(point.x)} cy={Y(point.z)} r="3.3" fill="#1c1917" style={{ pointerEvents: 'none' }} />
       ))}
-      {visibleNodes.map((node) => (
+      {drawnNodes.map((node) => (
         <g
           key={node.id}
           data-testid={`svc-node-${node.kind}`}
@@ -699,7 +752,9 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           style={{ pointerEvents: interactive ? 'auto' : 'none' }}
           onContextMenu={(event) => open(event, { target: 'node', id: node.id, system: node.system })}
         >
-          <NodeSymbol node={node} />
+          {node.kind === 'floor-manifold'
+            ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
+            : <NodeSymbol node={node} />}
           {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
             <g style={{ pointerEvents: 'none' }}>
               <line x1="5" y1="-3" x2="14" y2="-14" stroke={nodeColor(node)} strokeWidth="0.7" />

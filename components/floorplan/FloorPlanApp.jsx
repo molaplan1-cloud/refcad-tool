@@ -380,10 +380,8 @@ function worldPath(points, X, Y) {
 
 function faceInk(color) {
   const hex = String(color || '').replace('#', '')
-  if (hex.length < 6) return '#44403c'
-  const value = (pair) => parseInt(hex.slice(pair, pair + 2), 16)
-  const mix = (channel) => Math.round(channel * 0.55)
-  return `#${[mix(value(0)), mix(value(2)), mix(value(4))].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`
+  if (hex.length < 6) return color || '#44403c'
+  return `#${hex.slice(0, 6)}`
 }
 
 function FaceLines({ plan, X, Y, selected, onSelect }) {
@@ -408,7 +406,7 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
         const cx = poly.reduce((sum, point) => sum + point.x, 0) / (poly.length || 1)
         const cz = poly.reduce((sum, point) => sum + point.z, 0) / (poly.length || 1)
         if ((cx - midX) * ox + (cz - midZ) * oz < 0) { ox = -ox; oz = -oz }
-        const shift = 0.16
+        const shift = 0.012
         const a = { x: a0.x + ox * shift, z: a0.z + oz * shift }
         const b = { x: b0.x + ox * shift, z: b0.z + oz * shift }
         const active = selected?.id === room.id && selected?.wallId === edge.wallId
@@ -423,7 +421,7 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
             x2={X(b.x)}
             y2={Y(b.z)}
             stroke={active ? '#0f766e' : faceInk(color)}
-            strokeWidth={active ? 3.2 : 2.2}
+            strokeWidth={active ? 1.8 : 0.55}
             strokeDasharray={hatch}
             strokeLinecap="butt"
             onPointerDown={(event) => {
