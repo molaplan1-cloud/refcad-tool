@@ -497,7 +497,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     <g data-testid="service-layer">
       {drawn.map(({ run, points }) => {
         const color = runColor(run)
-        const dashed = run.system === 'electric'
+        const heatFloor = run.system === 'heat' && (run.dashed || run.kind === 'floorheat' || run.kind === 'efloor' || run.kind === 'ceiling' || run.kind === 'sensor' || run.kind === 'heat-zone' || run.role === 'feeder' || run.role === 'loop')
+        const dashed = run.system === 'electric' || heatFloor
         const width = multi
           ? (run.system === 'iv' ? 1.15 : run.system === 'drain' ? 1.05 : 0.8)
           : (run.system === 'iv' ? 2.05 : run.system === 'drain' ? 1.85 : dashed ? 1.15 : 1.45)
@@ -508,8 +509,10 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               fill="none"
               stroke={color}
               strokeWidth={width}
-              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : dashed ? '5 3' : undefined}
+              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : dashed ? '6 4' : undefined}
               data-wire-role={run.role || ''}
+              data-heat-kind={run.system === 'heat' ? run.kind : undefined}
+              data-testid={run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined}
               strokeLinejoin="round"
               strokeLinecap="round"
               style={{ pointerEvents: 'none' }}

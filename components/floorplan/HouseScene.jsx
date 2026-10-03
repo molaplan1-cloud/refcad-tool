@@ -1198,15 +1198,20 @@ export default function HouseScene({
       </mesh>
       <YardScene plan={plan} selected={selected} />
       <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2) / (drawMode ? 0.5 : 1)), '#b7b1a4', '#e4e0d8']} position={[cx, 0, cz]} />
-      {visibleRooms(plan).map((room) => (
-        <FloorMesh
-          key={room.id}
-          room={room}
-          selected={selected}
-          hovered={hovered}
-          translucent={layerVisible(plan, 'drain') && (plan.services?.runs || []).some((run) => run.system === 'drain')}
-        />
-      ))}
+      {visibleRooms(plan).map((room) => {
+        const runs = plan.services?.runs || []
+        const drainOn = layerVisible(plan, 'drain') && runs.some((run) => run.system === 'drain')
+        const heatOn = layerVisible(plan, 'heat') && runs.some((run) => run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor' || run.kind === 'ceiling' || run.role === 'feeder' || run.role === 'loop'))
+        return (
+          <FloorMesh
+            key={room.id}
+            room={room}
+            selected={selected}
+            hovered={hovered}
+            translucent={drainOn || heatOn}
+          />
+        )
+      })}
       {roofMode !== 'solid' && <RoomLabels plan={plan} />}
       <WallMesh plan={plan} mode={wallMode} selected={selected} hovered={hovered} />
       {(plan.openings || []).map((opening) => (
