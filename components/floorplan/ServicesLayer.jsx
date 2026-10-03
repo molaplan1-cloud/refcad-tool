@@ -434,15 +434,15 @@ function MenuBtn({ children, onClick, testid }) {
   )
 }
 
-export function ServiceMenu({ menu, plan, onApply, onClose }) {
+export function ServiceMenu({ menu, plan, onApply, onClose, docked = false }) {
   if (!menu || menu.kind !== 'service') return null
   const services = ensureServices(plan)
   const node = menu.service?.target === 'node' ? services.nodes.find((item) => item.id === menu.service.id) : null
   const run = menu.service?.target === 'run' ? services.runs.find((item) => item.id === menu.service.id) : null
   const target = node || run
   if (!target) return null
-  const left = Math.max(8, Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 280))
-  const top = Math.max(8, Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 320))
+  const left = docked ? 0 : Math.max(8, Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 280))
+  const top = docked ? 0 : Math.max(8, Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 320))
   const systemName = SERVICE_SYSTEMS.find((item) => item.id === target.system)?.title || 'Talotekniikka'
   const patchNode = (patch) => onApply(updateServiceNode(plan, node.id, patch))
   const patchRun = (patch) => onApply(updateServiceRun(plan, run.id, patch))
@@ -453,7 +453,9 @@ export function ServiceMenu({ menu, plan, onApply, onClose }) {
   return (
     <div
       data-testid="service-menu"
-      style={{ position: 'fixed', left, top, zIndex: 60, width: 260, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }}
+      style={docked
+        ? { position: 'relative', width: '100%', background: 'transparent', padding: 0 }
+        : { position: 'fixed', left, top, zIndex: 60, width: 260, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }}
       onPointerDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >

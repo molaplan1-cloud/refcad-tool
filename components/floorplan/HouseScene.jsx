@@ -19,6 +19,7 @@ import {
   visibleRooms,
   wallCladdingPieces,
   wallPieces,
+  zoneCovering,
 } from '@/lib/floorplan'
 import Services3D from './Services3D'
 import { layerVisible } from '@/lib/services'
@@ -205,24 +206,48 @@ function adjacentInterior(plan, wall, piece) {
   return materialOf('interior', room?.interiorId || 'paint')
 }
 
-function Solid({ args, position, rotation, color, map, opacity = 1, edges = true }) {
+function samePick(item, pick) {
+  if (!item || !pick) return false
+  if (item.kind === 'service' || pick.kind === 'service') {
+    return item.kind === pick.kind && item.service?.target === pick.service?.target && item.service?.id === pick.service?.id
+  }
+  return item.kind === pick.kind && item.id === pick.id
+}
+
+function markOf(selected, hovered, pick) {
+  if (samePick(selected, pick)) return 'selected'
+  if (samePick(hovered, pick)) return 'hover'
+  return null
+}
+
+function noopRaycast() {}
+
+function Solid({ args, position, rotation, color, map, opacity = 1, edges = true, pick, mark }) {
   const transparent = opacity < 0.98
+  const edge = mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : '#1e293b'
   return (
-    <mesh position={position} rotation={rotation} castShadow={false} receiveShadow={false}>
+    <mesh
+      position={position}
+      rotation={rotation}
+      castShadow={false}
+      receiveShadow={false}
+      userData={pick ? { pick } : undefined}
+      raycast={opacity < 0.5 ? noopRaycast : undefined}
+    >
       <boxGeometry args={args} />
       <meshLambertMaterial
-        color={color}
-        map={transparent ? null : map || null}
+        color={mark ? '#ccfbf1' : color}
+        map={mark || transparent ? null : map || null}
         transparent={transparent}
         opacity={opacity}
         depthWrite={!transparent}
       />
-      {edges && !transparent && <Edges threshold={20} color="#1e293b" />}
+      {edges && !transparent && <Edges threshold={20} color={edge} />}
     </mesh>
   )
 }
 
-function WallMesh({ plan, mode }) {
+function WallMesh({ plan, mode, selected, hovered }) {
   if (mode === 'hidden') return null
   const opacity = mode === 'ghost' ? 0.14 : 1
   return (
@@ -244,6 +269,9 @@ function WallMesh({ plan, mode }) {
           const cladding = wall.kind === 'exterior' ? claddingOf(piece.materialId || plan.exteriorId) : null
           const finish = cladding || adjacentInterior(plan, wall, piece)
           const map = mode !== 'solid' ? null : cladding ? repeatedCladding(cladding.id, span, height) : finishTexture('interior', finish.id)
+          const zone = wall.kind === 'exterior' ? zoneCovering(plan, wall, (piece.from + piece.to) / 2, y) : null
+          const pick = zone ? { kind: 'zone', id: zone.id, wallId: wall.id } : { kind: 'wall', id: wall.id }
+          const mark = markOf(selected, hovered, pick) || ((selected?.kind === 'wall' && selected.id === wall.id && !zone) ? 'selected' : null)
           return (
             <Solid
               key={`${wall.id}-${piece.from}-${piece.to}-${piece.y0}-${piece.y1}-${piece.materialId || 'base'}`}
@@ -253,6 +281,8 @@ function WallMesh({ plan, mode }) {
               color={finish.color}
               map={map}
               opacity={opacity}
+              pick={pick}
+              mark={mark}
             />
           )
         })
@@ -261,7 +291,30 @@ function WallMesh({ plan, mode }) {
   )
 }
 
-function FloorMesh({ room, translucent }) {
+function OpeningMesh({ plan, opening, selected, hovered }) {
+  const wall = (plan.walls || []).find((item) => item.id === opening.wallId)
+  if (!wall) return null
+  const len = segmentLength(wall.a, wall.b) || 1
+  const dx = (wall.b.x - wall.a.x) / len
+  const dz = (wall.b.z - wall.a.z) / len
+  const mid = pointAt(wall, opening.offset)
+  const yaw = Math.atan2(-dz, dx)
+  const sill = opening.kind === 'window' ? (Number.isFinite(opening.sill) ? opening.sill : 0.9) : 0
+  const height = opening.height || (opening.kind === 'window' ? 1.2 : 2.1)
+  const pick = { kind: 'opening', id: opening.id }
+  return (
+    <Solid
+      args={[Math.max(0.2, opening.width || 0.9), height, thicknessOf(wall, plan) + 0.03]}
+      position={[mid.x, sill + height / 2, mid.z]}
+      rotation={[0, yaw, 0]}
+      color={opening.kind === 'window' ? '#dbeafe' : '#f8fafc'}
+      pick={pick}
+      mark={markOf(selected, hovered, pick)}
+    />
+  )
+}
+
+function FloorMesh({ room, translucent, selected, hovered }) {
   const finish = materialOf('floor', room.floorId)
   const map = finishTexture('floor', finish.id)
   const geom = useMemo(() => {
@@ -275,14 +328,16 @@ function FloorMesh({ room, translucent }) {
     return geometry
   }, [room])
   if (!room.polygon || room.polygon.length < 3) return null
+  const pick = { kind: 'room', id: room.id }
+  const mark = markOf(selected, hovered, pick)
   return (
-    <mesh geometry={geom} position={[0, 0.012, 0]} receiveShadow={false}>
+    <mesh geometry={geom} position={[0, 0.012, 0]} receiveShadow={false} userData={{ pick }}>
       <meshLambertMaterial
-        color={finish.color}
-        map={translucent ? null : map}
-        transparent={Boolean(translucent)}
-        opacity={translucent ? 0.28 : 1}
-        depthWrite={!translucent}
+        color={mark ? '#99f6e4' : finish.color}
+        map={mark || translucent ? null : map}
+        transparent={Boolean(translucent) && !mark}
+        opacity={translucent && !mark ? 0.28 : 1}
+        depthWrite={!translucent || Boolean(mark)}
         side={THREE.DoubleSide}
       />
     </mesh>
@@ -350,7 +405,7 @@ function framedCamera(plan, aspect) {
   }
 }
 
-function RoofMesh({ plan, mode }) {
+function RoofMesh({ plan, mode, selected, hovered }) {
   const model = roofModel(plan)
   const finish = materialOf('roof', plan.roofId)
   const ghost = mode === 'ghost'
@@ -371,16 +426,18 @@ function RoofMesh({ plan, mode }) {
     return geometry
   }, [box.minX, box.maxX, box.minZ, box.maxZ])
   if (mode === 'hidden') return null
+  const pick = { kind: 'roof', id: 'roof' }
+  const mark = markOf(selected, hovered, pick)
   return (
     <group>
-      <mesh geometry={geom}>
+      <mesh geometry={geom} userData={{ pick }} raycast={ghost ? noopRaycast : undefined}>
         <meshLambertMaterial
-          color={ghost ? '#94a3b8' : finish.color}
-          map={map}
+          color={mark ? '#99f6e4' : ghost ? '#94a3b8' : finish.color}
+          map={mark ? null : map}
           side={THREE.DoubleSide}
-          transparent={ghost}
-          opacity={ghost ? 0.15 : 1}
-          depthWrite={!ghost}
+          transparent={ghost && !mark}
+          opacity={ghost && !mark ? 0.15 : 1}
+          depthWrite={!ghost || Boolean(mark)}
         />
       </mesh>
       {edgeSpecs.map((edge, index) => (
@@ -534,11 +591,21 @@ function FixtureBody({ type, w, d }) {
   return box([w, 0.8, d], [0, 0.4, 0], '#f5f5f4')
 }
 
-function FixtureMesh({ fixture }) {
+function FixtureMesh({ fixture, selected, hovered }) {
   const tpl = fixtureTemplate(fixture.type)
+  const w = fixture.w || tpl.w
+  const d = fixture.d || tpl.d
+  const pick = { kind: 'fixture', id: fixture.id }
+  const mark = markOf(selected, hovered, pick)
   return (
-    <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]}>
-      <FixtureBody type={fixture.type} w={fixture.w || tpl.w} d={fixture.d || tpl.d} />
+    <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]} userData={{ pick }}>
+      <FixtureBody type={fixture.type} w={w} d={d} />
+      {mark && (
+        <mesh position={[0, 0.04, 0]}>
+          <boxGeometry args={[w + 0.08, 0.04, d + 0.08]} />
+          <meshBasicMaterial color={mark === 'selected' ? '#0f766e' : '#14b8a6'} />
+        </mesh>
+      )}
     </group>
   )
 }
@@ -575,7 +642,69 @@ function FrameCamera({ plan, fitToken, controlsRef }) {
   return null
 }
 
-export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0 }) {
+function PickBridge({ onSelect, onContext, onHover }) {
+  const { camera, gl, scene } = useThree()
+  const handlers = useRef({ onSelect, onContext, onHover })
+  handlers.current = { onSelect, onContext, onHover }
+  useLayoutEffect(() => {
+    const raycaster = new THREE.Raycaster()
+    const pointer = new THREE.Vector2()
+    let down = null
+    let frame = 0
+    const read = (event) => {
+      const rect = gl.domElement.getBoundingClientRect()
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.setFromCamera(pointer, camera)
+      const hits = raycaster.intersectObjects(scene.children, true)
+      for (const hit of hits) {
+        let node = hit.object
+        while (node) {
+          if (node.userData?.pick) return node.userData.pick
+          node = node.parent
+        }
+      }
+      return { kind: 'house', id: 'house' }
+    }
+    const onPointerDown = (event) => {
+      if (event.button !== 0) return
+      down = { x: event.clientX, y: event.clientY }
+    }
+    const onPointerUp = (event) => {
+      if (event.button !== 0 || !down) return
+      const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y)
+      down = null
+      if (moved > 6) return
+      handlers.current.onSelect?.(read(event))
+    }
+    const onMenu = (event) => {
+      event.preventDefault()
+      handlers.current.onContext?.(read(event), event)
+    }
+    const onMove = (event) => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        handlers.current.onHover?.(read(event))
+      })
+    }
+    const el = gl.domElement
+    el.addEventListener('pointerdown', onPointerDown)
+    el.addEventListener('pointerup', onPointerUp)
+    el.addEventListener('contextmenu', onMenu)
+    el.addEventListener('pointermove', onMove)
+    return () => {
+      el.removeEventListener('pointerdown', onPointerDown)
+      el.removeEventListener('pointerup', onPointerUp)
+      el.removeEventListener('contextmenu', onMenu)
+      el.removeEventListener('pointermove', onMove)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [camera, gl, scene])
+  return null
+}
+
+export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0, selected = null, hovered = null, onSelect, onContext, onHover }) {
   const controlsRef = useRef(null)
   const box = planBounds(plan)
   const cx = (box.minX + box.maxX) / 2
@@ -600,21 +729,30 @@ export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0 }) {
         <FloorMesh
           key={room.id}
           room={room}
+          selected={selected}
+          hovered={hovered}
           translucent={layerVisible(plan, 'drain') && (plan.services?.runs || []).some((run) => run.system === 'drain')}
         />
       ))}
       <RoomLabels plan={plan} />
-      <WallMesh plan={plan} mode={wallMode} />
-      <RoofMesh plan={plan} mode={roofMode} />
-      {(plan.fixtures || []).map((fixture) => <FixtureMesh key={fixture.id} fixture={fixture} />)}
-      <Services3D plan={plan} />
+      <WallMesh plan={plan} mode={wallMode} selected={selected} hovered={hovered} />
+      {(plan.openings || []).map((opening) => (
+        <OpeningMesh key={opening.id} plan={plan} opening={opening} selected={selected} hovered={hovered} />
+      ))}
+      <RoofMesh plan={plan} mode={roofMode} selected={selected} hovered={hovered} />
+      {(plan.fixtures || []).map((fixture) => (
+        <FixtureMesh key={fixture.id} fixture={fixture} selected={selected} hovered={hovered} />
+      ))}
+      <Services3D plan={plan} selected={selected} hovered={hovered} />
       <OrbitControls
         ref={controlsRef}
         makeDefault
         target={[cx, 1.25, cz]}
         maxPolarAngle={Math.PI / 2.08}
         enableDamping={false}
+        mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: -1 }}
       />
+      <PickBridge onSelect={onSelect} onContext={onContext} onHover={onHover} />
       <FrameCamera plan={plan} fitToken={fitToken} controlsRef={controlsRef} />
     </Canvas>
   )

@@ -9,6 +9,7 @@ import {
   STANDARD_SCALES,
   addOpening,
   splitWallAt,
+  deleteFacadeZone,
   deleteOpening,
   deleteRoom,
   deleteWall,
@@ -20,12 +21,14 @@ import {
   segmentLength,
   setWallLength,
   splitWall,
+  updateFacadeZone,
   updateFixture,
   updateHouse,
   updateOpening,
   updateRoom,
   updateWall,
 } from '@/lib/floorplan'
+import { ServiceMenu } from './ServicesLayer'
 
 const inputStyle = {
   width: '100%',
@@ -187,12 +190,64 @@ function SwatchRow({ group, value, onPick }) {
   )
 }
 
-export function SelectionPanel({ plan, selection, onApply, onCommit }) {
-  if (!selection?.id) return <div style={{ fontSize: 12, color: '#78716c' }}>Valitse kohde pohjasta tai avaa talon asetukset.</div>
+export function RoofFields({ plan, onApply }) {
+  return (
+    <div data-testid="roof-fields">
+      <div style={{ fontSize: 13, fontWeight: 750, marginBottom: 8 }}>Katto</div>
+      <Field label="Kattomuoto">
+        <select data-testid="roof-type" style={inputStyle} value={plan.roofType || 'gable'} onChange={(event) => onApply(updateHouse(plan, { roofType: event.target.value }))}>
+          {ROOF_TYPES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Kattokaltevuus (°)" testid="roof-pitch-field">
+        <input data-testid="roof-pitch" style={inputStyle} type="number" min="0" max="60" value={plan.roofPitch ?? 25} onChange={(event) => onApply(updateHouse(plan, { roofPitch: parseFloat(event.target.value) || 0 }))} />
+      </Field>
+      <Field label="Räystään ylitys (mm)">
+        <input data-testid="roof-overhang" style={inputStyle} type="number" min="0" max="1500" value={mm(plan.eaveOverhang ?? 0.5)} onChange={(event) => onApply(updateHouse(plan, { eaveOverhang: fromMm(event.target.value) }))} />
+      </Field>
+      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Katemateriaali</div>
+      <SwatchRow group="roof" value={plan.roofId} onPick={(id) => onApply({ ...plan, roofId: id })} />
+    </div>
+  )
+}
+
+function ZoneFields({ plan, id, onApply, onCommit }) {
+  const zone = (plan.facades || []).find((item) => item.id === id)
+  if (!zone) return null
+  return (
+    <div data-testid="zone-fields">
+      <Field label="Materiaali">
+        <select data-testid="zone-material" style={inputStyle} value={zone.materialId} onChange={(event) => onApply(updateFacadeZone(plan, id, { materialId: event.target.value }))}>
+          {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.group}: {item.name}</option>)}
+        </select>
+      </Field>
+      <MenuBtn testid="ctx-delete" onClick={() => onCommit(deleteFacadeZone(plan, id))}>Poista vyöhyke</MenuBtn>
+    </div>
+  )
+}
+
+export function SelectionPanel({ plan, selection, onApply, onCommit, onClear }) {
+  if (!selection?.id && selection?.kind !== 'roof' && selection?.kind !== 'house') {
+    return <div style={{ fontSize: 12, color: '#78716c' }}>Valitse kohde pohjasta tai avaa talon asetukset.</div>
+  }
   if (selection.kind === 'wall') return <WallFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
   if (selection.kind === 'opening') return <OpeningFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
   if (selection.kind === 'room') return <RoomFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
   if (selection.kind === 'fixture') return <FixtureFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
+  if (selection.kind === 'roof') return <RoofFields plan={plan} onApply={onApply} />
+  if (selection.kind === 'house') return <HouseSettings plan={plan} onApply={onApply} />
+  if (selection.kind === 'zone') return <ZoneFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
+  if (selection.kind === 'service') {
+    return (
+      <ServiceMenu
+        docked
+        menu={{ kind: 'service', service: selection.service, x: 0, y: 0 }}
+        plan={plan}
+        onApply={onApply}
+        onClose={onClear}
+      />
+    )
+  }
   return null
 }
 
@@ -344,8 +399,8 @@ function FixtureFields({ plan, id, onApply, onCommit }) {
       <Field label="Väri">
         <input style={{ ...inputStyle, padding: 2, height: 32 }} type="color" value={fixture.color || '#1c1917'} onChange={(event) => onApply(updateFixture(plan, id, { color: event.target.value }))} />
       </Field>
-      <MenuBtn onClick={() => onCommit(rotateFixture(plan, id))}>Kierrä 90°</MenuBtn>
-      <MenuBtn onClick={() => onCommit(mirrorFixture(plan, id))}>Peilaa</MenuBtn>
+      <MenuBtn testid="ctx-rotate" onClick={() => onCommit(rotateFixture(plan, id))}>Kierrä 90°</MenuBtn>
+      <MenuBtn testid="ctx-mirror" onClick={() => onCommit(mirrorFixture(plan, id))}>Peilaa</MenuBtn>
     </div>
   )
 }
@@ -357,14 +412,24 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
   const wall = (plan.walls || []).find((item) => item.id === menu.id)
   const opening = (plan.openings || []).find((item) => item.id === menu.id)
   const room = (plan.rooms || []).find((item) => item.id === menu.id)
-  const titles = { wall: 'Seinä', opening: opening?.kind === 'window' ? 'Ikkuna' : 'Ovi', room: room?.name || 'Huone', fixture: 'Kaluste', canvas: 'Pohja' }
+  const titles = {
+    wall: 'Seinä',
+    opening: opening?.kind === 'window' ? 'Ikkuna' : 'Ovi',
+    room: room?.name || 'Huone',
+    fixture: 'Kaluste',
+    canvas: 'Pohja',
+    roof: 'Katto',
+    house: 'Talo',
+    zone: 'Julkisivuvyöhyke',
+  }
   const act = (next) => {
     onCommit(next)
     onNavigate('close')
   }
   return (
-    <div
+      <div
       data-testid="context-menu"
+      data-kind={menu.kind}
       style={{ position: 'fixed', left, top, zIndex: 50, width: 260, maxHeight: '70vh', overflowY: 'auto', background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }}
       onPointerDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
@@ -395,22 +460,21 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
       )}
       {menu.kind === 'fixture' && (
         <>
-          <MenuBtn testid="ctx-rotate" onClick={() => act(rotateFixture(plan, menu.id))}>Kierrä 90°</MenuBtn>
-          <MenuBtn testid="ctx-mirror" onClick={() => act(mirrorFixture(plan, menu.id))}>Peilaa</MenuBtn>
-          <MenuBtn testid="ctx-dimensions" onClick={() => onNavigate('focus')}>Mitat</MenuBtn>
-          <Field label="Väri">
-            <input style={{ ...inputStyle, padding: 2, height: 32 }} type="color" value={(plan.fixtures || []).find((item) => item.id === menu.id)?.color || '#1c1917'} onChange={(event) => onApply(updateFixture(plan, menu.id, { color: event.target.value }))} />
-          </Field>
+          <FixtureFields plan={plan} id={menu.id} onApply={onApply} onCommit={onCommit} />
           <MenuBtn testid="ctx-duplicate" onClick={() => act(duplicateFixture(plan, menu.id))}>Monista</MenuBtn>
           <MenuBtn testid="ctx-delete" onClick={() => act(removeFixture(plan, menu.id))}>Poista</MenuBtn>
         </>
       )}
+      {menu.kind === 'zone' && <ZoneFields plan={plan} id={menu.id} onApply={onApply} onCommit={(next) => act(next)} />}
+      {menu.kind === 'roof' && <RoofFields plan={plan} onApply={onApply} />}
+      {menu.kind === 'house' && <HouseSettings plan={plan} onApply={onApply} />}
       {menu.kind === 'canvas' && (
         <>
           <MenuBtn testid="ctx-paste" onClick={() => onNavigate('paste')}>Liitä</MenuBtn>
           <MenuBtn testid="ctx-draw-wall" onClick={() => onNavigate('wall')}>Piirrä seinä</MenuBtn>
           <MenuBtn testid="ctx-draw-room" onClick={() => onNavigate('room')}>Piirrä huone</MenuBtn>
           <MenuBtn testid="ctx-house" onClick={() => onNavigate('house')}>Talon asetukset</MenuBtn>
+          <HouseSettings plan={plan} onApply={onApply} />
         </>
       )}
     </div>
