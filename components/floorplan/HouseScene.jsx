@@ -29,6 +29,7 @@ import {
 import Services3D from './Services3D'
 import YardScene from './YardScene'
 import { hasYard, sceneBounds } from '@/lib/yard'
+import { yardHasUnderground } from '@/lib/groundworks'
 import { layerVisible } from '@/lib/services'
 import { layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { chimneyKind, chimneyTop, drawingOf } from '@/lib/chimney'
@@ -1341,7 +1342,7 @@ export default function HouseScene({
       <directionalLight position={[8, 22, 10]} intensity={0.5} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.02, cz]} raycast={noopRaycast}>
         <planeGeometry args={[Math.max(24, span * 1.4), Math.max(24, span * 1.4)]} />
-        <meshBasicMaterial color="#efe8d8" />
+        <meshBasicMaterial color="#efe8d8" transparent={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground')} opacity={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground') ? 0.35 : 1} depthWrite={!(yardHasUnderground(plan.yard) && layerVisible(plan, 'ground'))} />
       </mesh>
       <YardScene plan={plan} selected={selected} />
       <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2) / (drawMode ? 0.5 : 1)), '#b7b1a4', '#e4e0d8']} position={[cx, 0, cz]} />
@@ -1349,13 +1350,14 @@ export default function HouseScene({
         const runs = plan.services?.runs || []
         const drainOn = layerVisible(plan, 'drain') && runs.some((run) => run.system === 'drain')
         const heatOn = layerVisible(plan, 'heat') && runs.some((run) => run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor' || run.kind === 'ceiling' || run.role === 'feeder' || run.role === 'loop'))
+        const buried = layerVisible(plan, 'ground') && runs.some((run) => run.kind === 'collector' || String(run.linkedFrom || '').startsWith('yard:waste:') || String(run.linkedFrom || '').startsWith('yard:ground:'))
         return (
           <FloorMesh
             key={room.id}
             room={room}
             selected={selected}
             hovered={hovered}
-            translucent={drainOn || heatOn}
+            translucent={drainOn || heatOn || buried}
           />
         )
       })}

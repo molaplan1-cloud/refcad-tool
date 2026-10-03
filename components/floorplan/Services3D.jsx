@@ -1,7 +1,7 @@
 'use client'
 
 import * as THREE from 'three'
-import { ensureServices, layerVisible, pipeRadius, runColor } from '@/lib/services'
+import { ensureServices, pipeRadius, runColor, serviceItemVisible } from '@/lib/services'
 
 function Segment({ a, b, radius, color, pick, mark }) {
   const start = new THREE.Vector3(a.x, a.y || 0, a.z)
@@ -148,8 +148,8 @@ function NodeMesh({ node, selected, hovered }) {
 
 export default function Services3D({ plan, selected = null, hovered = null }) {
   const services = ensureServices(plan)
-  const runs = services.runs.filter((run) => layerVisible(plan, run.system))
-  const nodes = services.nodes.filter((node) => layerVisible(plan, node.system))
+  const runs = services.runs.filter((run) => serviceItemVisible(plan, run))
+  const nodes = services.nodes.filter((node) => serviceItemVisible(plan, node))
   return (
     <group>
       {runs.map((run) => <RunMesh key={run.id} run={run} selected={selected} hovered={hovered} />)}

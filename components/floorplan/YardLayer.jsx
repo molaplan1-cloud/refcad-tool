@@ -1,6 +1,8 @@
 'use client'
 
 import { COVER_TYPES, coverPosts } from '@/lib/covers'
+import { CLEARANCE_RADII, GROUND_TOOLS, groundWarnings } from '@/lib/groundworks'
+import { layerVisible } from '@/lib/services'
 import {
   BEDS,
   FENCE_KINDS,
@@ -490,6 +492,59 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
           </g>
         )
       })}
+      {layerVisible(plan, 'ground') && yard.ground.wells.filter((item) => !item.hidden).map((item) => (
+        <g key={item.id} data-testid="energy-well" data-depth={item.depth}>
+          {CLEARANCE_RADII.map((radius) => (
+            <circle
+              key={radius}
+              data-testid="clearance-circle"
+              data-radius={radius}
+              cx={X(item.x)}
+              cy={Y(item.z)}
+              r={px(radius)}
+              fill="none"
+              stroke={radius === 3 ? '#b45309' : radius === 7.5 ? '#0f766e' : '#1d4ed8'}
+              strokeWidth={1}
+              strokeDasharray="5 4"
+              opacity={0.85}
+            />
+          ))}
+          <circle cx={X(item.x)} cy={Y(item.z)} r={Math.max(7, px(0.45))} fill="#ccfbf1" stroke="#0f766e" strokeWidth={1.6} />
+          <line x1={X(item.x) - 5} y1={Y(item.z)} x2={X(item.x) + 5} y2={Y(item.z)} stroke="#0f766e" strokeWidth={1.2} />
+          <line x1={X(item.x)} y1={Y(item.z) - 5} x2={X(item.x)} y2={Y(item.z) + 5} stroke="#0f766e" strokeWidth={1.2} />
+          <text x={X(item.x) + 10} y={Y(item.z) - 8} fontSize={9} fill="#0f766e">{`EK ${Math.round(item.depth || 0)} m`}</text>
+        </g>
+      ))}
+      {layerVisible(plan, 'ground') && yard.ground.mode === 'loop' && yard.ground.loop && (
+        <polygon data-testid="ground-loop" points={pts(yard.ground.loop.points, X, Y)} fill="rgba(15,118,110,0.12)" stroke="#0f766e" strokeWidth={sw} strokeDasharray="8 4" />
+      )}
+      {layerVisible(plan, 'ground') && yard.ground.water.map((item) => (
+        <polygon key={item.id} data-testid="water-body" points={pts(item.points, X, Y)} fill="rgba(37,99,235,0.18)" stroke="#1d4ed8" strokeWidth={sw} />
+      ))}
+      {layerVisible(plan, 'ground') && yard.waste.areas.map((item) => (
+        <g key={item.id} data-testid={item.kind === 'sandfilter' ? 'yard-waste-sandfilter' : 'yard-waste-field'}>
+          <polygon points={pts(item.points, X, Y)} fill="rgba(146,64,14,0.16)" stroke="#9a3412" strokeWidth={sw} strokeDasharray="4 3" />
+        </g>
+      ))}
+      {layerVisible(plan, 'ground') && yard.waste.units.map((item) => {
+        const mark = Math.max(item.w || 1, item.d || 1)
+        return (
+          <g key={item.id} data-testid={`yard-waste-${item.kind}`} transform={`translate(${X(item.x)} ${Y(item.z)}) rotate(${item.rotation || 0})`}>
+            <rect x={-px(item.w) / 2} y={-px(item.d) / 2} width={px(item.w)} height={px(item.d)} fill="#f5f5f4" stroke="#44403c" strokeWidth={1.3} />
+            {item.kind === 'septic' && Array.from({ length: Math.max(2, Math.min(3, item.chambers || 3)) - 1 }, (_, index) => (
+              <line key={index} x1={-px(item.w) / 2 + (px(item.w) * (index + 1)) / (item.chambers || 3)} y1={-px(item.d) / 2} x2={-px(item.w) / 2 + (px(item.w) * (index + 1)) / (item.chambers || 3)} y2={px(item.d) / 2} stroke="#44403c" strokeWidth={0.8} />
+            ))}
+            <text x={px(mark) / 2 + 4} y={3} fontSize={8} fill="#44403c">{item.kind === 'holding' ? `${item.volume} m³` : item.kind === 'septic' ? `${item.chambers}` : ''}</text>
+          </g>
+        )
+      })}
+      {layerVisible(plan, 'ground') && groundWarnings(plan).length > 0 && (
+        <g data-testid="ground-warnings">
+          {groundWarnings(plan).slice(0, 4).map((warning, index) => (
+            <text key={`${warning.code}-${index}`} x={sheet.x + 16} y={sheet.y + sheet.h - 28 - index * 12} fontSize={9} fill={warning.level === 'fail' ? '#b91c1c' : '#b45309'}>{warning.text}</text>
+          ))}
+        </g>
+      )}
       {preview?.points?.length > 0 && (
         <polyline
           points={pts([...preview.points, ...(preview.cursor ? [preview.cursor] : [])], X, Y)}
@@ -532,6 +587,13 @@ export function yardToolLabel(tool) {
   if (tool.startsWith('cover:')) {
     const name = COVER_TYPES.find((item) => item.id === tool.slice(6))?.name || 'Katos'
     return `${name}: piirrä suorakulmio tai monikulmio. Se voi tarttua seinään.`
+  }
+  if (tool.startsWith('ground:')) {
+    const spec = GROUND_TOOLS.find((item) => item.id === tool.slice(7))
+    if (!spec) return 'Maanalaiset'
+    if (spec.mode === 'point') return `${spec.name}: napsauta paikka.`
+    if (spec.mode === 'line') return `${spec.name}: napsauta pisteet, päätä Enterillä.`
+    return `${spec.name}: piirrä alue.`
   }
   return 'Piha'
 }

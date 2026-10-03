@@ -3,6 +3,8 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
 import { coverMembers, normalizeCover, roofLook } from '@/lib/covers'
+import { visualBoreholeDepth, yardHasUnderground } from '@/lib/groundworks'
+import { layerVisible } from '@/lib/services'
 import { buildingSpec, ensureYard, footprint, hasYard, objectSpec, plantSpec, yardBounds } from '@/lib/yard'
 
 function noop() {}
@@ -389,16 +391,18 @@ export default function YardScene({ plan, selected }) {
   const w = Math.max(4, box.maxX - box.minX)
   const d = Math.max(4, box.maxZ - box.minZ)
   const active = (collection, id) => selected?.kind === 'yard' && selected.collection === collection && selected.id === id
+  const buried = yardHasUnderground(yard) && layerVisible(plan, 'ground')
+  const groundOpacity = buried ? 0.35 : 1
   return (
     <group>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.004, cz]} raycast={noop}>
         <planeGeometry args={[w + 1.2, d + 1.2]} />
-        <meshStandardMaterial color="#c4b89a" />
+        <meshStandardMaterial color="#c4b89a" transparent={buried} opacity={groundOpacity} depthWrite={!buried} />
       </mesh>
       {yard.plot && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.008, cz]} raycast={noop}>
           <planeGeometry args={[w, d]} />
-          <meshStandardMaterial color="#d9e7c4" />
+          <meshStandardMaterial color="#d9e7c4" transparent={buried} opacity={groundOpacity} depthWrite={!buried} />
         </mesh>
       )}
       {yard.beds.map((bed) => {
@@ -451,6 +455,47 @@ export default function YardScene({ plan, selected }) {
       {yard.objects.map((item) => <ObjectMesh key={item.id} item={item} selected={active('objects', item.id)} />)}
       {yard.buildings.map((item) => <BuildingMesh key={item.id} item={item} selected={active('buildings', item.id)} />)}
       {(yard.covers || []).map((item) => <CoverMesh key={item.id} plan={plan} item={item} selected={active('covers', item.id)} />)}
+      {buried && yard.ground.mode !== 'loop' && yard.ground.wells.filter((item) => !item.hidden).map((well) => {
+        const height = visualBoreholeDepth(well.depth)
+        return (
+          <mesh key={well.id} position={[well.x, -height / 2, well.z]}>
+            <cylinderGeometry args={[0.22, 0.22, height, 12]} />
+            <meshStandardMaterial color="#0f766e" />
+          </mesh>
+        )
+      })}
+      {buried && yard.waste.units.filter((item) => !item.hidden).map((unit) => (
+        <mesh key={unit.id} position={[unit.x, -0.55, unit.z]}>
+          <boxGeometry args={[unit.w || 1.4, 0.7, unit.d || 1.2]} />
+          <meshStandardMaterial color={unit.kind === 'septic' || unit.kind === 'holding' ? '#78716c' : '#57534e'} transparent opacity={0.9} />
+        </mesh>
+      ))}
+      {buried && yard.waste.areas.filter((item) => !item.hidden).map((area) => (
+        <AreaSlab key={area.id} points={area.points} color="#b45309" y={-0.35} />
+      ))}
+      {buried && yard.ground.mode === 'loop' && yard.ground.loop && (
+        <AreaSlab points={yard.ground.loop.points} color="#0f766e" y={-0.7} />
+      )}
     </group>
+  )
+}
+
+function AreaSlab({ points, color, y }) {
+  const geo = useMemo(() => {
+    const shape = new THREE.Shape()
+    ;(points || []).forEach((point, index) => {
+      if (index === 0) shape.moveTo(point.x, -point.z)
+      else shape.lineTo(point.x, -point.z)
+    })
+    const geometry = new THREE.ShapeGeometry(shape)
+    geometry.rotateX(-Math.PI / 2)
+    geometry.translate(0, y, 0)
+    geometry.computeBoundingSphere()
+    return geometry
+  }, [points, y])
+  return (
+    <mesh geometry={geo} frustumCulled={false}>
+      <meshStandardMaterial color={color} transparent opacity={0.55} side={THREE.DoubleSide} depthWrite={false} />
+    </mesh>
   )
 }

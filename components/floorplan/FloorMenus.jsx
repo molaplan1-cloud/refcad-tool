@@ -66,6 +66,7 @@ import { yardTitle } from '@/lib/yard'
 import { addServiceNode, applyHeating, ensureServices, refreshHeat, serviceObjectTitle, suggestFloorManifold } from '@/lib/services'
 import { HEAT_SOURCES, HEATING_METHODS, LOOP_SPACINGS, normalizeHeating, normalizeRoomHeating } from '@/lib/hydronic'
 import { formatRoomInfo, roomReport, thermalOf } from '@/lib/roominfo'
+import { normalizeGround } from '@/lib/groundworks'
 import {
   LAYER_MATERIALS,
   assignHouseStructure,
@@ -179,6 +180,14 @@ function HeatingSettings({ plan, onApply }) {
           <input data-testid="heat-borehole" type="checkbox" checked={heating.borehole !== false} onChange={(event) => set({ borehole: event.target.checked })} />
           {t('house.borehole')}
         </label>
+      )}
+      {heating.source === 'ground' && heating.borehole !== false && normalizeGround(plan.yard?.ground).wells.length > 0 && (
+        <div data-testid="borehole-depth" style={{ fontSize: 12, color: '#44403c', margin: '0 0 8px' }}>
+          {t('ground.depthNote', {
+            depth: Math.round(normalizeGround(plan.yard?.ground).wells.reduce((sum, well) => sum + (Number(well.depth) || 0), 0) / normalizeGround(plan.yard?.ground).wells.length),
+            count: normalizeGround(plan.yard?.ground).wells.length,
+          })}
+        </div>
       )}
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
         <input data-testid="heat-air" type="checkbox" checked={Boolean(heating.supplementAir)} onChange={(event) => set({ supplementAir: event.target.checked })} />

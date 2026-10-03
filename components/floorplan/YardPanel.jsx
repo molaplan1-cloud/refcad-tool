@@ -2,6 +2,7 @@
 
 import { usePlanLocale } from '@/components/i18n/Locale'
 import { COVER_FRAMES, COVER_GLASS, COVER_ROOFS, COVER_SIDES, COVER_TINTS, COVER_TYPES, normalizeCover } from '@/lib/covers'
+import { groundWarnings } from '@/lib/groundworks'
 import {
   BEDS,
   BUILDINGS,
@@ -236,6 +237,40 @@ export function YardFields({ plan, selection, onCommit }) {
           </>
         )
       })()}
+      {selection.collection === 'wells' && item && (
+        <>
+          <Field label={t('ground.depth')}>
+            <input data-testid="well-depth" style={inputStyle} type="number" min="20" step="1" value={item.depth || 0} onChange={(event) => commit({ depth: Number(event.target.value) || 0 })} />
+          </Field>
+        </>
+      )}
+      {selection.collection === 'waste-units' && item?.kind === 'holding' && (
+        <>
+          <Field label={t('ground.volume')}>
+            <input data-testid="holding-volume" style={inputStyle} type="number" min="6" max="10" step="0.5" value={item.volume || 8} onChange={(event) => commit({ volume: Math.min(10, Math.max(6, Number(event.target.value) || 8)) })} />
+          </Field>
+          <Field label={t('ground.access')}>
+            <input data-testid="holding-access" style={inputStyle} value={item.accessNote || ''} onChange={(event) => commit({ accessNote: event.target.value })} />
+          </Field>
+        </>
+      )}
+      {selection.collection === 'waste-units' && item?.kind === 'septic' && (
+        <Field label={t('ground.chambers')}>
+          <select data-testid="septic-chambers" style={inputStyle} value={item.chambers || 3} onChange={(event) => commit({ chambers: Number(event.target.value) || 3 })}>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+          </select>
+        </Field>
+      )}
+      {selection.collection === 'waste-units' && item?.kind === 'plant' && (
+        <label style={{ display: 'flex', gap: 6, fontSize: 13 }}>
+          <input data-testid="plant-pump" type="checkbox" checked={Boolean(item.pump)} onChange={(event) => commit({ pump: event.target.checked })} />
+          {t('ground.pump')}
+        </label>
+      )}
+      {['wells', 'waste-units', 'waste-areas', 'loop'].includes(selection.collection) && groundWarnings(plan).filter((warning) => String(warning.subject || '').includes(selection.id)).map((warning) => (
+        <div key={`${warning.code}-${warning.subject}`} data-testid="ground-warning" style={{ fontSize: 12, color: warning.level === 'fail' ? '#b91c1c' : '#b45309', marginTop: 6 }}>{warning.text}</div>
+      ))}
       {(selection.collection === 'objects' || selection.collection === 'buildings') && (
         <button type="button" style={btn} onClick={() => onCommit(rotateYardItem(plan, selection.collection, selection.id))}>Kierrä 90°</button>
       )}

@@ -13,6 +13,7 @@ import {
   ensureServices,
   joinServiceRuns,
   layerVisible,
+  serviceItemVisible,
   nodeColor,
   rerouteRun,
   rerouteSystem,
@@ -452,8 +453,8 @@ function CableMark({ points, text, X, Y }) {
 
 export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown }) {
   const services = ensureServices(plan)
-  const visibleRuns = services.runs.filter((run) => layerVisible(plan, run.system) && !run.hidden)
-  const visibleNodes = services.nodes.filter((node) => layerVisible(plan, node.system) && !node.hidden)
+  const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run))
+  const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node))
   const order = { drain: 0, water: 1, heat: 2, electric: 3, iv: 4 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
@@ -498,7 +499,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
       {drawn.map(({ run, points }) => {
         const color = runColor(run)
         const heatFloor = run.system === 'heat' && (run.dashed || run.kind === 'floorheat' || run.kind === 'efloor' || run.kind === 'ceiling' || run.kind === 'sensor' || run.kind === 'heat-zone' || run.role === 'feeder' || run.role === 'loop')
-        const dashed = run.system === 'electric' || heatFloor
+        const dashed = run.system === 'electric' || heatFloor || Boolean(run.dashed)
         const width = multi
           ? (run.system === 'iv' ? 1.15 : run.system === 'drain' ? 1.05 : 0.8)
           : (run.system === 'iv' ? 2.05 : run.system === 'drain' ? 1.85 : dashed ? 1.15 : 1.45)
@@ -512,7 +513,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : dashed ? '6 4' : undefined}
               data-wire-role={run.role || ''}
               data-heat-kind={run.system === 'heat' ? run.kind : undefined}
-              data-testid={run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined}
+              data-testid={run.kind === 'collector' ? 'collector-pipe' : (String(run.linkedFrom || '').includes(':sewer') ? 'sewer-line' : (run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined))}
               strokeLinejoin="round"
               strokeLinecap="round"
               style={{ pointerEvents: 'none' }}
