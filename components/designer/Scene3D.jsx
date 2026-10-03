@@ -11,6 +11,21 @@ import { pipeSupports } from '@/lib/pipeTopology'
 import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
 import { sharedWallPanels } from '@/lib/sharedWalls'
 import { buildingDimensionSpec, dimensionStyle, layoutRoomTags } from '@/lib/sceneDims'
+import { resolveDoor } from '@/lib/doors'
+
+const DOOR_PART = {
+  frame: '#3a3f46',
+  leaf: '#f7f4ee',
+  handle: '#1c1917',
+  curtain: '#d9d4cc',
+  track: '#2a2e33',
+  glass: '#c5d8e8',
+  hood: '#4b5563',
+  plate: '#6b7280',
+  heat: '#c2410c',
+  seam: '#57534e',
+  seal: '#1f2937',
+}
 
 const SceneTheme = createContext(null)
 
@@ -57,9 +72,11 @@ function footprintGeometry(points, height) {
 }
 
 function doorBasis(room, eq) {
+  const spec = resolveDoor(eq)
   const wall = eq.wall || 's'
-  const w = Math.max(0.6, eq.width || 0.9)
-  const h = Math.max(1.8, eq.height || 2.1)
+  const low = spec.style === 'leveler'
+  const w = Math.max(low ? 0.8 : 0.55, eq.width || 0.9)
+  const h = Math.max(low ? 0.08 : 1.5, eq.height || 2.1)
   const cx = room.x + (eq.x || 0)
   const cz = room.z + (eq.z || 0)
   const alongX = wall === 'n' || wall === 's'
@@ -75,26 +92,48 @@ function doorBasis(room, eq) {
     new THREE.Vector3(-inward.x, 0, -inward.z),
   )
   const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
-  const sliding = eq.slide === true || /liuku/i.test(eq.name || '') || w >= 1.15
-  const curtain = !!(eq.curtain || eq.stripCurtain || /lamelli|verho|liuska/i.test(eq.name || ''))
-  return { w, h, hinge, quaternion, sliding, curtain }
+  return { w, h, hinge, quaternion, spec }
 }
 
 function DoorPart({ part, args, position, rotation, children }) {
+  const color = DOOR_PART[part] || DOOR_PART.leaf
   return (
     <mesh position={position} rotation={rotation} userData={{ part }} castShadow>
       {children || <boxGeometry args={args} />}
-      <meshStandardMaterial color={part === 'frame' ? '#3a3f46' : part === 'handle' ? '#1c1917' : part === 'track' ? '#2a2e33' : part === 'curtain' ? '#d9d4cc' : '#f7f4ee'} roughness={0.45} metalness={part === 'handle' ? 0.6 : 0.08} />
+      <meshStandardMaterial
+        color={color}
+        roughness={part === 'glass' ? 0.08 : 0.45}
+        metalness={part === 'handle' || part === 'hood' ? 0.55 : 0.08}
+        transparent={part === 'glass'}
+        opacity={part === 'glass' ? 0.45 : 1}
+      />
     </mesh>
   )
 }
 
+function DoorLeaf({ w, h, glass = false }) {
+  if (glass) {
+    return (
+      <group>
+        <DoorPart part="frame" args={[0.06, h - 0.08, 0.04]} position={[0.05, h / 2, 0.02]} />
+        <DoorPart part="frame" args={[0.06, h - 0.08, 0.04]} position={[w - 0.05, h / 2, 0.02]} />
+        <DoorPart part="frame" args={[w - 0.04, 0.06, 0.04]} position={[w / 2, h - 0.07, 0.02]} />
+        <DoorPart part="frame" args={[w - 0.04, 0.06, 0.04]} position={[w / 2, 0.08, 0.02]} />
+        <DoorPart part="glass" args={[Math.max(0.2, w - 0.16), Math.max(0.4, h - 0.22), 0.015]} position={[w / 2, h / 2, 0.02]} />
+      </group>
+    )
+  }
+  return <DoorPart part="leaf" args={[w - 0.04, h - 0.08, 0.04]} position={[w / 2, h / 2, 0.02]} />
+}
+
 function DoorMesh({ room, eq, onSelect, onContext }) {
-  const { w, h, hinge, quaternion, sliding, curtain } = useMemo(() => doorBasis(room, eq), [room, eq])
+  const { w, h, hinge, quaternion, spec } = useMemo(() => doorBasis(room, eq), [room, eq])
   const doors = (room.equipment || []).filter((item) => item.category === 'door')
   const number = Math.max(1, doors.findIndex((item) => item.id === eq.id) + 1)
+  const style = spec.style
   const jamb = 0.05
   const strips = Math.max(6, Math.round(w / 0.12))
+  const swing = style === 'hinged' || style === 'freezer' || style === 'fire' || style === 'glass'
   return (
     <group
       position={[hinge.x, 0, hinge.z]}
@@ -106,26 +145,77 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
       }}
       onContextMenu={(event) => openMenu(event, onContext, eq.id, 'equipment')}
     >
-      <DoorPart part="frame" args={[jamb, h + 0.06, 0.1]} position={[-jamb / 2, h / 2, 0]} />
-      <DoorPart part="frame" args={[jamb, h + 0.06, 0.1]} position={[w + jamb / 2, h / 2, 0]} />
-      <DoorPart part="frame" args={[w + jamb * 2, 0.06, 0.1]} position={[w / 2, h + 0.02, 0]} />
-      {sliding ? (
-        <DoorPart part="track" args={[w * 1.7, 0.04, 0.06]} position={[w * 0.72, h + 0.08, 0]} />
-      ) : [0.18, 0.5, 0.82].map((t) => (
-        <mesh key={`hinge-${t}`} position={[0.01, h * t, 0]} rotation={[Math.PI / 2, 0, 0]} userData={{ part: 'handle' }} castShadow>
-          <cylinderGeometry args={[0.016, 0.016, 0.1, 8]} />
-          <meshStandardMaterial color="#1c1917" metalness={0.6} roughness={0.3} />
-        </mesh>
-      ))}
-      <group rotation={[0, sliding ? 0 : -0.42, 0]} position={sliding ? [w * 0.62, 0, 0.03] : [0, 0, 0]}>
-        <DoorPart part="leaf" args={[w - 0.04, h - 0.08, 0.04]} position={[w / 2, h / 2, 0.02]} />
-        <DoorPart part="handle" args={[0.025, 0.22, 0.035]} position={[w * 0.78, h * 0.48, 0.055]} />
-        <DoorPart part="handle" args={[0.1, 0.022, 0.03]} position={[w * 0.78, h * 0.58, 0.05]} />
-      </group>
-      {curtain && Array.from({ length: strips }, (_, index) => (
-        <DoorPart key={`strip-${index}`} part="curtain" args={[w / strips * 0.72, h - 0.12, 0.008]} position={[(index + 0.5) * (w / strips), h / 2, 0.012]} />
-      ))}
-      <DoorNumber room={room} number={number} h={h} w={w} />
+      {style === 'leveler' ? (
+        <>
+          <DoorPart part="plate" args={[w, 0.05, Math.max(1.4, eq.depth || 2)]} position={[w / 2, 0.06, Math.max(1.4, eq.depth || 2) / 2 + 0.04]} />
+          <DoorPart part="seam" args={[w, 0.02, 0.04]} position={[w / 2, 0.09, 0.04]} />
+          <DoorPart part="plate" args={[w * 0.92, 0.03, 0.08]} position={[w / 2, 0.1, Math.max(1.4, eq.depth || 2) - 0.02]} />
+        </>
+      ) : (
+        <>
+          <DoorPart part="frame" args={[jamb, h + 0.06, 0.1]} position={[-jamb / 2, h / 2, 0]} />
+          <DoorPart part="frame" args={[jamb, h + 0.06, 0.1]} position={[w + jamb / 2, h / 2, 0]} />
+          <DoorPart part="frame" args={[w + jamb * 2, 0.06, 0.1]} position={[w / 2, h + 0.02, 0]} />
+          {style === 'freezer' && <DoorPart part="heat" args={[0.02, h, 0.02]} position={[0.05, h / 2, 0.07]} />}
+          {style === 'sliding' && <DoorPart part="track" args={[w * 1.7, 0.04, 0.06]} position={[w * 0.72, h + 0.08, 0]} />}
+          {(style === 'roll' || style === 'speed-roll') && (
+            <DoorPart part="hood" args={[w + 0.28, style === 'speed-roll' ? 0.16 : 0.32, style === 'speed-roll' ? 0.16 : 0.28]} position={[w / 2, h + (style === 'speed-roll' ? 0.12 : 0.18), 0.08]} />
+          )}
+          {style === 'dock-seal' && (
+            <>
+              <DoorPart part="seal" args={[0.16, h, 0.28]} position={[0.02, h / 2, 0.14]} />
+              <DoorPart part="seal" args={[0.16, h, 0.28]} position={[w - 0.02, h / 2, 0.14]} />
+              <DoorPart part="seal" args={[w, 0.2, 0.28]} position={[w / 2, h - 0.02, 0.14]} />
+            </>
+          )}
+          {swing && (
+            <>
+              {[0.18, 0.5, 0.82].map((t) => (
+                <mesh key={`hinge-${t}`} position={[0.01, h * t, 0]} rotation={[Math.PI / 2, 0, 0]} userData={{ part: 'handle' }} castShadow>
+                  <cylinderGeometry args={[0.016, 0.016, 0.1, 8]} />
+                  <meshStandardMaterial color="#1c1917" metalness={0.6} roughness={0.3} />
+                </mesh>
+              ))}
+              <group rotation={[0, -0.42, 0]}>
+                <DoorLeaf w={w} h={h} glass={style === 'glass'} />
+                <DoorPart part="handle" args={[0.025, 0.22, 0.035]} position={[w * 0.78, h * 0.48, 0.055]} />
+                <DoorPart part="handle" args={[0.1, 0.022, 0.03]} position={[w * 0.78, h * 0.58, 0.05]} />
+              </group>
+            </>
+          )}
+          {style === 'sliding' && (
+            <group position={[w * 0.62, 0, 0.03]}>
+              <DoorPart part="leaf" args={[w - 0.04, h - 0.08, 0.04]} position={[w / 2, h / 2, 0.02]} />
+              <DoorPart part="handle" args={[0.1, 0.22, 0.03]} position={[w * 0.5, h * 0.48, 0.05]} />
+            </group>
+          )}
+          {(style === 'double' || style === 'impact') && (
+            <>
+              <group rotation={[0, style === 'impact' ? -0.16 : -0.36, 0]}>
+                <DoorPart part="leaf" args={[w / 2 - 0.03, h - 0.08, 0.04]} position={[w / 4, h / 2, 0.02]} />
+              </group>
+              <group position={[w, 0, 0]} rotation={[0, style === 'impact' ? 0.16 : 0.36, 0]}>
+                <DoorPart part="leaf" args={[w / 2 - 0.03, h - 0.08, 0.04]} position={[-w / 4, h / 2, 0.02]} />
+              </group>
+            </>
+          )}
+          {style === 'sectional' && (
+            <group>
+              <DoorPart part="leaf" args={[w - 0.06, h - 0.08, 0.045]} position={[w / 2, h / 2, 0.02]} />
+              {Array.from({ length: 5 }, (_, index) => (
+                <DoorPart key={`panel-${index}`} part="seam" args={[w - 0.1, 0.015, 0.02]} position={[w / 2, ((index + 1) / 6) * h, 0.05]} />
+              ))}
+            </group>
+          )}
+          {(style === 'roll' || style === 'speed-roll') && Array.from({ length: style === 'speed-roll' ? 8 : 6 }, (_, index) => (
+            <DoorPart key={`slat-${index}`} part="curtain" args={[w - 0.08, h / (style === 'speed-roll' ? 10 : 8), 0.025]} position={[w / 2, h * ((index + 0.6) / (style === 'speed-roll' ? 9 : 7)), 0.03]} />
+          ))}
+          {(style === 'strip' || spec.curtain) && Array.from({ length: strips }, (_, index) => (
+            <DoorPart key={`strip-${index}`} part="curtain" args={[w / strips * 0.72, h - 0.12, 0.008]} position={[(index + 0.5) * (w / strips), h / 2, 0.012]} />
+          ))}
+        </>
+      )}
+      {h > 0.8 && <DoorNumber room={room} number={number} h={h} w={w} />}
     </group>
   )
 }
@@ -1410,8 +1500,7 @@ function technicalMaterial(role, mesh, palette) {
   }
   if (role === 'door') {
     const part = mesh.userData?.part || 'leaf'
-    const colors = { frame: '#3a3f46', leaf: '#f7f4ee', handle: '#1c1917', curtain: '#d9d4cc', track: '#2a2e33' }
-    return new THREE.MeshLambertMaterial({ color: colors[part] || colors.leaf, side: THREE.DoubleSide })
+    return new THREE.MeshLambertMaterial({ color: DOOR_PART[part] || DOOR_PART.leaf, side: THREE.DoubleSide })
   }
   const color = mesh.material?.color ? mesh.material.color.clone() : new THREE.Color(palette.equip)
   return new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide })

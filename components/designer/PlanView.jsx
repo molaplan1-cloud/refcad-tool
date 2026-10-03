@@ -8,6 +8,7 @@ import { pointInEquipment } from '@/lib/placement'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
 import { highlightedPorts, pipeAppearance, snapPort } from '@/lib/pipeTopology'
 import { calculateProject } from '@/lib/heatLoad'
+import { doorPlanFigures } from '@/lib/doors'
 import {
   applyBox,
   applyOutline,
@@ -15,7 +16,6 @@ import {
   clampGroupTranslation,
   clampResizeBox,
   cleanOrthogonal,
-  doorSymbol,
   edgesOf,
   fitView,
   footprintInside,
@@ -310,6 +310,53 @@ function longestMid(points) {
   }
   const span = Math.hypot(dx, dz) || 1
   return { ...mid, nx: -dz / span, nz: dx / span }
+}
+
+function DoorGlyph({ room, eq, scale }) {
+  const drawn = doorPlanFigures(room, eq)
+  const px = (n) => n / scale
+  return (
+    <g data-eq={eq.id} data-door-style={drawn.style}>
+      {drawn.figures.map((fig, index) => {
+        if (fig.kind === 'rect') {
+          return (
+            <rect
+              key={index}
+              x={fig.x}
+              y={fig.z}
+              width={fig.w}
+              height={fig.h}
+              fill={fig.fill === 'paper' ? PAPER : (fig.fill || 'none')}
+              stroke={fig.stroke || 'none'}
+              strokeWidth={fig.stroke ? px(fig.strokeWidth || 1.1) : 0}
+            />
+          )
+        }
+        if (fig.kind === 'line') {
+          return <line key={index} x1={fig.x1} y1={fig.z1} x2={fig.x2} y2={fig.z2} stroke={fig.stroke || '#9a3412'} strokeWidth={px(fig.strokeWidth || 1.3)} />
+        }
+        if (fig.kind === 'polyline') {
+          return (
+            <polyline
+              key={index}
+              points={fig.points.map((point) => `${point.x},${point.z}`).join(' ')}
+              fill="none"
+              stroke={fig.stroke || '#9a3412'}
+              strokeWidth={px(fig.strokeWidth || 1.1)}
+            />
+          )
+        }
+        if (fig.kind === 'text') {
+          return (
+            <text key={index} x={fig.x} y={fig.z} textAnchor="middle" fill="#9a3412" fontSize={px(11)} fontWeight="700">
+              {fig.text}
+            </text>
+          )
+        }
+        return null
+      })}
+    </g>
+  )
 }
 
 export default function PlanView({
@@ -1026,24 +1073,7 @@ export default function PlanView({
                 />
                 {(room.equipment || []).map((eq) => {
                   if (eq.category === 'door') {
-                    const symbol = doorSymbol(room, eq)
-                    const thickness = Math.max(room.wallThickness, 0.08) * 2.2
-                    const gapW = symbol.iz !== 0 ? symbol.width : thickness
-                    const gapD = symbol.ix !== 0 ? symbol.width : thickness
-                    const gx = (symbol.x1 + symbol.x2) / 2
-                    const gz = (symbol.z1 + symbol.z2) / 2
-                    return (
-                      <g key={eq.id} data-eq={eq.id}>
-                        <rect x={gx - gapW / 2} y={gz - gapD / 2} width={gapW} height={gapD} fill={PAPER} />
-                        <polyline
-                          points={symbol.arc.map((point) => `${point.x},${point.z}`).join(' ')}
-                          fill="none"
-                          stroke="#9a3412"
-                          strokeWidth={1 / view.scale}
-                        />
-                        <line x1={symbol.hinge.x} y1={symbol.hinge.z} x2={symbol.open.x} y2={symbol.open.z} stroke="#9a3412" strokeWidth={1.4 / view.scale} />
-                      </g>
-                    )
+                    return <DoorGlyph key={eq.id} room={room} eq={eq} scale={view.scale} />
                   }
                   const ex = room.x + eq.x
                   const ez = room.z + eq.z
