@@ -1045,16 +1045,6 @@ export default function FloorPlanApp() {
                     )
                   })()}
                 </g>
-                {claddingAreas(plan).length > 0 && (
-                  <g data-testid="plan-facade-legend" style={{ pointerEvents: 'none' }}>
-                    {claddingAreas(plan).map((item, index) => (
-                      <g key={item.id} transform={`translate(${sheet.x + 16} ${sheet.y + 22 + index * 16})`}>
-                        <rect width="12" height="10" fill={item.color} stroke="#44403c" strokeWidth="0.6" />
-                        <text x="16" y="9" fontSize="11" fill="#1c1917">{item.name} {formatArea(item.area)}</text>
-                      </g>
-                    ))}
-                  </g>
-                )}
                 <ServiceDrawing
                   plan={plan}
                   X={X}

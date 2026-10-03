@@ -122,17 +122,15 @@ function FacadeHeights({ X, Y, length, wallH, ridge, openings }) {
     marks.push({ y: head, text: formatMm(head) })
   }
   marks.push({ y: wallH, text: formatMm(wallH) })
-  marks.push({ y: ridge, text: formatMm(ridge) })
+  if (ridge - wallH > 0.12) marks.push({ y: ridge, text: formatMm(ridge) })
   const unique = []
   marks.forEach((mark) => {
-    if (!unique.some((item) => Math.abs(item.y - mark.y) < 0.08)) unique.push(mark)
+    if (!unique.some((item) => Math.abs(item.y - mark.y) < 0.08 || item.text === mark.text)) unique.push(mark)
   })
   const x = X(length + 0.72)
-  const x2 = X(length + 1.45)
   return (
     <g fill="#1c1917">
       <line x1={x} y1={Y(0)} x2={x} y2={Y(ridge)} stroke="#292524" strokeWidth={0.85} />
-      <line x1={x2} y1={Y(0)} x2={x2} y2={Y(ridge)} stroke="#292524" strokeWidth={0.85} />
       {unique.map((mark) => (
         <g key={`${mark.text}-${mark.y}`}>
           <line x1={X(length)} y1={Y(mark.y)} x2={x + 4} y2={Y(mark.y)} stroke="#a8a29e" strokeWidth={0.55} />
@@ -144,7 +142,88 @@ function FacadeHeights({ X, Y, length, wallH, ridge, openings }) {
       <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(-0.55)} stroke="#a8a29e" strokeWidth={0.55} />
       <line x1={X(length)} y1={Y(0)} x2={X(length)} y2={Y(-0.55)} stroke="#a8a29e" strokeWidth={0.55} />
       <text x={(X(0) + X(length)) / 2} y={Y(-0.42) + 12} textAnchor="middle" fontSize="10">{formatMm(length)}</text>
-      <text x={x2 + 8} y={(Y(0) + Y(ridge)) / 2} fontSize="10" transform={`rotate(90 ${x2 + 8} ${(Y(0) + Y(ridge)) / 2})`}>{formatMm(ridge)}</text>
+    </g>
+  )
+}
+
+function roofStyle(roofId) {
+  if (roofId === 'tile') return { fill: '#8f342c', edge: '#3f1210', fascia: '#6b5344' }
+  if (roofId === 'felt') return { fill: '#57534e', edge: '#1c1917', fascia: '#44403c' }
+  return { fill: '#9aa6b2', edge: '#1e293b', fascia: '#64748b' }
+}
+
+function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd, roofType, roofId }) {
+  const style = roofStyle(roofId)
+  const left = -overhang
+  const right = length + overhang
+  const mid = length / 2
+  const fascia = 0.16
+  const flat = roofType === 'flat' || ridge - wallH < 0.2
+  const courses = []
+  for (let y = wallH + (roofId === 'tile' ? 0.18 : 0.28); y < ridge - 0.05; y += roofId === 'tile' ? 0.16 : 0.32) courses.push(y)
+  const seams = []
+  const step = roofId === 'tile' ? 0.42 : 0.55
+  for (let u = left + step * 0.5; u < right - 0.15; u += step) seams.push(u)
+
+  if (flat) {
+    return (
+      <g data-testid="facade-roof">
+        <rect x={X(left)} y={Y(wallH + 0.18)} width={metres(right - left)} height={metres(0.18)} fill={style.fill} stroke={style.edge} strokeWidth={1.1} />
+        <rect x={X(left)} y={Y(wallH)} width={metres(right - left)} height={metres(fascia)} fill={style.fascia} stroke={style.edge} strokeWidth={0.9} />
+        <line x1={X(left)} y1={Y(wallH)} x2={X(right)} y2={Y(wallH)} stroke="#f8fafc" strokeWidth={0.7} />
+      </g>
+    )
+  }
+
+  if (!gableEnd) {
+    return (
+      <g data-testid="facade-roof">
+        <polygon
+          points={`${X(left)},${Y(wallH)} ${X(right)},${Y(wallH)} ${X(right)},${Y(ridge)} ${X(left)},${Y(ridge)}`}
+          fill={style.fill}
+          stroke={style.edge}
+          strokeWidth={1.15}
+        />
+        {roofId === 'tile'
+          ? courses.map((y) => <line key={y} x1={X(left)} y1={Y(y)} x2={X(right)} y2={Y(y)} stroke={style.edge} strokeWidth={0.9} />)
+          : seams.map((u) => <line key={u} x1={X(u)} y1={Y(wallH + 0.02)} x2={X(u)} y2={Y(ridge - 0.05)} stroke={style.edge} strokeWidth={1.35} />)}
+        <rect x={X(left)} y={Y(ridge)} width={metres(right - left)} height={metres(0.07)} fill={style.edge} />
+        <line x1={X(left)} y1={Y(ridge)} x2={X(right)} y2={Y(ridge)} stroke="#f8fafc" strokeWidth={0.8} />
+        <rect x={X(left)} y={Y(wallH)} width={metres(right - left)} height={metres(fascia)} fill={style.fascia} stroke={style.edge} strokeWidth={0.9} />
+        <line x1={X(left)} y1={Y(wallH)} x2={X(right)} y2={Y(wallH)} stroke="#e2e8f0" strokeWidth={0.8} />
+        <line x1={X(left)} y1={Y(wallH - fascia)} x2={X(right)} y2={Y(wallH - fascia)} stroke={style.edge} strokeWidth={1.15} />
+      </g>
+    )
+  }
+
+  const inset = (ax, ay, bx, by, dist) => {
+    const dx = bx - ax
+    const dy = by - ay
+    const len = Math.hypot(dx, dy) || 1
+    const ox = (dy / len) * dist
+    const oy = (-dx / len) * dist
+    return [ax + ox, ay + oy, bx + ox, by + oy]
+  }
+  const barge = 0.12
+  const leftBarge = inset(left, wallH, mid, ridge, barge)
+  const rightBarge = inset(mid, ridge, right, wallH, barge)
+  const clip = `${X(left)},${Y(wallH)} ${X(mid)},${Y(ridge)} ${X(right)},${Y(wallH)}`
+  return (
+    <g data-testid="facade-roof">
+      <defs>
+        <clipPath id="facade-roof-clip">
+          <polygon points={clip} />
+        </clipPath>
+      </defs>
+      <polygon points={clip} fill={style.fill} stroke={style.edge} strokeWidth={1.25} strokeLinejoin="miter" />
+      <g clipPath="url(#facade-roof-clip)">
+        {courses.map((y) => <line key={y} x1={X(left)} y1={Y(y)} x2={X(right)} y2={Y(y)} stroke={style.edge} strokeWidth={0.9} />)}
+      </g>
+      <line x1={X(leftBarge[0])} y1={Y(leftBarge[1])} x2={X(leftBarge[2])} y2={Y(leftBarge[3])} stroke={style.fascia} strokeWidth={2.4} />
+      <line x1={X(rightBarge[0])} y1={Y(rightBarge[1])} x2={X(rightBarge[2])} y2={Y(rightBarge[3])} stroke={style.fascia} strokeWidth={2.4} />
+      <line x1={X(left)} y1={Y(wallH)} x2={X(mid)} y2={Y(ridge)} stroke={style.edge} strokeWidth={1.35} />
+      <line x1={X(mid)} y1={Y(ridge)} x2={X(right)} y2={Y(wallH)} stroke={style.edge} strokeWidth={1.35} />
+      <line x1={X(left)} y1={Y(wallH)} x2={X(right)} y2={Y(wallH)} stroke={style.edge} strokeWidth={1.2} />
     </g>
   )
 }
@@ -175,8 +254,8 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
   const gableEnd = roof.alongX ? (side === 'east' || side === 'west') : (side === 'north' || side === 'south')
   const overhang = roof.overhang
   const wallH = layout.height
-  const rise = roof.type === 'flat' ? roof.rise : roof.rise
-  const ridge = wallH + rise
+  const rise = roof.rise
+  const ridge = Math.round((wallH + rise) * 100) / 100
   const contentLeft = -overhang - 0.15
   const contentRight = layout.length + overhang + 1.7
   const contentTop = ridge + 0.4
@@ -314,26 +393,18 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
             )
           })}
           <rect x={X(0)} y={Y(0.3)} width={metres(layout.length)} height={metres(0.3)} fill="#9ca3af" stroke="#1c1917" strokeWidth={0.9} />
-          {gableEnd ? (
-            <polygon
-              points={`${X(-overhang)},${Y(wallH)} ${X(layout.length / 2)},${Y(ridge)} ${X(layout.length + overhang)},${Y(wallH)}`}
-              fill="#e7e5e4"
-              stroke="#1c1917"
-              strokeWidth={1.2}
-              strokeLinejoin="miter"
-            />
-          ) : (
-            <g>
-              <polygon
-                points={`${X(-overhang)},${Y(wallH)} ${X(layout.length + overhang)},${Y(wallH)} ${X(layout.length + overhang)},${Y(ridge)} ${X(-overhang)},${Y(ridge)}`}
-                fill="#e7e5e4"
-                stroke="#1c1917"
-                strokeWidth={1.15}
-              />
-              <line x1={X(-overhang)} y1={Y(ridge)} x2={X(layout.length + overhang)} y2={Y(ridge)} stroke="#1c1917" strokeWidth={1.5} />
-            </g>
-          )}
-          <rect x={X(-overhang)} y={Y(wallH)} width={metres(layout.length + overhang * 2)} height={metres(0.14)} fill="#d6d3d1" stroke="#1c1917" strokeWidth={0.8} />
+          <RoofElevation
+            X={X}
+            Y={Y}
+            metres={metres}
+            length={layout.length}
+            wallH={wallH}
+            ridge={ridge}
+            overhang={overhang}
+            gableEnd={gableEnd}
+            roofType={roof.type}
+            roofId={plan.roofId}
+          />
           {layout.openings.map((opening) => (
             <ElevationOpening key={opening.id} opening={opening} X={X} Y={Y} metres={metres} />
           ))}
@@ -349,14 +420,28 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
             />
           )}
           <FacadeHeights X={X} Y={Y} metres={metres} length={layout.length} wallH={wallH} ridge={ridge} openings={layout.openings} />
-          <g data-testid="facade-legend">
-            {areas.map((row, index) => (
-              <g key={row.id} transform={`translate(${sheet.x + 18} ${sheet.y + 18 + index * 16})`}>
-                <rect width="14" height="10" fill={`url(#clad-${row.item.id})`} stroke="#44403c" strokeWidth="0.5" />
-                <text x="18" y="9" fontSize="11" fill="#1c1917">{row.item.name} {formatArea(row.area)}</text>
-              </g>
-            ))}
-          </g>
+          {areas.length > 0 && (
+            <g data-testid="facade-legend">
+              {(() => {
+                const legendW = Math.max(148, ...areas.map((row) => 40 + (`${row.item.name} ${formatArea(row.area)}`).length * 6.1))
+                const legendH = 22 + areas.length * 16
+                const lx = sheet.x + 14
+                const ly = sheet.y + 14
+                return (
+                  <>
+                    <rect x={lx} y={ly} width={legendW} height={legendH} fill="#fff" stroke="#1c1917" strokeWidth={0.9} />
+                    <text x={lx + 8} y={ly + 13} fontSize="10" fontWeight="700" fill="#1c1917">Selite</text>
+                    {areas.map((row, index) => (
+                      <g key={row.id} transform={`translate(${lx + 8} ${ly + 20 + index * 16})`}>
+                        <rect width="14" height="10" fill={`url(#clad-${row.item.id})`} stroke="#44403c" strokeWidth="0.5" />
+                        <text x="18" y="9" fontSize="11" fill="#1c1917">{row.item.name} {formatArea(row.area)}</text>
+                      </g>
+                    ))}
+                  </>
+                )
+              })()}
+            </g>
+          )}
           <g data-testid="facade-title">
             <rect x={sheet.x + (frame.x + frame.w - titleW - 2) * k} y={sheet.y + (frame.y + frame.h - titleH - 2) * k} width={titleW * k} height={titleH * k} fill="#fff" stroke="#1c1917" strokeWidth={1} />
             <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 14) * k} fontSize="13" fontWeight="750" fill="#1c1917">Julkisivu {layout.name}</text>
