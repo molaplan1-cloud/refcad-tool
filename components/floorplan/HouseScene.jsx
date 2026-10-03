@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { Edges, Html, OrbitControls } from '@react-three/drei'
+import { Edges, Html, Line, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import {
   claddingOf,
@@ -222,8 +222,14 @@ function markOf(selected, hovered, pick) {
 
 function noopRaycast() {}
 
+function outlineScale(args, mark) {
+  const pad = mark === 'selected' ? 0.07 : 0.035
+  return args.map((size) => (Math.max(size, 0.02) + pad * 2) / Math.max(size, 0.02))
+}
+
 function Solid({ args, position, rotation, color, map, opacity = 1, edges = true, pick, mark }) {
   const transparent = opacity < 0.98
+  const face = mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#ccfbf1' : color
   const edge = mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : '#1e293b'
   return (
     <mesh
@@ -236,13 +242,21 @@ function Solid({ args, position, rotation, color, map, opacity = 1, edges = true
     >
       <boxGeometry args={args} />
       <meshLambertMaterial
-        color={mark ? '#ccfbf1' : color}
+        color={face}
+        emissive={mark === 'selected' ? '#115e59' : '#000000'}
+        emissiveIntensity={mark === 'selected' ? 0.55 : 0}
         map={mark || transparent ? null : map || null}
         transparent={transparent}
         opacity={opacity}
         depthWrite={!transparent}
       />
       {edges && !transparent && <Edges threshold={20} color={edge} />}
+      {mark && (
+        <mesh scale={outlineScale(args, mark)} raycast={noopRaycast}>
+          <boxGeometry args={args} />
+          <meshBasicMaterial color={edge} side={THREE.BackSide} />
+        </mesh>
+      )}
     </mesh>
   )
 }
@@ -271,7 +285,12 @@ function WallMesh({ plan, mode, selected, hovered }) {
           const map = mode !== 'solid' ? null : cladding ? repeatedCladding(cladding.id, span, height) : finishTexture('interior', finish.id)
           const zone = wall.kind === 'exterior' ? zoneCovering(plan, wall, (piece.from + piece.to) / 2, y) : null
           const pick = zone ? { kind: 'zone', id: zone.id, wallId: wall.id } : { kind: 'wall', id: wall.id }
-          const mark = markOf(selected, hovered, pick) || ((selected?.kind === 'wall' && selected.id === wall.id && !zone) ? 'selected' : null)
+          const onThisWall = (item) => item?.kind === 'wall' && item.id === wall.id
+          const mark = samePick(selected, pick) || onThisWall(selected)
+            ? 'selected'
+            : samePick(hovered, pick) || onThisWall(hovered)
+              ? 'hover'
+              : null
           return (
             <Solid
               key={`${wall.id}-${piece.from}-${piece.to}-${piece.y0}-${piece.y1}-${piece.materialId || 'base'}`}
@@ -333,13 +352,16 @@ function FloorMesh({ room, translucent, selected, hovered }) {
   return (
     <mesh geometry={geom} position={[0, 0.012, 0]} receiveShadow={false} userData={{ pick }}>
       <meshLambertMaterial
-        color={mark ? '#99f6e4' : finish.color}
+        color={mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#99f6e4' : finish.color}
+        emissive={mark === 'selected' ? '#115e59' : '#000000'}
+        emissiveIntensity={mark === 'selected' ? 0.45 : 0}
         map={mark || translucent ? null : map}
         transparent={Boolean(translucent) && !mark}
         opacity={translucent && !mark ? 0.28 : 1}
         depthWrite={!translucent || Boolean(mark)}
         side={THREE.DoubleSide}
       />
+      {mark && <Edges threshold={1} color={mark === 'selected' ? '#0f766e' : '#14b8a6'} />}
     </mesh>
   )
 }
@@ -432,13 +454,16 @@ function RoofMesh({ plan, mode, selected, hovered }) {
     <group>
       <mesh geometry={geom} userData={{ pick }} raycast={ghost ? noopRaycast : undefined}>
         <meshLambertMaterial
-          color={mark ? '#99f6e4' : ghost ? '#94a3b8' : finish.color}
+          color={mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#99f6e4' : ghost ? '#94a3b8' : finish.color}
+          emissive={mark === 'selected' ? '#115e59' : '#000000'}
+          emissiveIntensity={mark === 'selected' ? 0.45 : 0}
           map={mark ? null : map}
           side={THREE.DoubleSide}
           transparent={ghost && !mark}
           opacity={ghost && !mark ? 0.15 : 1}
           depthWrite={!ghost || Boolean(mark)}
         />
+        {mark && <Edges threshold={15} color={mark === 'selected' ? '#0f766e' : '#14b8a6'} />}
       </mesh>
       {edgeSpecs.map((edge, index) => (
         <mesh key={index} position={edge.position} quaternion={edge.quaternion}>
@@ -601,9 +626,9 @@ function FixtureMesh({ fixture, selected, hovered }) {
     <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]} userData={{ pick }}>
       <FixtureBody type={fixture.type} w={w} d={d} />
       {mark && (
-        <mesh position={[0, 0.04, 0]}>
-          <boxGeometry args={[w + 0.08, 0.04, d + 0.08]} />
-          <meshBasicMaterial color={mark === 'selected' ? '#0f766e' : '#14b8a6'} />
+        <mesh position={[0, 0.45, 0]}>
+          <boxGeometry args={[w + (mark === 'selected' ? 0.14 : 0.07), 0.95, d + (mark === 'selected' ? 0.14 : 0.07)]} />
+          <meshBasicMaterial color={mark === 'selected' ? '#0f766e' : '#14b8a6'} wireframe />
         </mesh>
       )}
     </group>
@@ -642,20 +667,71 @@ function FrameCamera({ plan, fitToken, controlsRef }) {
   return null
 }
 
-function PickBridge({ onSelect, onContext, onHover }) {
+function pixelsPerMetre(camera, gl, world) {
+  const rect = gl.domElement.getBoundingClientRect()
+  const origin = world.clone()
+  const shifted = world.clone()
+  shifted.x += 1
+  origin.project(camera)
+  shifted.project(camera)
+  const dx = (shifted.x - origin.x) * rect.width * 0.5
+  const dy = (shifted.y - origin.y) * rect.height * 0.5
+  return Math.max(1, Math.hypot(dx, dy))
+}
+
+function FloorCursor({ point, ppm, kind }) {
+  if (!point) return null
+  const arm = 18 / Math.max(ppm || 40, 1)
+  const mark = 8 / Math.max(ppm || 40, 1)
+  return (
+    <group position={[point.x, 0.04, point.z]}>
+      <mesh renderOrder={20}>
+        <boxGeometry args={[arm * 2, 0.02, Math.max(0.01, arm * 0.08)]} />
+        <meshBasicMaterial color="#0f766e" depthTest={false} />
+      </mesh>
+      <mesh renderOrder={20}>
+        <boxGeometry args={[Math.max(0.01, arm * 0.08), 0.02, arm * 2]} />
+        <meshBasicMaterial color="#0f766e" depthTest={false} />
+      </mesh>
+      {kind === 'corner' && (
+        <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={21}>
+          <ringGeometry args={[mark, mark * 1.45, 4]} />
+          <meshBasicMaterial color="#0f766e" depthTest={false} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      {kind === 'midpoint' && (
+        <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={21}>
+          <circleGeometry args={[mark, 3]} />
+          <meshBasicMaterial color="#0f766e" depthTest={false} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+    </group>
+  )
+}
+
+function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onDropFixture }) {
   const { camera, gl, scene } = useThree()
-  const handlers = useRef({ onSelect, onContext, onHover })
-  handlers.current = { onSelect, onContext, onHover }
+  const handlers = useRef({})
+  handlers.current = { drawMode, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onDropFixture }
   useLayoutEffect(() => {
     const raycaster = new THREE.Raycaster()
     const pointer = new THREE.Vector2()
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    const hitPoint = new THREE.Vector3()
     let down = null
+    let drag = null
     let frame = 0
-    const read = (event) => {
+    const aim = (event) => {
       const rect = gl.domElement.getBoundingClientRect()
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+      pointer.x = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1
+      pointer.y = -((event.clientY - rect.top) / Math.max(rect.height, 1)) * 2 + 1
       raycaster.setFromCamera(pointer, camera)
+    }
+    const floor = () => {
+      if (!raycaster.ray.intersectPlane(plane, hitPoint)) return null
+      return { x: hitPoint.x, z: hitPoint.z, ppm: pixelsPerMetre(camera, gl, hitPoint) }
+    }
+    const read = () => {
       const hits = raycaster.intersectObjects(scene.children, true)
       for (const hit of hits) {
         let node = hit.object
@@ -668,43 +744,120 @@ function PickBridge({ onSelect, onContext, onHover }) {
     }
     const onPointerDown = (event) => {
       if (event.button !== 0) return
+      aim(event)
       down = { x: event.clientX, y: event.clientY }
+      if (handlers.current.drawMode) return
+      const pick = read()
+      if (pick?.kind === 'fixture' || pick?.kind === 'opening') {
+        drag = { kind: pick.kind, id: pick.id, moved: false }
+        if (controlsRef.current) controlsRef.current.enabled = false
+      }
     }
     const onPointerUp = (event) => {
       if (event.button !== 0 || !down) return
       const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y)
       down = null
+      aim(event)
+      const spot = floor()
+      if (drag) {
+        const ended = drag
+        drag = null
+        if (controlsRef.current) controlsRef.current.enabled = true
+        if (ended.moved && spot) {
+          if (ended.kind === 'fixture') handlers.current.onFixtureDrag?.(ended.id, spot, 'end')
+          else handlers.current.onOpeningDrag?.(ended.id, spot, 'end')
+        } else if (ended.kind === 'fixture') handlers.current.onSelect?.({ kind: 'fixture', id: ended.id })
+        else handlers.current.onSelect?.({ kind: 'opening', id: ended.id })
+        return
+      }
       if (moved > 6) return
-      handlers.current.onSelect?.(read(event))
+      if (handlers.current.drawMode && spot) handlers.current.onPlace?.(spot)
+      else handlers.current.onSelect?.(read())
     }
     const onMenu = (event) => {
       event.preventDefault()
-      handlers.current.onContext?.(read(event), event)
+      aim(event)
+      handlers.current.onContext?.(read(), event, floor())
     }
     const onMove = (event) => {
+      aim(event)
+      const spot = floor()
+      if (drag && spot) {
+        const travel = down ? Math.hypot(event.clientX - down.x, event.clientY - down.y) : 0
+        if (travel > 3) drag.moved = true
+        if (drag.moved) {
+          if (drag.kind === 'fixture') handlers.current.onFixtureDrag?.(drag.id, spot, 'move')
+          else handlers.current.onOpeningDrag?.(drag.id, spot, 'move')
+          return
+        }
+      }
+      if (handlers.current.drawMode && spot) handlers.current.onPreview?.(spot)
       if (frame) return
       frame = requestAnimationFrame(() => {
         frame = 0
-        handlers.current.onHover?.(read(event))
+        if (!drag) handlers.current.onHover?.(read())
       })
+    }
+    const onDragOver = (event) => {
+      const types = event.dataTransfer ? Array.from(event.dataTransfer.types || []) : []
+      if (!types.includes('application/x-fixture') && !types.includes('text/plain')) return
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+    }
+    const onDrop = (event) => {
+      const id = event.dataTransfer?.getData('application/x-fixture') || event.dataTransfer?.getData('text/plain')
+      if (!id) return
+      event.preventDefault()
+      aim(event)
+      const spot = floor()
+      if (spot) handlers.current.onDropFixture?.(id, spot)
     }
     const el = gl.domElement
     el.addEventListener('pointerdown', onPointerDown)
     el.addEventListener('pointerup', onPointerUp)
     el.addEventListener('contextmenu', onMenu)
     el.addEventListener('pointermove', onMove)
+    el.addEventListener('dragover', onDragOver)
+    el.addEventListener('drop', onDrop)
     return () => {
       el.removeEventListener('pointerdown', onPointerDown)
       el.removeEventListener('pointerup', onPointerUp)
       el.removeEventListener('contextmenu', onMenu)
       el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('dragover', onDragOver)
+      el.removeEventListener('drop', onDrop)
       if (frame) cancelAnimationFrame(frame)
+      if (controlsRef.current) controlsRef.current.enabled = true
     }
-  }, [camera, gl, scene])
+  }, [camera, gl, scene, controlsRef])
   return null
 }
 
-export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0, selected = null, hovered = null, onSelect, onContext, onHover }) {
+export default function HouseScene({
+  plan,
+  wallMode,
+  roofMode,
+  fitToken = 0,
+  selected = null,
+  hovered = null,
+  drawMode = false,
+  cursor = null,
+  cursorPpm = 40,
+  snapKind = null,
+  draft = null,
+  liveEnd = null,
+  liveLabel = '',
+  roomDraft = null,
+  roomCursor = null,
+  onSelect,
+  onContext,
+  onHover,
+  onPreview,
+  onPlace,
+  onFixtureDrag,
+  onOpeningDrag,
+  onDropFixture,
+}) {
   const controlsRef = useRef(null)
   const box = planBounds(plan)
   const cx = (box.minX + box.maxX) / 2
@@ -724,7 +877,11 @@ export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0, sel
       <color attach="background" args={['#e7e5e4']} />
       <ambientLight intensity={0.94} />
       <directionalLight position={[8, 22, 10]} intensity={0.5} />
-      <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2)), '#cfcabe', '#e4e0d8']} position={[cx, 0, cz]} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.02, cz]} raycast={noopRaycast}>
+        <planeGeometry args={[Math.max(24, span * 2.4), Math.max(24, span * 2.4)]} />
+        <meshBasicMaterial color="#f3f1ec" />
+      </mesh>
+      <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2) / (drawMode ? 0.5 : 1)), '#b7b1a4', '#e4e0d8']} position={[cx, 0, cz]} />
       {visibleRooms(plan).map((room) => (
         <FloorMesh
           key={room.id}
@@ -734,7 +891,7 @@ export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0, sel
           translucent={layerVisible(plan, 'drain') && (plan.services?.runs || []).some((run) => run.system === 'drain')}
         />
       ))}
-      <RoomLabels plan={plan} />
+      {roofMode !== 'solid' && <RoomLabels plan={plan} />}
       <WallMesh plan={plan} mode={wallMode} selected={selected} hovered={hovered} />
       {(plan.openings || []).map((opening) => (
         <OpeningMesh key={opening.id} plan={plan} opening={opening} selected={selected} hovered={hovered} />
@@ -744,15 +901,55 @@ export default function HouseScene({ plan, wallMode, roofMode, fitToken = 0, sel
         <FixtureMesh key={fixture.id} fixture={fixture} selected={selected} hovered={hovered} />
       ))}
       <Services3D plan={plan} selected={selected} hovered={hovered} />
+      {drawMode && cursor && <FloorCursor point={cursor} ppm={cursorPpm} kind={snapKind} />}
+      {draft && liveEnd && (
+        <group>
+          <mesh
+            position={[(draft.x + liveEnd.x) / 2, 0.07, (draft.z + liveEnd.z) / 2]}
+            rotation={[0, Math.atan2(liveEnd.x - draft.x, liveEnd.z - draft.z), 0]}
+          >
+            <boxGeometry args={[0.08, 0.05, Math.max(0.05, Math.hypot(liveEnd.x - draft.x, liveEnd.z - draft.z))]} />
+            <meshBasicMaterial color="#0f766e" depthTest={false} />
+          </mesh>
+          <Line points={[[draft.x, 0.08, draft.z], [liveEnd.x, 0.08, liveEnd.z]]} color="#0f766e" lineWidth={2} />
+          <Html position={[(draft.x + liveEnd.x) / 2, 0.35, (draft.z + liveEnd.z) / 2]} center zIndexRange={[30, 0]} style={{ pointerEvents: 'none' }}>
+            <div data-testid="wall-length-3d" style={{ background: '#042f2e', color: '#ccfbf1', fontWeight: 700, fontSize: 13, padding: '3px 7px', borderRadius: 6, whiteSpace: 'nowrap' }}>{liveLabel}</div>
+          </Html>
+        </group>
+      )}
+      {roomDraft && roomCursor && (
+        <Line
+          points={[
+            [roomDraft.x, 0.08, roomDraft.z],
+            [roomCursor.x, 0.08, roomDraft.z],
+            [roomCursor.x, 0.08, roomCursor.z],
+            [roomDraft.x, 0.08, roomCursor.z],
+            [roomDraft.x, 0.08, roomDraft.z],
+          ]}
+          color="#0f766e"
+          lineWidth={2}
+        />
+      )}
       <OrbitControls
         ref={controlsRef}
         makeDefault
         target={[cx, 1.25, cz]}
         maxPolarAngle={Math.PI / 2.08}
         enableDamping={false}
-        mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: -1 }}
+        mouseButtons={{ LEFT: drawMode ? -1 : THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: -1 }}
       />
-      <PickBridge onSelect={onSelect} onContext={onContext} onHover={onHover} />
+      <EditBridge
+        drawMode={drawMode}
+        controlsRef={controlsRef}
+        onSelect={onSelect}
+        onContext={onContext}
+        onHover={onHover}
+        onPreview={onPreview}
+        onPlace={onPlace}
+        onFixtureDrag={onFixtureDrag}
+        onOpeningDrag={onOpeningDrag}
+        onDropFixture={onDropFixture}
+      />
       <FrameCamera plan={plan} fitToken={fitToken} controlsRef={controlsRef} />
     </Canvas>
   )

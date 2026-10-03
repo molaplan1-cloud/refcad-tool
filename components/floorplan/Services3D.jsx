@@ -13,8 +13,12 @@ function Segment({ a, b, radius, color, pick, mark }) {
   const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction)
   return (
     <mesh position={mid.toArray()} quaternion={quaternion} userData={pick ? { pick } : undefined}>
-      <cylinderGeometry args={[Math.max(radius, mark ? 0.06 : radius), Math.max(radius, mark ? 0.06 : radius), length, 8]} />
-      <meshLambertMaterial color={mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : color} />
+      <cylinderGeometry args={[Math.max(radius, mark === 'selected' ? 0.09 : mark ? 0.055 : radius), Math.max(radius, mark === 'selected' ? 0.09 : mark ? 0.055 : radius), length, 8]} />
+      <meshLambertMaterial
+        color={mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : color}
+        emissive={mark === 'selected' ? '#042f2e' : '#000000'}
+        emissiveIntensity={mark === 'selected' ? 0.6 : 0}
+      />
     </mesh>
   )
 }
