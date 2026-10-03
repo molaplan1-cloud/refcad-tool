@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { ROOF_TYPES } from '@/lib/floorplan'
+import { useLocale } from '@/components/i18n/Locale'
 
 const inputStyle = {
   width: '100%',
@@ -58,13 +59,14 @@ function Field({ label, children }) {
 }
 
 export function StartDialog({ library, onEmpty, onExample, onOpen }) {
+  const { t } = useLocale()
   return (
-    <Overlay testid="plan-start" title="Aloita pohjakuva">
-      <p style={{ fontSize: 13, margin: '0 0 12px', color: '#44403c' }}>Valitse tyhjä pohja, esimerkkitalo tai aiemmin tallennettu työ.</p>
-      <button type="button" data-testid="start-empty" style={choiceBtn} onClick={onEmpty}>Uusi tyhjä pohja</button>
-      <button type="button" data-testid="start-example" style={choiceBtn} onClick={onExample}>Esimerkkitalo</button>
-      <div style={{ fontSize: 12, fontWeight: 750, margin: '8px 0' }}>Tallennetut</div>
-      {(library?.projects || []).length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>Ei tallennettuja pohjia.</div>}
+    <Overlay testid="plan-start" title={t('start.title')}>
+      <p style={{ fontSize: 13, margin: '0 0 12px', color: '#44403c' }}>{t('start.lead')}</p>
+      <button type="button" data-testid="start-empty" style={choiceBtn} onClick={onEmpty}>{t('start.empty')}</button>
+      <button type="button" data-testid="start-example" style={choiceBtn} onClick={onExample}>{t('file.example')}</button>
+      <div style={{ fontSize: 12, fontWeight: 750, margin: '8px 0' }}>{t('start.saved')}</div>
+      {(library?.projects || []).length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>{t('start.none')}</div>}
       {(library?.projects || []).map((item) => (
         <button key={item.id} type="button" data-testid={`start-open-${item.id}`} style={choiceBtn} onClick={() => onOpen(item.id)}>
           {item.name}

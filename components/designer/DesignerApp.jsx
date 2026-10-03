@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
+import { LanguageSwitch, useLocale } from '@/components/i18n/Locale'
 import PlanView from './PlanView'
 import HeatLoadPanel from './HeatLoadPanel'
 import { ROOM_TYPES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
@@ -19,6 +20,7 @@ import { decorateExample } from '@/lib/exampleScene'
 import { templatesForGroup } from '@/lib/selection'
 import { REFRIGERANT_IDS } from '@/lib/pipeSizing'
 import { INTERNAL_LIQUID_TRAIN, PIPE_STYLES, autoCircuit, validateRoute } from '@/lib/pipeTopology'
+import { heightMetres, insertRisers, moveVertexPoints, riseMetres, setRunMount, splitPoints } from '@/lib/routeEdit'
 import {
   defaultElevation,
   doorOnWall,
@@ -28,6 +30,18 @@ import {
   snapOutdoorUnit,
 } from '@/lib/placement'
 import { applyOutline, bboxOf, clampGroupTranslation, cleanOrthogonal, isRectangleOutline, scaleOutline, selfIntersects, translateOutline } from '@/lib/cadDraw'
+import {
+  DESIGNER_CLIPBOARD_KEY,
+  classifyDesignerIds,
+  designerClipboard,
+  designerHits,
+  designerShared,
+  pasteDesignerClipboard,
+  patchDesigner,
+  runDesignerCommand,
+  selectionBox,
+} from '@/lib/cadEdit'
+import { CadPrompt, CadToolbar, MultiProperties } from '../floorplan/CadTools'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
 import { panelSchedule } from '@/lib/sharedWalls'
 import { doorChoices, doorEquipmentPatch, doorSchedule, doorTypeById } from '@/lib/doors'
@@ -215,6 +229,7 @@ export default function DesignerApp({
   user = null,
   persistLabel = 'selaimeen',
 }) {
+  const { t, locale, setLocale } = useLocale()
   const [name, setName] = useState(initialName || 'Uusi projekti')
   const [rooms, setRooms] = useState(() => normalizeRooms(initialRooms))
   const [pipes, setPipes] = useState(initialPipes || [])
@@ -242,6 +257,7 @@ export default function DesignerApp({
   const [drawType, setDrawType] = useState('chilled')
   const [view, setView] = useState('2d')
   const [selectedIds, setSelectedIds] = useState([])
+  const [cad, setCad] = useState(null)
   const [placingId, setPlacingId] = useState(null)
   const [notice, setNotice] = useState('')
   const [pipeOffer, setPipeOffer] = useState(null)
@@ -256,6 +272,8 @@ export default function DesignerApp({
   const pipesRef = useRef(pipes)
   const cablesRef = useRef(cables)
   const selectedRef = useRef(selectedIds)
+  const originScene = useRef(null)
+  const cadRef = useRef(null)
   const undoRef = useRef([])
   const redoRef = useRef([])
   const editSnap = useRef(null)
@@ -264,6 +282,7 @@ export default function DesignerApp({
   pipesRef.current = pipes
   cablesRef.current = cables
   selectedRef.current = selectedIds
+  cadRef.current = cad
   const selectedId = selectedIds[selectedIds.length - 1] || null
   const snapFlags = { grid: snapOn, endpoint: true, midpoint: true, wall: true, ortho: true }
 
@@ -320,14 +339,60 @@ export default function DesignerApp({
       } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
         e.preventDefault()
         redo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        const hits = designerHits(
+          { rooms: roomsRef.current, pipes: pipesRef.current, cables: cablesRef.current },
+          selectionBox({ x: -1e6, z: -1e6 }, { x: 1e6, z: 1e6 }),
+        )
+        setSelectedIds(hits.map((item) => item.id))
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        e.preventDefault()
+        const payload = designerClipboard({ rooms: roomsRef.current, pipes: pipesRef.current, cables: cablesRef.current }, selectedRef.current)
+        window.localStorage.setItem(DESIGNER_CLIPBOARD_KEY, JSON.stringify(payload))
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+        e.preventDefault()
+        const payload = designerClipboard({ rooms: roomsRef.current, pipes: pipesRef.current, cables: cablesRef.current }, selectedRef.current)
+        window.localStorage.setItem(DESIGNER_CLIPBOARD_KEY, JSON.stringify(payload))
+        deleteSelected()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        let payload = null
+        try { payload = JSON.parse(window.localStorage.getItem(DESIGNER_CLIPBOARD_KEY) || 'null') } catch (err) { payload = null }
+        if (!payload) return
+        pushUndo()
+        const next = pasteDesignerClipboard({ rooms: roomsRef.current, pipes: pipesRef.current, cables: cablesRef.current }, payload, { x: (payload.rooms?.[0]?.x || 0) + 1, z: payload.rooms?.[0]?.z || 0 })
+        setRooms(next.rooms)
+        setPipes(next.pipes)
+        setCables(next.cables)
       } else if (e.key === 'Escape') {
+        if (cadRef.current) {
+          cadRef.current = null
+          if (originScene.current) {
+            setRooms(originScene.current.rooms)
+            setPipes(originScene.current.pipes)
+            setCables(originScene.current.cables)
+          }
+          originScene.current = null
+          setCad(null)
+        } else setSelectedIds([])
         setPlacingId(null)
         setTool('select')
         setNotice('')
+      } else if (e.key === 'Enter' && cadRef.current?.step === 'to') {
+        confirmCad(cadRef.current.base || { x: 0, z: 0 })
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         deleteSelected()
-      } else if (e.key.toLowerCase() === 'v') setTool('select')
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 'm') beginCad('move')
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 'c') beginCad('copy')
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 'e') beginCad('rotate')
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 's') beginCad('scale')
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 'b') beginCad('array')
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 'o') beginCad('offset')
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 't') beginCad('stretch')
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 'n') beginCad('align')
+      else if (e.key.toLowerCase() === 'v') setTool('select')
       else if (e.key.toLowerCase() === 'r') setTool('draw')
       else if (e.key.toLowerCase() === 'p') setTool('polygon')
       else if (e.key.toLowerCase() === 'w') setTool('partition')
@@ -516,10 +581,13 @@ export default function DesignerApp({
 
   function commitPipes(result) {
     pushUndo()
-    const kept = pipesRef.current.filter((pipe) => pipe.kind === 'cable')
-    setPipes([...kept, ...result.pipes])
-    setSelectedIds(result.pipes[0] ? [result.pipes[0].id] : [])
-    setNotice(result.notice)
+    const locked = pipesRef.current.filter((pipe) => pipe.locked)
+    const lockedKey = new Set(locked.map((pipe) => `${pipe.kind}:${pipe.segment || ''}`))
+    const fresh = (result.pipes || []).filter((pipe) => !lockedKey.has(`${pipe.kind}:${pipe.segment || ''}`))
+    const loose = pipesRef.current.filter((pipe) => pipe.kind === 'cable' && !pipe.locked)
+    setPipes([...locked, ...loose, ...fresh])
+    setSelectedIds(fresh[0] ? [fresh[0].id] : (locked[0] ? [locked[0].id] : []))
+    setNotice(locked.length ? `${result.notice || 'Putket reititetty.'} Manuaaliset reitit säilyivät.` : result.notice)
     setPipeOffer(null)
   }
 
@@ -630,6 +698,22 @@ export default function DesignerApp({
     setView('2d')
     setFitToken((token) => token + 1)
     setNotice('Esimerkki: kylmähuoneet, varasto, konehuone ja putket. Kuorma on oikealla.')
+  }
+
+  const routeBase = useRef(null)
+  function onRouteDrag(kind, id, index, at, phase) {
+    if (phase === 'start') {
+      pushUndo()
+      const list = kind === 'cable' ? cablesRef.current : pipesRef.current
+      const item = list.find((entry) => entry.id === id)
+      routeBase.current = item ? item.points.map((point) => ({ ...point })) : null
+      return
+    }
+    if (phase !== 'move' || !at || !routeBase.current) return
+    const points = moveVertexPoints(routeBase.current, index, at, { ortho: true })
+    const apply = (items) => items.map((item) => (item.id === id ? { ...item, points, riseM: riseMetres(points), locked: true, manual: true } : item))
+    if (kind === 'cable') setCables(apply(cablesRef.current))
+    else setPipes(apply(pipesRef.current))
   }
 
   function patchEquipment(id, patch) {
@@ -822,6 +906,106 @@ export default function DesignerApp({
     reader.readAsText(file)
   }
 
+  function sceneNow() {
+    return { rooms: roomsRef.current, pipes: pipesRef.current, cables: cablesRef.current }
+  }
+
+  function applyScene(next) {
+    setRooms(next.rooms)
+    setPipes(next.pipes || [])
+    setCables(next.cables || [])
+  }
+
+  function beginCad(name, extra) {
+    const scene = sceneNow()
+    const ids = selectedRef.current
+    const picks = classifyDesignerIds(scene, ids)
+    if (name === 'delete') { deleteSelected(); return }
+    if (name === 'group') {
+      pushUndo()
+      applyScene(patchDesigner(scene, picks, { groupId: `grp-${genId()}` }))
+      return
+    }
+    if (name === 'ungroup') { pushUndo(); applyScene(patchDesigner(scene, picks, { groupId: undefined })); return }
+    if (name === 'lock') { pushUndo(); applyScene(patchDesigner(scene, picks, { cadLock: true })); return }
+    if (name === 'unlock') { pushUndo(); applyScene(patchDesigner(scene, picks, { cadLock: false })); return }
+    if (name === 'hide') { pushUndo(); applyScene(patchDesigner(scene, picks, { hidden: true })); setSelectedIds([]); return }
+    if (name === 'show') {
+      pushUndo()
+      applyScene(patchDesigner(scene, classifyDesignerIds(scene, [
+        ...scene.rooms.map((room) => room.id),
+        ...scene.rooms.flatMap((room) => (room.equipment || []).map((eq) => eq.id)),
+        ...scene.pipes.map((pipe) => pipe.id),
+        ...scene.cables.map((cable) => cable.id),
+      ]), { hidden: false }))
+      return
+    }
+    if (name === 'isolate') {
+      pushUndo()
+      const keep = new Set(ids)
+      setRooms(scene.rooms.map((room) => ({
+        ...room,
+        hidden: !keep.has(room.id),
+        equipment: (room.equipment || []).map((eq) => ({ ...eq, hidden: !keep.has(eq.id) && !keep.has(room.id) })),
+      })))
+      setPipes(scene.pipes.map((pipe) => ({ ...pipe, hidden: !keep.has(pipe.id) })))
+      setCables(scene.cables.map((cable) => ({ ...cable, hidden: !keep.has(cable.id) })))
+      return
+    }
+    if (name === 'layer') { pushUndo(); applyScene(patchDesigner(scene, picks, { layer: extra })); return }
+    if (name === 'rotate90') {
+      const room = scene.rooms.find((item) => ids.includes(item.id)) || scene.rooms[0]
+      const base = { x: room?.x || 0, z: room?.z || 0 }
+      pushUndo()
+      applyScene(runDesignerCommand(scene, ids, { name: 'rotate', base, value: '90' }, base))
+      return
+    }
+    if (name === 'similar') {
+      const kind = picks[0]?.kind
+      if (!kind) return
+      const hits = designerHits(scene, selectionBox({ x: -1e6, z: -1e6 }, { x: 1e6, z: 1e6 })).filter((item) => item.kind === kind)
+      setSelectedIds(hits.map((item) => item.id))
+      return
+    }
+    if (!ids.length && name !== 'stretch' && name !== 'measure') return
+    originScene.current = scene
+    setCad({
+      name,
+      step: name === 'stretch' ? 'window' : 'base',
+      copies: 1,
+      count: 3,
+      cols: 3,
+      rows: 2,
+      arrayMode: 'linear',
+      edge: 'left',
+      value: '',
+    })
+    setTool('select')
+    setMenu(null)
+  }
+
+  function confirmCad(point) {
+    const origin = originScene.current
+    const current = cadRef.current
+    if (!origin || !current || current.name === 'measure') {
+      cadRef.current = null
+      originScene.current = null
+      setCad(null)
+      return
+    }
+    cadRef.current = null
+    const next = runDesignerCommand(origin, selectedRef.current, current, point)
+    undoRef.current.push({
+      rooms: structuredClone(origin.rooms),
+      pipes: structuredClone(origin.pipes),
+      cables: structuredClone(origin.cables),
+    })
+    redoRef.current = []
+    applyScene(next)
+    originScene.current = null
+    setCad(null)
+  }
+
   const saveText = saveState === 'saving' ? 'Tallentaa…' : saveState === 'error' ? 'Tallennus epäonnistui' : `Tallennettu ${persistLabel}`
   const planProps = {
     rooms,
@@ -854,6 +1038,35 @@ export default function DesignerApp({
     onCreatePolygon,
     onCreateRoute,
     onPlace,
+    onPreviewPipes: setPipes,
+    onPreviewCables: setCables,
+    cad,
+    onCadDown: (world) => {
+      const current = cadRef.current
+      if (!current) return
+      if (current.step === 'base') {
+        originScene.current = originScene.current || sceneNow()
+        const next = { ...current, step: 'to', base: world }
+        cadRef.current = next
+        setCad(next)
+        return
+      }
+      if (current.step === 'to') confirmCad(world)
+    },
+    onCadMove: (world) => {
+      const current = cadRef.current
+      if (!current || current.step !== 'to' || !originScene.current) return
+      if (current.name === 'measure') {
+        setCad({ ...current, readout: `${Math.round(Math.hypot(world.x - current.base.x, world.z - current.base.z) * 1000)} mm` })
+        return
+      }
+      applyScene(runDesignerCommand(originScene.current, selectedRef.current, current, world))
+    },
+    onCadStretch: (box) => {
+      const hits = designerHits(sceneNow(), box)
+      setSelectedIds(hits.map((item) => item.id))
+      setCad((current) => (current ? { ...current, step: 'base', box } : current))
+    },
     onContextMenu: (hit) => {
       setSelectedIds([hit.id])
       setMenu(hit)
@@ -872,9 +1085,10 @@ export default function DesignerApp({
         background: '#14181f', borderBottom: '1px solid #0c0f14', color: '#f5f5f4',
       }}>
         <Link href="/projects" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, letterSpacing: -0.2, flexShrink: 0 }}>RefCAD</Link>
-        <Link href="/pohjakuva" data-testid="open-floorplan" title="Talon pohjakuva" style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>Pohjakuva</Link>
+        <LanguageSwitch value={locale} onChange={setLocale} />
+        <Link href="/pohjakuva" data-testid="open-floorplan" title={t('designer.floorplanTitle')} style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>{t('designer.floorplan')}</Link>
         <input
-          aria-label="Projektin nimi"
+          aria-label={t('designer.projectName')}
           value={name}
           onChange={(e) => setName(e.target.value)}
           style={{
@@ -884,7 +1098,7 @@ export default function DesignerApp({
           }}
         />
         <span title={saveText} style={{ fontSize: 11, color: saveState === 'error' ? '#fca5a5' : '#86efac', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          {saveState === 'error' ? 'Virhe' : saveState === 'saving' ? 'Tallentaa' : 'Tallennettu'}
+          {saveState === 'error' ? t('designer.error') : saveState === 'saving' ? t('designer.saving') : t('designer.saved')}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
           <button type="button" data-testid="tool-select" title="Valitse (V)" style={iconBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
@@ -985,6 +1199,46 @@ export default function DesignerApp({
         </div>
         <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={importJson} />
       </header>
+
+      <CadToolbar
+        active={cad?.name}
+        onCommand={beginCad}
+        onSelectType={(type) => {
+          const hits = designerHits(sceneNow(), selectionBox({ x: -1e6, z: -1e6 }, { x: 1e6, z: 1e6 }))
+          setSelectedIds(hits.filter((item) => {
+            if (!type || type === 'all') return true
+            if (type === 'room') return item.kind === 'room'
+            if (type === 'door') {
+              const room = roomsRef.current.find((entry) => (entry.equipment || []).some((eq) => eq.id === item.id))
+              return room?.equipment?.find((eq) => eq.id === item.id)?.category === 'door'
+            }
+            if (type === 'electric') return item.kind === 'cable'
+            return item.kind === 'room' || item.kind === type
+          }).map((item) => item.id))
+        }}
+        onLayer={(layer) => beginCad('layer', layer)}
+      />
+      {cad && (
+        <div style={{ padding: '4px 10px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
+          <CadPrompt
+            command={cad}
+            readout={cad.readout}
+            onChange={(patch) => setCad((current) => {
+              if (!current) return current
+              const next = { ...current, ...patch }
+              cadRef.current = next
+              return next
+            })}
+            onApply={() => { if (cad.step === 'to') confirmCad(cad.base || { x: 0, z: 0 }) }}
+            onCancel={() => {
+              cadRef.current = null
+              if (originScene.current) applyScene(originScene.current)
+              originScene.current = null
+              setCad(null)
+            }}
+          />
+        </div>
+      )}
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <aside data-testid="template-library" style={{ width: 248, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #e7e5e4' }}>
@@ -1111,11 +1365,11 @@ export default function DesignerApp({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%' }}>
               <PlanView {...planProps} />
               <div style={{ borderLeft: '1px solid #d6d3d1' }}>
-                <Scene3D rooms={rooms} pipes={pipes} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} unitSystem={unitSystem} />
+                <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
               </div>
             </div>
           ) : view === '3d' ? (
-            <Scene3D rooms={rooms} pipes={pipes} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} unitSystem={unitSystem} />
+            <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
           ) : (
             <PlanView {...planProps} />
           )}
@@ -1166,6 +1420,40 @@ export default function DesignerApp({
         </main>
 
         {view !== 'schematic' && <aside style={{ width: 340, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #e7e5e4' }}>
+          {selectedIds.length > 1 && (
+            <div style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
+              <MultiProperties count={selectedIds.length}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 650 }}>
+                  Lämpötila °C
+                  <input
+                    data-testid="multi-temp"
+                    type="number"
+                    defaultValue={designerShared(sceneNow(), selectedIds).temp ?? ''}
+                    key={`temp-${selectedIds.join('-')}`}
+                    onBlur={(event) => {
+                      const temp = Number(event.target.value)
+                      if (!Number.isFinite(temp)) return
+                      pushUndo()
+                      applyScene(patchDesigner(sceneNow(), classifyDesignerIds(sceneNow(), selectedIds).filter((item) => item.kind === 'room'), { temp }))
+                    }}
+                    style={{ display: 'block', width: '100%', marginTop: 4, height: 28, borderRadius: 6, border: '1px solid #d6d3d1' }}
+                  />
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650 }}>
+                  <input
+                    data-testid="multi-lock"
+                    type="checkbox"
+                    checked={Boolean(designerShared(sceneNow(), selectedIds).cadLock)}
+                    onChange={(event) => {
+                      pushUndo()
+                      applyScene(patchDesigner(sceneNow(), classifyDesignerIds(sceneNow(), selectedIds), { cadLock: event.target.checked }))
+                    }}
+                  />
+                  Lukittu
+                </label>
+              </MultiProperties>
+            </div>
+          )}
           <HeatLoadPanel
             room={selectedRoom}
             rooms={rooms}
@@ -1182,6 +1470,7 @@ export default function DesignerApp({
             }}
             selectedEquipment={selectedEquipment}
             selectedPipe={pipes.find((pipe) => pipe.id === selectedId) || null}
+            selectedCable={cables.find((cable) => cable.id === selectedId) || null}
             pipes={pipes}
             onPatchEquipment={(patch) => {
               if (!selectedEquipment) return
@@ -1189,7 +1478,39 @@ export default function DesignerApp({
             }}
             onPatchPipe={(patch) => {
               if (!selectedId) return
-              setPipes((current) => current.map((pipe) => (pipe.id === selectedId ? { ...pipe, ...patch } : pipe)))
+              const pipe = pipesRef.current.find((item) => item.id === selectedId)
+              const cable = cablesRef.current.find((item) => item.id === selectedId)
+              const apply = (item) => {
+                if (!item) return item
+                const next = { ...item, ...patch }
+                if (patch.points) next.points = insertRisers(patch.points)
+                if (next.points) next.riseM = riseMetres(next.points)
+                if (patch.heightMode) {
+                  const host = roomsRef.current[0]
+                  next.points = setRunMount(item.points, heightMetres({ floorHeight: host?.height || 3 }, patch.heightMode, 'iv'), patch.heightMode)
+                  next.locked = true
+                }
+                if (patch.locked === false) next.locked = false
+                else if (patch.points || patch.material || patch.insulation || patch.label || patch.heightMode) next.locked = true
+                return next
+              }
+              if (cable) setCables((current) => current.map((item) => (item.id === selectedId ? apply(item) : item)))
+              else if (pipe) setPipes((current) => current.map((item) => (item.id === selectedId ? apply(item) : item)))
+            }}
+            onReroutePipe={(id) => {
+              const target = id || selectedId
+              pipesRef.current = pipesRef.current.map((pipe) => (pipe.id === target ? { ...pipe, locked: false } : pipe))
+              setPipes(pipesRef.current)
+              runAutoPipe()
+            }}
+            onSplitPipe={(id) => {
+              const pipe = pipesRef.current.find((item) => item.id === id)
+              if (!pipe) return
+              const parts = splitPoints(pipe.points, 0, 0.5)
+              if (!parts) return
+              pushUndo()
+              const copy = { ...pipe, id: genId(), points: parts.right, locked: true, showMark: false }
+              setPipes(pipesRef.current.map((item) => (item.id === id ? { ...item, points: parts.left, locked: true } : item)).concat(copy))
             }}
             onDeleteEquipment={deleteSelected}
           />
@@ -1200,7 +1521,32 @@ export default function DesignerApp({
           menu={menu}
           rooms={rooms}
           pipes={pipes}
+          cables={cables}
           onClose={() => setMenu(null)}
+          onReroute={() => {
+            if (menu.kind === 'cable') {
+              setCables((current) => current.map((cable) => (cable.id === menu.id ? { ...cable, locked: false } : cable)))
+              setMenu(null)
+              return
+            }
+            pipesRef.current = pipesRef.current.map((pipe) => (pipe.id === menu.id ? { ...pipe, locked: false } : pipe))
+            setPipes(pipesRef.current)
+            setMenu(null)
+            runAutoPipe()
+          }}
+          onHeight={(heightMode) => {
+            const patch = { heightMode }
+            const pipe = pipesRef.current.find((item) => item.id === menu.id)
+            const cable = cablesRef.current.find((item) => item.id === menu.id)
+            const host = roomsRef.current[0]
+            const points = setRunMount((pipe || cable)?.points || [], heightMetres({ floorHeight: host?.height || 3 }, heightMode, 'iv'), heightMode)
+            if (cable) setCables((current) => current.map((item) => (item.id === menu.id ? { ...item, ...patch, points, locked: true } : item)))
+            if (pipe) setPipes((current) => current.map((item) => (item.id === menu.id ? { ...item, ...patch, points, locked: true } : item)))
+          }}
+          onLock={(locked) => {
+            if (menu.kind === 'cable') setCables((current) => current.map((item) => (item.id === menu.id ? { ...item, locked } : item)))
+            else setPipes((current) => current.map((item) => (item.id === menu.id ? { ...item, locked } : item)))
+          }}
           onRotate={(delta) => { rotateSelected(delta); }}
           onAngle={(angle) => {
             const target = selectedTarget()
@@ -1226,6 +1572,7 @@ export default function DesignerApp({
             if (mount === 'roof') next.elevation = target.room.height
             patchEquipment(target.eq.id, next)
           }}
+          onCad={(name) => { beginCad(name); setMenu(null) }}
           onDuplicate={() => { duplicateSelected(); setMenu(null) }}
           onDelete={() => { deleteSelected(); setMenu(null) }}
           onDoorType={(id) => {
@@ -1244,10 +1591,10 @@ export default function DesignerApp({
   )
 }
 
-function ContextMenu({ menu, rooms, pipes, onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily }) {
+function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily, onReroute, onHeight, onLock, onCad }) {
   const host = rooms.find((room) => room.id === menu.id) || rooms.find((room) => (room.equipment || []).some((eq) => eq.id === menu.id))
   const eq = host?.equipment?.find((item) => item.id === menu.id) || null
-  const pipe = pipes.find((item) => item.id === menu.id) || null
+  const pipe = pipes.find((item) => item.id === menu.id) || cables.find((item) => item.id === menu.id) || null
   const [angle, setAngle] = useState(eq?.rotation || 0)
   const [width, setWidth] = useState(eq?.width || host?.width || 1)
   const [depth, setDepth] = useState(eq?.depth || host?.depth || 1)
@@ -1260,6 +1607,10 @@ function ContextMenu({ menu, rooms, pipes, onClose, onRotate, onAngle, onResize,
   return (
     <div data-testid="context-menu" style={{ position: 'fixed', left, top, zIndex: 40, width: 280, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }} onMouseDown={(event) => event.stopPropagation()}>
       <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{eq?.name || pipe?.kind || host?.name || 'Kohde'}</div>
+      <MenuBtn testid="ctx-cad-move" onClick={() => onCad?.('move')}>Siirrä</MenuBtn>
+      <MenuBtn testid="ctx-cad-copy" onClick={() => onCad?.('copy')}>Kopioi</MenuBtn>
+      <MenuBtn testid="ctx-cad-rotate" onClick={() => onCad?.('rotate')}>Käännä</MenuBtn>
+      <MenuBtn testid="ctx-cad-mirror" onClick={() => onCad?.('mirror')}>Peilaa</MenuBtn>
       {menu.kind !== 'pipe' && menu.kind !== 'cable' && (
         <>
           <MenuBtn testid="ctx-rotate-cw" onClick={() => onRotate(90)}>Käännä 90° myötäpäivään  ]</MenuBtn>
@@ -1316,6 +1667,25 @@ function ContextMenu({ menu, rooms, pipes, onClose, onRotate, onAngle, onResize,
               <MenuBtn testid="ctx-apply-elevation" onClick={() => onElevation(elevation, mount)}>Aseta korkeus  Alt+↑↓</MenuBtn>
             </>
           )}
+        </>
+      )}
+      {(menu.kind === 'pipe' || menu.kind === 'cable') && (
+        <>
+          <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>
+            Korkeus
+            <select data-testid="ctx-cold-height" value={pipe?.heightMode || ''} onChange={(event) => onHeight?.(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
+              <option value="">Oma</option>
+              <option value="ceiling">Katossa</option>
+              <option value="false-ceiling">Alakatossa</option>
+              <option value="wall">Seinäkorkeus</option>
+              <option value="floor">Lattiassa</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, padding: '4px 6px' }}>
+            <input data-testid="ctx-cold-lock" type="checkbox" checked={Boolean(pipe?.locked)} onChange={(event) => onLock?.(event.target.checked)} />
+            Manuaalinen
+          </label>
+          <MenuBtn testid="ctx-cold-reroute" onClick={onReroute}>Reititä uudelleen</MenuBtn>
         </>
       )}
       <MenuBtn testid="ctx-duplicate" onClick={onDuplicate}>Kopioi  Ctrl+D</MenuBtn>

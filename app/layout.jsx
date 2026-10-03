@@ -1,4 +1,5 @@
 import './globals.css'
+import { LocaleProvider } from '@/components/i18n/Locale'
 
 export const metadata = {
   title: 'RefCAD Tool | Cold Room Designer',
@@ -20,7 +21,7 @@ export default function RootLayout({ children }) {
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body style={{ margin: 0, fontFamily: '-apple-system, BlinkMacSystemFont, Inter, sans-serif', background: '#0a0f1e', color: '#f1f5f9', overflow: 'hidden', height: '100vh' }}>
-        {children}
+        <LocaleProvider>{children}</LocaleProvider>
       </body>
     </html>
   )
