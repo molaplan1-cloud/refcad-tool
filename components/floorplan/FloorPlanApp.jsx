@@ -11,6 +11,8 @@ import {
   addOpening,
   addWall,
   claddingAreas,
+  cornerAngles,
+  cornerJoint,
   deleteOpening,
   facadeSide,
   deleteRoom,
@@ -40,6 +42,7 @@ import {
   rotateFixture,
   segmentLength,
   viewLayout,
+  wallDirection,
   visibleRooms,
   wallQuads,
   buildFloorPlanPdf,
@@ -109,6 +112,58 @@ const sideBtn = (active) => ({
   cursor: 'pointer',
   transform: 'none',
 })
+
+function DrawFields({ draft, end, onLength, onAngle, onCommit }) {
+  const lengthMm = Math.max(0, Math.round(segmentLength(draft, end) * 1000))
+  const angle = wallDirection({ a: draft, b: end })
+  const [len, setLen] = useState(String(lengthMm))
+  const [ang, setAng] = useState(String(angle))
+  const lenFocus = useRef(false)
+  const angFocus = useRef(false)
+  useEffect(() => { if (!lenFocus.current) setLen(String(lengthMm)) }, [lengthMm])
+  useEffect(() => { if (!angFocus.current) setAng(String(angle)) }, [angle])
+  const field = { width: 72, marginLeft: 4, padding: '2px 6px', borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }
+  const commitOnEnter = (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      onCommit()
+    }
+  }
+  return (
+    <span data-testid="wall-draw-input" style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <label>Pituus
+        <input data-testid="draw-length" inputMode="decimal" value={len} style={field} onChange={(event) => { setLen(event.target.value); onLength(Number(event.target.value)) }} onFocus={(event) => { lenFocus.current = true; event.target.select() }} onBlur={() => { lenFocus.current = false }} onKeyDown={commitOnEnter} />
+        {' '}mm
+      </label>
+      <label>Kulma
+        <input data-testid="draw-angle" inputMode="decimal" value={ang} style={field} onChange={(event) => { setAng(event.target.value); onAngle(Number(event.target.value)) }} onFocus={(event) => { angFocus.current = true; event.target.select() }} onBlur={() => { angFocus.current = false }} onKeyDown={commitOnEnter} />
+        °
+      </label>
+    </span>
+  )
+}
+
+function AngleMarks({ marks, X, Y, zoom }) {
+  const scale = 1 / (zoom || 1)
+  return (marks || []).filter((mark) => Math.abs(mark.degrees - 90) > 1).map((mark) => {
+    const cx = X(mark.x)
+    const cy = Y(mark.z)
+    const r = 28 * scale
+    const a0 = mark.start
+    const a1 = mark.start + mark.sweep
+    const p0 = { x: cx + Math.cos(a0) * r, y: cy + Math.sin(a0) * r }
+    const p1 = { x: cx + Math.cos(a1) * r, y: cy + Math.sin(a1) * r }
+    const mid = a0 + mark.sweep / 2
+    const lx = cx + Math.cos(mid) * (r + 14 * scale)
+    const ly = cy + Math.sin(mid) * (r + 14 * scale)
+    return (
+      <g key={`${mark.x}-${mark.z}-${mark.degrees}`} data-testid="angle-arc" data-degrees={mark.degrees} style={{ pointerEvents: 'none' }}>
+        <path d={`M ${p0.x} ${p0.y} A ${r} ${r} 0 ${mark.sweep > Math.PI ? 1 : 0} 1 ${p1.x} ${p1.y}`} fill="none" stroke="#0f766e" strokeWidth={1.3 * scale} />
+        <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fontSize={12 * scale} fontWeight={700} fill="#0f766e">{mark.degrees}°</text>
+      </g>
+    )
+  })
+}
 
 function SnapMark({ snap, X, Y, zoom }) {
   if (!snap?.point || !snap.kind || snap.kind === 'grid') return null
@@ -383,7 +438,9 @@ export default function FloorPlanApp() {
   const [size, setSize] = useState({ w: 960, h: 680 })
   const [camera, setCamera] = useState(FIT_CAMERA)
   const [gridStep, setGridStep] = useState(0.1)
-  const [ortho, setOrtho] = useState(false)
+  const [angleStep, setAngleStep] = useState(90)
+  const [drawGuide, setDrawGuide] = useState(null)
+  const angleMemory = useRef(90)
   const [altDown, setAltDown] = useState(false)
   const [snapVisual, setSnapVisual] = useState(null)
   const [cursorPpm, setCursorPpm] = useState(40)
@@ -491,11 +548,11 @@ export default function FloorPlanApp() {
     const walls = plan.walls || []
     if (svcTool) return null
     if (tool === 'exterior' || tool === 'interior') {
-      return snapPoint(world, { walls, grid: gridStep, radius, origin: draft, ortho, enabled })
+      return snapPoint(world, { walls, grid: gridStep, radius, origin: draft, ortho: angleStep === 90, angleStep, enabled })
     }
     if (tool === 'room') {
       const origin = roomShape === 'poly' ? poly[poly.length - 1] : draft
-      return snapPoint(world, { walls, grid: gridStep, radius, origin: origin || null, ortho, enabled })
+      return snapPoint(world, { walls, grid: gridStep, radius, origin: origin || null, ortho: angleStep === 90, angleStep, enabled })
     }
     if (tool === 'door' || tool === 'window') {
       const along = snapAlongWall(world, walls, Math.max(radius, 0.35), enabled)
@@ -507,7 +564,7 @@ export default function FloorPlanApp() {
       return { point: { x: placed.x, z: placed.z }, kind: placed.kind, guides: [], rotation: placed.rotation }
     }
     return null
-  }, [ppm2d, plan.walls, tool, draft, ortho, gridStep, roomShape, poly, placing, svcTool])
+  }, [ppm2d, plan.walls, tool, draft, angleStep, gridStep, roomShape, poly, placing, svcTool])
 
   useEffect(() => {
     if (view !== '2d') return undefined
@@ -552,7 +609,14 @@ export default function FloorPlanApp() {
     setPanel(hit.kind === 'house' ? 'house' : 'object')
   }
 
-  const openHitMenu = (hit, event) => {
+  const openHitMenu = (hit, event, spot) => {
+    if (spot) {
+      const joint = cornerJoint(plan.walls, spot, Math.max(0.32, 18 / Math.max(spot.ppm || ppm2d, 0.001)))
+      if (joint) {
+        setMenu({ x: event.clientX, y: event.clientY, kind: 'corner', id: 'corner', at: { x: joint.x, z: joint.z } })
+        return
+      }
+    }
     const point = hit || { kind: 'house', id: 'house' }
     if (point.kind === 'service') {
       setMenu({ x: event.clientX, y: event.clientY, kind: 'service', service: point.service })
@@ -580,9 +644,11 @@ export default function FloorPlanApp() {
       return
     }
     const world = toWorld(event)
+    const typingDraw = document.activeElement?.getAttribute('data-testid') === 'draw-length' || document.activeElement?.getAttribute('data-testid') === 'draw-angle'
     const visual = describeSnap(world, ppm2d)
     setSnapVisual(visual)
     setCursor(world)
+    if (!typingDraw) setDrawGuide(null)
     const radius = Math.max(12 / Math.max(ppm2d, 0.001), 0.45)
     if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z, radius))
     if (dragOpen.current) setPlan((current) => moveOpening(current, dragOpen.current, world))
@@ -638,6 +704,11 @@ export default function FloorPlanApp() {
     }
     event.preventDefault()
     const world = toWorld(event)
+    const joint = cornerJoint(plan.walls, world, Math.max(0.32, 18 / Math.max(ppm2d, 0.001)))
+    if (joint) {
+      setMenu({ x: event.clientX, y: event.clientY, kind: 'corner', id: 'corner', at: { x: joint.x, z: joint.z } })
+      return
+    }
     const serviceHit = hitService(plan, world)
     if (serviceHit) {
       openServiceMenu(event, serviceHit)
@@ -699,10 +770,12 @@ export default function FloorPlanApp() {
       return
     }
     if (tool === 'exterior' || tool === 'interior') {
-      if (!draft) setDraft(point)
+      const next = drawGuide || point
+      if (!draft) setDraft(next)
       else {
-        commit(addWall(plan, draft, point, tool))
+        commit(addWall(plan, draft, next, tool))
         setDraft(null)
+        setDrawGuide(null)
       }
       return
     }
@@ -762,7 +835,11 @@ export default function FloorPlanApp() {
       const tag = event.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       if (event.key === 'Shift' && !event.repeat) {
-        setOrtho((value) => !value)
+        setAngleStep((value) => {
+          if (value === 0) return angleMemory.current || 90
+          angleMemory.current = value
+          return 0
+        })
         return
       }
       if (event.key === ' ' && !event.repeat) {
@@ -1058,7 +1135,7 @@ export default function FloorPlanApp() {
   const dims = dimensionChains(plan)
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = activeSystems.length === 1 ? activeSystems[0].title : 'Pohjakuva'
-  const liveEnd = draft && (tool === 'exterior' || tool === 'interior') && snapVisual?.point ? snapVisual.point : null
+  const liveEnd = draft && (tool === 'exterior' || tool === 'interior') ? (drawGuide || snapVisual?.point || null) : null
   const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
@@ -1144,7 +1221,11 @@ export default function FloorPlanApp() {
         <button type="button" data-testid="snap-100" title="Ruudukko 100 mm" style={textBtn(gridStep === 0.1)} onClick={() => setGridStep(0.1)}>100</button>
         <button type="button" data-testid="snap-50" title="Ruudukko 50 mm" style={textBtn(gridStep === 0.05)} onClick={() => setGridStep(0.05)}>50</button>
         <button type="button" data-testid="snap-10" title="Ruudukko 10 mm" style={textBtn(gridStep === 0.01)} onClick={() => setGridStep(0.01)}>10</button>
-        <button type="button" data-testid="snap-ortho" title="Suorakulma (Shift)" aria-pressed={ortho} style={textBtn(ortho)} onClick={() => setOrtho((value) => !value)}>Suora</button>
+        <span style={{ fontSize: 11, color: '#a8a29e', marginLeft: 6 }}>Kulma</span>
+        <button type="button" data-testid="angle-90" data-ortho="true" title="90° (Shift)" aria-pressed={angleStep === 90} style={textBtn(angleStep === 90)} onClick={() => setAngleStep(90)}>90°</button>
+        <button type="button" data-testid="angle-45" aria-pressed={angleStep === 45} style={textBtn(angleStep === 45)} onClick={() => setAngleStep(45)}>45°</button>
+        <button type="button" data-testid="angle-15" aria-pressed={angleStep === 15} style={textBtn(angleStep === 15)} onClick={() => setAngleStep(15)}>15°</button>
+        <button type="button" data-testid="angle-free" aria-pressed={angleStep === 0} style={textBtn(angleStep === 0)} onClick={() => setAngleStep(0)}>Vapaa</button>
         {view === '2d' && (
           <>
             <button type="button" data-testid="zoom-out" title="Loitonna (−)" style={textBtn(false)} onClick={() => {
@@ -1228,7 +1309,33 @@ export default function FloorPlanApp() {
         </aside>
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ height: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>{status}</div>
+          <div style={{ height: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
+            {draft && liveEnd && (tool === 'exterior' || tool === 'interior') ? (
+              <DrawFields
+                draft={draft}
+                end={liveEnd}
+                onLength={(mm) => {
+                  if (!Number.isFinite(mm) || mm < 50) return
+                  const ang = Math.atan2(liveEnd.z - draft.z, liveEnd.x - draft.x)
+                  const metres = mm / 1000
+                  setDrawGuide({ x: draft.x + Math.cos(ang) * metres, z: draft.z + Math.sin(ang) * metres })
+                }}
+                onAngle={(deg) => {
+                  if (!Number.isFinite(deg)) return
+                  const metres = Math.max(0.2, segmentLength(draft, liveEnd))
+                  const rad = deg * Math.PI / 180
+                  setDrawGuide({ x: draft.x + Math.cos(rad) * metres, z: draft.z + Math.sin(rad) * metres })
+                }}
+                onCommit={() => {
+                  const end = drawGuide || liveEnd
+                  if (!draft || !end) return
+                  commit(addWall(plan, draft, end, tool))
+                  setDraft(null)
+                  setDrawGuide(null)
+                }}
+              />
+            ) : status}
+          </div>
           {view === 'facade' ? (
             <FacadeView plan={plan} side={facadeSideId} onSide={setFacadeSideId} onApply={setPlan} onCommit={commit} />
           ) : view === '2d' ? (
@@ -1270,6 +1377,11 @@ export default function FloorPlanApp() {
                   return (
                     <polygon
                       key={`${wall.id}-${index}`}
+                      data-testid="wall-quad"
+                      data-sax={X(wall.a.x)}
+                      data-say={Y(wall.a.z)}
+                      data-sbx={X(wall.b.x)}
+                      data-sby={Y(wall.b.z)}
                       points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
                       fill={wall.materialId
                         ? materialOf(interior ? 'interior' : 'exterior', wall.materialId).color
@@ -1474,6 +1586,7 @@ export default function FloorPlanApp() {
                   <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">Piirrä ulkoseinät tai avaa esimerkkitalo</text>
                 )}
                 <SnapMark snap={snapVisual} X={X} Y={Y} zoom={camera.zoom} />
+                <AngleMarks marks={cornerAngles(plan.walls)} X={X} Y={Y} zoom={camera.zoom} />
                 </g>
               </svg>
             </div>

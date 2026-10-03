@@ -777,7 +777,7 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
     const onMenu = (event) => {
       event.preventDefault()
       aim(event)
-      handlers.current.onContext?.(read(), event)
+      handlers.current.onContext?.(read(), event, floor())
     }
     const onMove = (event) => {
       aim(event)

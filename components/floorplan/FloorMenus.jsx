@@ -9,6 +9,8 @@ import {
   ROOF_TYPES,
   STANDARD_SCALES,
   addOpening,
+  cornerAngles,
+  cornerJoint,
   splitWallAt,
   deleteFacadeZone,
   deleteOpening,
@@ -21,7 +23,10 @@ import {
   removeFixture,
   rotateFixture,
   segmentLength,
+  setCornerAngle,
+  setWallDirection,
   setWallLength,
+  wallDirection,
   splitWall,
   updateFacadeZone,
   updateFixture,
@@ -344,6 +349,17 @@ function WallFields({ plan, id, onApply, onCommit }) {
           onBlur={(event) => onCommit(setWallLength(plan, id, fromMm(event.target.value)))}
         />
       </Field>
+      <Field label="Suunta (°)">
+        <input
+          data-testid="wall-direction"
+          style={inputStyle}
+          type="number"
+          defaultValue={wallDirection(wall)}
+          key={`${id}-${wallDirection(wall)}`}
+          onBlur={(event) => onCommit(setWallDirection(plan, id, Number(event.target.value)))}
+          onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+        />
+      </Field>
       <SplitField plan={plan} wall={wall} onCommit={onCommit} />
     </div>
   )
@@ -526,6 +542,19 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
           ]}
         />
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
+          Suunta
+          <input
+            data-testid="ctx-wall-angle"
+            type="number"
+            defaultValue={wallDirection(wall)}
+            key={`dir-${wall.id}-${wallDirection(wall)}`}
+            onBlur={(event) => onCommit(setWallDirection(plan, wall.id, Number(event.target.value)))}
+            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+            style={{ width: 64, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
+          />
+          °
+        </label>
         <CadSep />
         <CadItem testid="ctx-split" onClick={() => act(splitWall(plan, wall.id, menu.at || { x: (wall.a.x + wall.b.x) / 2, z: (wall.a.z + wall.b.z) / 2 }))}>Jaa seinä</CadItem>
         <CadItem testid="ctx-door" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'door'))}>Lisää ovi</CadItem>
@@ -544,6 +573,34 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
         <CadItem testid="ctx-facade" onClick={() => onNavigate('facade')}>Julkisivu</CadItem>
         <CadSep />
         <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteWall(plan, wall.id))}>Poista</CadItem>
+      </>
+    )
+  } else if (menu.kind === 'corner') {
+    const joint = cornerJoint(plan.walls, menu.at || { x: 0, z: 0 }, 0.2)
+    const angle = cornerAngles(plan.walls).find((item) => joint && Math.hypot(item.x - joint.x, item.z - joint.z) < 0.12)
+    const degrees = angle?.degrees ?? 90
+    title = `Kulma ${degrees}°`
+    body = (
+      <>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
+          Kulma…
+          <input
+            data-testid="corner-angle"
+            type="number"
+            min="1"
+            max="179"
+            defaultValue={degrees}
+            key={`corner-${degrees}-${joint?.x}-${joint?.z}`}
+            onBlur={(event) => {
+              if (!joint) return
+              onCommit(setCornerAngle(plan, joint, Number(event.target.value)))
+            }}
+            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+            style={{ width: 64, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
+          />
+          °
+        </label>
+        <div style={{ padding: '0 8px 6px', fontSize: 11, color: '#78716c' }}>Viereinen seinä kiertyy nurkan ympäri.</div>
       </>
     )
   } else if (menu.kind === 'opening' && opening) {
