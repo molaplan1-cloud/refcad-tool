@@ -152,6 +152,45 @@ function ObjectMesh({ item, selected }) {
   )
 }
 
+function FenceMesh({ fence }) {
+  const points = fence.points || []
+  const height = fence.height || 1.2
+  const hedge = fence.kind === 'hedge'
+  const stone = fence.kind === 'stone'
+  const color = hedge ? '#3f6212' : stone ? '#78716c' : fence.kind === 'mesh' ? '#94a3b8' : '#9a6b3f'
+  const pick = { kind: 'yard', collection: 'fences', id: fence.id, movable: false }
+  const posts = []
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i]
+    const b = points[i + 1]
+    const len = Math.hypot(b.x - a.x, b.z - a.z)
+    const step = hedge ? len : 1.8
+    const count = Math.max(1, Math.round(len / step))
+    for (let n = 0; n <= count; n += 1) {
+      const t = n / count
+      posts.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, key: `${i}-${n}` })
+    }
+  }
+  return (
+    <group userData={{ pick }}>
+      {hedge || stone ? (
+        <Ribbon points={points} width={hedge ? 0.55 : 0.38} y={height / 2} thickness={height} color={color} />
+      ) : (
+        <>
+          {posts.map((post) => (
+            <mesh key={post.key} position={[post.x, height / 2, post.z]}>
+              <boxGeometry args={[0.1, height, 0.1]} />
+              <meshStandardMaterial color={color} />
+            </mesh>
+          ))}
+          <Ribbon points={points} width={0.08} y={height - 0.08} thickness={0.08} color={color} />
+          <Ribbon points={points} width={0.06} y={height * 0.45} thickness={0.05} color={color} />
+        </>
+      )}
+    </group>
+  )
+}
+
 function RoofMesh({ w, d, height, roof }) {
   if (roof === 'flat' || roof === 'shed') {
     return (
@@ -274,17 +313,7 @@ export default function YardScene({ plan, selected }) {
           pick={{ kind: 'yard', collection: 'paths', id: item.id, movable: false }}
         />
       ))}
-      {yard.fences.map((fence) => (
-        <Ribbon
-          key={fence.id}
-          points={fence.points}
-          width={fence.kind === 'hedge' ? 0.45 : fence.kind === 'stone' ? 0.35 : 0.08}
-          y={(fence.height || 1.2) / 2}
-          thickness={fence.height || 1.2}
-          color={fence.kind === 'hedge' ? '#3f6212' : fence.kind === 'stone' ? '#78716c' : fence.kind === 'mesh' ? '#94a3b8' : '#a16207'}
-          pick={{ kind: 'yard', collection: 'fences', id: fence.id, movable: false }}
-        />
-      ))}
+      {yard.fences.map((fence) => <FenceMesh key={fence.id} fence={fence} />)}
       {yard.plants.map((item) => <PlantMesh key={item.id} item={item} selected={active('plants', item.id)} />)}
       {yard.objects.map((item) => <ObjectMesh key={item.id} item={item} selected={active('objects', item.id)} />)}
       {yard.buildings.map((item) => <BuildingMesh key={item.id} item={item} selected={active('buildings', item.id)} />)}

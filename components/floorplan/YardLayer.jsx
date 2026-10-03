@@ -458,16 +458,16 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
         />
       )}
       <g data-testid="yard-legend" transform={`translate(${sheet.x + sheet.w - 166} ${sheet.y + 86})`}>
-        <rect width={148} height={22 + PLANTS.length * 18 + BEDS.length * 16} fill="#fff" stroke="#1c1917" strokeWidth={0.8} opacity={0.94} />
-        <text x={8} y={14} fontSize={11} fontWeight={750} fill="#1c1917">Kasvillisuus</text>
+        <rect width={158} height={58 + PLANTS.length * 20 + BEDS.length * 14} fill="#fff" stroke="#1c1917" strokeWidth={0.8} opacity={0.94} />
+        <text x={10} y={16} fontSize={11} fontWeight={750} fill="#1c1917">Kasvillisuus</text>
         {PLANTS.map((item, index) => (
-          <g key={item.id} transform={`translate(16 ${36 + index * 18})`}>
-            <PlantMark kind={item.id} r={6.5} />
-            <text x={16} y={3} fontSize={9} fill="#1c1917">{item.name}</text>
+          <g key={item.id} transform={`translate(22 ${40 + index * 20})`}>
+            <PlantMark kind={item.id} r={7} />
+            <text x={18} y={3} fontSize={9} fill="#1c1917">{item.name}</text>
           </g>
         ))}
         {BEDS.map((item, index) => (
-          <text key={item.id} x={8} y={36 + PLANTS.length * 18 + index * 14} fontSize={9} fill="#1c1917">{item.name}</text>
+          <text key={item.id} x={12} y={48 + PLANTS.length * 20 + index * 14} fontSize={9} fill="#1c1917">{item.name}</text>
         ))}
       </g>
     </g>

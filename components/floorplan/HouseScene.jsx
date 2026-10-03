@@ -25,7 +25,7 @@ import {
 } from '@/lib/floorplan'
 import Services3D from './Services3D'
 import YardScene from './YardScene'
-import { sceneBounds } from '@/lib/yard'
+import { hasYard, sceneBounds } from '@/lib/yard'
 import { layerVisible } from '@/lib/services'
 
 const textureCache = new Map()
@@ -894,12 +894,18 @@ export default function HouseScene({
   const controlsRef = useRef(null)
   const house = planBounds(plan)
   const box = sceneBounds(plan)
+  const site = hasYard(plan)
   const cx = (house.minX + house.maxX) / 2
   const cz = (house.minZ + house.maxZ) / 2
+  const focusX = site ? (box.minX + box.maxX) / 2 : cx
+  const focusZ = site ? (box.minZ + box.maxZ) / 2 : cz
   const span = Math.max(box.maxX - box.minX, box.maxZ - box.minZ, 8)
+  const cameraPosition = site
+    ? [focusX + span * 0.46, span * 0.58, focusZ + span * 0.62]
+    : [cx, span, cz + span]
   return (
     <Canvas
-      camera={{ position: [cx, span * 0.85, cz + span * 0.95], fov: 34, near: 0.08, far: Math.max(240, span * 8) }}
+      camera={{ position: cameraPosition, fov: site ? 32 : 34, near: 0.08, far: Math.max(240, span * 8) }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
       onCreated={({ gl }) => {
@@ -968,7 +974,7 @@ export default function HouseScene({
       <OrbitControls
         ref={controlsRef}
         makeDefault
-        target={[cx, 1.25, cz]}
+        target={[focusX, site ? 0.4 : 1.25, focusZ]}
         maxPolarAngle={Math.PI / 2.08}
         enableDamping={false}
         mouseButtons={{ LEFT: drawMode ? -1 : THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: -1 }}
