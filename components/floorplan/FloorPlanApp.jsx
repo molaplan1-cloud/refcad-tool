@@ -2332,6 +2332,7 @@ export default function FloorPlanApp() {
                         if (event.button !== 0) return
                         if (commandRef.current) return
                         event.stopPropagation()
+                        choose({ kind: 'room', id: item.id })
                         setSelectedRoom(item.id)
                         setSelectedFixture(null)
                         dragLabel.current = item.id

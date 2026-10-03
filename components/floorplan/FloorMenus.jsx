@@ -51,8 +51,8 @@ import { addChimneyFor, chimneyKind, defaultFlue, flueOptions, withChimneyFields
 import { ServiceMenu } from './ServicesLayer'
 import { YardFields, YardMenuBody } from './YardPanel'
 import { yardTitle } from '@/lib/yard'
-import { applyHeating, ensureServices, refreshHeat, serviceObjectTitle } from '@/lib/services'
-import { HEAT_SOURCES, normalizeHeating } from '@/lib/hydronic'
+import { applyHeating, ensureServices, refreshHeat, serviceObjectTitle, suggestFloorManifold } from '@/lib/services'
+import { HEAT_SOURCES, HEATING_METHODS, LOOP_SPACINGS, normalizeHeating, normalizeRoomHeating } from '@/lib/hydronic'
 import { CLIMATE_ZONES, formatRoomInfo, roomReport, thermalOf } from '@/lib/roominfo'
 
 const inputStyle = {
@@ -637,11 +637,101 @@ function RoomFields({ plan, id, wallId, onApply }) {
       <Field label="Sisälämpötila (°C)">
         <input data-testid="room-setpoint" style={inputStyle} type="number" value={Number.isFinite(room.setpoint) ? room.setpoint : defaultRoomSetpoint(room.type)} onChange={(event) => onApply(refreshHeat(updateRoom(plan, id, { setpoint: parseFloat(event.target.value) })))} />
       </Field>
+      <RoomHeatingFields plan={plan} room={room} onApply={onApply} />
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, marginBottom: 8 }}>
         <input type="checkbox" checked={room.showLabel !== false} onChange={(event) => patch({ showLabel: event.target.checked })} />
         Näytä pinta-ala
       </label>
       {report && <RoomInfo report={report} />}
+    </div>
+  )
+}
+
+function RoomHeatingFields({ plan, room, onApply }) {
+  const choice = normalizeRoomHeating(room)
+  const methods = choice?.methods || []
+  const selected = !choice ? '' : methods.length > 1 ? 'combo' : methods[0]
+  const floor = methods.some((item) => item === 'efloor' || item === 'wfloor' || item === 'ceiling')
+  const write = (nextMethods, extra = {}) => {
+    onApply(refreshHeat(updateRoom(plan, room.id, {
+      heating: {
+        methods: nextMethods,
+        spacing: extra.spacing ?? choice?.spacing ?? (nextMethods.includes('efloor') ? 0.1 : 0.15),
+        pattern: extra.pattern ?? choice?.pattern ?? 'serpentine',
+        wattsPerM2: Object.prototype.hasOwnProperty.call(extra, 'wattsPerM2') ? extra.wattsPerM2 : (choice?.wattsPerM2 ?? null),
+      },
+    })))
+  }
+  return (
+    <div data-testid="room-heating-fields">
+      <Field label="Lämmitys">
+        <select
+          data-testid="room-heating"
+          style={inputStyle}
+          value={selected}
+          onChange={(event) => {
+            const value = event.target.value
+            if (!value) {
+              onApply(refreshHeat(updateRoom(plan, room.id, { heating: null })))
+              return
+            }
+            if (value === 'combo') {
+              const seed = methods.filter((item) => item !== 'none')
+              write(seed.length > 1 ? seed : seed.length === 1 ? [...seed, seed[0] === 'wrad' ? 'efloor' : 'wrad'] : ['efloor', 'wrad'])
+              return
+            }
+            write([value])
+          }}
+        >
+          <option value="">Talon asetuksen mukaan</option>
+          {HEATING_METHODS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          <option value="combo">Yhdistelmä</option>
+        </select>
+      </Field>
+      {selected === 'combo' && (
+        <div data-testid="room-heating-combo" style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
+          {HEATING_METHODS.filter((item) => item.id !== 'none').map((item) => (
+            <label key={item.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+              <input
+                type="checkbox"
+                checked={methods.includes(item.id)}
+                onChange={(event) => {
+                  const next = event.target.checked
+                    ? [...methods.filter((id) => id !== 'none'), item.id]
+                    : methods.filter((id) => id !== item.id)
+                  write(next.length ? next : ['none'])
+                }}
+              />
+              {item.name}
+            </label>
+          ))}
+        </div>
+      )}
+      {floor && selected !== 'none' && (
+        <>
+          <Field label="Jakoväli">
+            <select data-testid="room-heat-spacing" style={inputStyle} value={String(choice?.spacing || 0.15)} onChange={(event) => write(methods, { spacing: Number(event.target.value) })}>
+              {LOOP_SPACINGS.map((spacing) => <option key={spacing} value={spacing}>{Math.round(spacing * 1000)} mm</option>)}
+            </select>
+          </Field>
+          <Field label="Kuvio">
+            <select data-testid="room-heat-pattern" style={inputStyle} value={choice?.pattern || 'serpentine'} onChange={(event) => write(methods, { pattern: event.target.value })}>
+              <option value="serpentine">Siksak</option>
+              <option value="spiral">Spiraali</option>
+            </select>
+          </Field>
+        </>
+      )}
+      {methods.includes('efloor') && (
+        <Field label="Teho (W/m²)">
+          <input data-testid="room-heat-density" style={inputStyle} type="number" min="40" max="200" step="10" value={choice?.wattsPerM2 || ''} placeholder="automaattinen" onChange={(event) => write(methods, { wattsPerM2: event.target.value ? Number(event.target.value) : null })} />
+        </Field>
+      )}
+      {methods.includes('wfloor') && (
+        <button type="button" data-testid="suggest-manifold" onClick={() => onApply(suggestFloorManifold(plan))} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1', marginBottom: 8 }}>
+          Ehdota jakotukkia
+        </button>
+      )}
     </div>
   )
 }
