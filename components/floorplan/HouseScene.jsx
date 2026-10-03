@@ -11,6 +11,8 @@ import {
   materialOf,
   planBounds,
   pointInPolygon,
+  resolveFaceMaterial,
+  roomForWallSide,
   roofFaces,
   roofModel,
   roofOutline,
@@ -291,18 +293,43 @@ function WallMesh({ plan, mode, selected, hovered }) {
             : samePick(hovered, pick) || onThisWall(hovered)
               ? 'hover'
               : null
+          const faceKey = `${wall.id}-${piece.from}-${piece.to}-${piece.y0}-${piece.y1}-${piece.materialId || 'base'}`
           return (
-            <Solid
-              key={`${wall.id}-${piece.from}-${piece.to}-${piece.y0}-${piece.y1}-${piece.materialId || 'base'}`}
-              args={[span, height, thick]}
-              position={[mid.x, y, mid.z]}
-              rotation={[0, yaw, 0]}
-              color={finish.color}
-              map={map}
-              opacity={opacity}
-              pick={pick}
-              mark={mark}
-            />
+            <group key={faceKey}>
+              <Solid
+                args={[span, height, thick]}
+                position={[mid.x, y, mid.z]}
+                rotation={[0, yaw, 0]}
+                color={wall.kind === 'exterior' ? finish.color : '#d6d3d1'}
+                map={wall.kind === 'exterior' ? map : null}
+                opacity={opacity}
+                pick={pick}
+                mark={mark}
+              />
+              {['left', 'right'].map((side) => {
+                if (!roomForWallSide(plan, wall, side)) return null
+                const matId = resolveFaceMaterial(plan, wall, side)
+                const item = materialOf('interior', matId)
+                const sign = side === 'left' ? 1 : -1
+                const shift = thick / 2 + 0.012
+                return (
+                  <mesh
+                    key={`${faceKey}-${side}`}
+                    position={[mid.x + (-dz * sign) * shift, y, mid.z + (dx * sign) * shift]}
+                    rotation={[0, yaw, 0]}
+                    raycast={noopRaycast}
+                  >
+                    <boxGeometry args={[Math.max(0.05, span - 0.02), height, 0.02]} />
+                    <meshLambertMaterial
+                      color={item.color}
+                      map={mode === 'solid' ? finishTexture('interior', item.id) : null}
+                      transparent={opacity < 0.98}
+                      opacity={opacity}
+                    />
+                  </mesh>
+                )
+              })}
+            </group>
           )
         })
       })}
