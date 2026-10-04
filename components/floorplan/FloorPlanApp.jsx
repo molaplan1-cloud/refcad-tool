@@ -88,7 +88,7 @@ import {
 import { CadPrompt } from './CadTools'
 import { LayerDock, PlanChrome } from './PlanChrome'
 import { buildPlanPdf } from '@/lib/roominfo'
-import { applyDisplay, deviceLabelObstacles, heatingLabelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { applyDisplay, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { paperFont } from '@/lib/annotations'
 import { DisplayPanel } from './DisplayPanel'
 import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
@@ -382,16 +382,18 @@ function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
   const block = (name ? nameSize : 0) + (area ? areaSize + 1 : 0)
   const nameY = cy - block / 2 + nameSize * 0.35
   const areaY = name ? nameY + nameSize + 1 : cy + areaSize * 0.15
+  const ink = label.halo ? '#fbfaf7' : 'none'
+  const haloW = label.halo ? Math.max(1.1, nameSize * 0.28) : 0
   return (
     <>
       {label.leader && (
         <line data-testid="room-leader" x1={X(label.leader.x)} y1={Y(label.leader.z)} x2={cx} y2={cy} stroke="#78716c" strokeWidth={0.7} />
       )}
       {name && (
-        <text x={cx} y={nameY} textAnchor="middle" fontSize={nameSize} fontWeight={700} fill="#1c1917">{name}</text>
+        <text x={cx} y={nameY} textAnchor="middle" fontSize={nameSize} fontWeight={700} fill="#1c1917" stroke={ink} strokeWidth={haloW} strokeLinejoin="round" paintOrder="stroke">{name}</text>
       )}
       {area && (
-        <text x={cx} y={areaY} textAnchor="middle" fontSize={areaSize} fill="#57534e">{area}</text>
+        <text x={cx} y={areaY} textAnchor="middle" fontSize={areaSize} fill="#57534e" stroke={ink} strokeWidth={haloW} strokeLinejoin="round" paintOrder="stroke">{area}</text>
       )}
     </>
   )
@@ -2080,7 +2082,7 @@ export default function FloorPlanApp() {
     ratio: layout.ratio,
     showNames: display.roomNames,
     showAreas: display.areas,
-    obstacles: [...heatingLabelObstacles(plan), ...deviceLabelObstacles(plan, layout.scale * k)],
+    obstacles: labelObstacles(plan, layout.scale * k),
   })
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = sheetMode === 'site' ? t('sheet.site') : (activeSystems.length === 1 ? text(locale, `service.${activeSystems[0].id}`, activeSystems[0].title) : t('sheet.plan'))
@@ -2943,6 +2945,7 @@ export default function FloorPlanApp() {
                     data-testid="room-label"
                     data-name={label.roomName}
                     data-text={label.text}
+                    data-halo={label.halo ? '1' : '0'}
                     onContextMenu={(event) => {
                       event.preventDefault()
                       event.stopPropagation()

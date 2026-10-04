@@ -35,7 +35,7 @@ import YardScene from './YardScene'
 import { hasYard, sceneBounds } from '@/lib/yard'
 import { yardHasUnderground } from '@/lib/groundworks'
 import { layerVisible } from '@/lib/services'
-import { deviceLabelObstacles, heatingLabelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { chimneyKind, chimneyTop, drawingOf } from '@/lib/chimney'
 
 const textureCache = new Map()
@@ -1385,13 +1385,14 @@ function RoomLabels({ plan }) {
     ratio: 100,
     showNames: display.roomNames,
     showAreas: display.areas,
-    obstacles: [...heatingLabelObstacles(plan), ...deviceLabelObstacles(plan, 22)],
+    obstacles: labelObstacles(plan, 22),
   })
+  const halo = { textShadow: '0 0 2px #fbfaf7, 0 0 2px #fbfaf7, 0 0 3px #fbfaf7' }
   return labels.map((label) => (
     <Html key={label.id} position={[label.x, 0.12, label.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
       <div style={{ textAlign: 'center', color: '#1c1917', fontFamily: 'sans-serif', whiteSpace: 'nowrap' }}>
-        {label.text && <div style={{ fontWeight: 700, fontSize: 12 }}>{label.text}</div>}
-        {label.area && <div style={{ fontSize: 10, color: '#44403c' }}>{label.area}</div>}
+        {label.text && <div style={{ fontWeight: 700, fontSize: 12, ...(label.halo ? halo : {}) }}>{label.text}</div>}
+        {label.area && <div style={{ fontSize: 10, color: '#44403c', ...(label.halo ? halo : {}) }}>{label.area}</div>}
       </div>
     </Html>
   ))
