@@ -28,7 +28,7 @@ import {
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
 import { houseBox } from '@/lib/yard'
 import { CAD_COMMANDS } from '@/lib/cadEdit'
-import { annotationFont, placeLineLabels } from '@/lib/annotations'
+import { annotationFont, paperFont, placeFlowLabel, placeLineLabels, routeStrokeBoxes } from '@/lib/annotations'
 import { CadItem, CadMenu, CadSep, Flyout, Segmented } from './CadMenu'
 
 const barBtn = (active) => ({
@@ -177,7 +177,7 @@ function shiftPoints(points, system, multi, kind) {
   })
 }
 
-function SlopeMark({ run, X, Y, show = true }) {
+function SlopeMark({ run, X, Y, show = true, size = 8 }) {
   const pts = run.points || []
   if (!show || !run.slope || pts.length < 2) return null
   let best = null
@@ -197,12 +197,12 @@ function SlopeMark({ run, X, Y, show = true }) {
   return (
     <g transform={`translate(${(x1 + x2) / 2} ${(y1 + y2) / 2}) rotate(${ang})`} style={{ pointerEvents: 'none' }}>
       <polygon points="9,0 -3,-3.2 -3,3.2" fill="#44403c" />
-      <text x="12" y="-3" fontSize="10" fill="#292524">{label}</text>
+      <text x="12" y="-3" fontSize={size} fill="#292524">{label}</text>
     </g>
   )
 }
 
-function NodeSymbol({ node }) {
+function NodeSymbol({ node, tagSize = 8 }) {
   const color = nodeColor(node)
   if (node.kind === 'ahu') {
     return (
@@ -210,7 +210,7 @@ function NodeSymbol({ node }) {
         <rect x={-16} y={-10} width={32} height={20} rx={3} fill="#f8fafc" stroke={color} strokeWidth={1.6} />
         <path d="M-8,-4 L0,4 L8,-4" fill="none" stroke="#dc2626" strokeWidth={1.2} />
         <path d="M-8,4 L0,-4 L8,4" fill="none" stroke="#2563eb" strokeWidth={1.2} />
-        <text x="0" y="18" textAnchor="middle" fontSize="9" fontWeight="700" fill="#1c1917">IV</text>
+        <text x="0" y="18" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">IV</text>
       </g>
     )
   }
@@ -218,7 +218,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-12} y={-7} width={24} height={14} fill="#fff7ed" stroke={color} strokeWidth={1.4} />
-        <text x="0" y="4" textAnchor="middle" fontSize="9" fontWeight="700" fill={color}>LK</text>
+        <text x="0" y="4" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill={color}>LK</text>
       </g>
     )
   }
@@ -242,7 +242,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-12} y={-6} width={24} height={12} fill="#eff6ff" stroke="#1d4ed8" strokeWidth={1.3} />
-        <text x="0" y="3.5" textAnchor="middle" fontSize="8" fontWeight="700" fill="#1d4ed8">JT</text>
+        <text x="0" y="3.5" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1d4ed8">JT</text>
       </g>
     )
   }
@@ -269,7 +269,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-6} y={-6} width={12} height={12} fill="#fff" stroke="#44403c" strokeWidth={1.2} />
-        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#44403c">PL</text>
+        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#44403c">PL</text>
       </g>
     )
   }
@@ -278,7 +278,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-11} y={-8} width={22} height={16} fill="#fff" stroke="#1c1917" strokeWidth={1.4} />
-        <text x="0" y="3.5" textAnchor="middle" fontSize="8" fontWeight="700" fill="#1c1917">SK</text>
+        <text x="0" y="3.5" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">SK</text>
       </g>
     )
   }
@@ -317,7 +317,7 @@ function NodeSymbol({ node }) {
     return (
       <g data-testid="heater-control-symbol">
         <rect x="-7" y="-5" width="14" height="10" fill="#fff" stroke="#1c1917" strokeWidth="1.1" />
-        <text x="0" y="3" textAnchor="middle" fontSize="6" fontWeight="700" fill="#1c1917">OK</text>
+        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">OK</text>
       </g>
     )
   }
@@ -334,7 +334,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-8} y={-6} width={16} height={12} fill="#fff" stroke="#1c1917" strokeWidth={1.2} />
-        <text x="0" y="3" textAnchor="middle" fontSize="8" fontWeight="700" fill="#1c1917">{node.kind === 'heater' ? 'K' : 'L'}</text>
+        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">{node.kind === 'heater' ? 'K' : 'L'}</text>
       </g>
     )
   }
@@ -359,7 +359,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-width / 2} y={-7} width={width} height={14} fill="#fff" stroke="#1c1917" strokeWidth={1.2} />
-        <text x="0" y="3.5" textAnchor="middle" fontSize="8" fontWeight="700" fill="#1c1917">{label}</text>
+        <text x="0" y="3.5" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">{label}</text>
       </g>
     )
   }
@@ -368,7 +368,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <circle r="6" fill="#fff" stroke={both ? '#dc2626' : '#1d4ed8'} strokeWidth="1.4" />
-        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1c1917">{both ? 'KL' : 'KV'}</text>
+        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">{both ? 'KL' : 'KV'}</text>
       </g>
     )
   }
@@ -376,7 +376,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-11} y={-8} width={22} height={16} rx="3" fill="#fff" stroke="#dc2626" strokeWidth="1.3" />
-        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#dc2626">{node.kind === 'buffer-tank' ? 'PV' : 'LV'}</text>
+        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#dc2626">{node.kind === 'buffer-tank' ? 'PV' : 'LV'}</text>
       </g>
     )
   }
@@ -385,7 +385,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-12} y={-5} width={24} height={10} fill="#fff" stroke="#1d4ed8" strokeWidth="1.2" />
-        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1d4ed8">{label}</text>
+        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1d4ed8">{label}</text>
       </g>
     )
   }
@@ -393,7 +393,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-12} y={-8} width={24} height={16} fill="#fff7ed" stroke="#c2410c" strokeWidth="1.3" />
-        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#c2410c">{node.kind === 'air-air' ? 'ILP' : 'LL'}</text>
+        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#c2410c">{node.kind === 'air-air' ? 'ILP' : 'LL'}</text>
       </g>
     )
   }
@@ -409,7 +409,7 @@ function NodeSymbol({ node }) {
     return (
       <g data-testid="actuator-tag">
         <rect x={-3} y={-3} width={6} height={6} rx={0.8} fill="#fff" stroke="#0f766e" strokeWidth={0.7} />
-        <text x="0" y="1.7" textAnchor="middle" fontSize="4.5" fontWeight="700" fill="#0f766e">A</text>
+        <text x="0" y="1.7" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#0f766e">A</text>
       </g>
     )
   }
@@ -417,7 +417,7 @@ function NodeSymbol({ node }) {
     return (
       <g>
         <rect x={-6} y={-6} width={12} height={12} fill="#fff" stroke="#0f766e" strokeWidth="1.1" />
-        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0f766e">T</text>
+        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#0f766e">T</text>
       </g>
     )
   }
@@ -430,7 +430,7 @@ function cableMark(run) {
   return ''
 }
 
-function CableMark({ points, text, X, Y, show = true, side = 1, along = 0.5, gap = 0.55 }) {
+function CableMark({ points, text, X, Y, show = true, side = 1, along = 0.5, gap = 0.55, size = 8 }) {
   if (!show || !text || !points || points.length < 2) return null
   let best = null
   for (let i = 1; i < points.length; i += 1) {
@@ -449,7 +449,7 @@ function CableMark({ points, text, X, Y, show = true, side = 1, along = 0.5, gap
       x={X(best.a.x + dx * along + ox)}
       y={Y(best.a.z + dz * along + oz)}
       textAnchor="middle"
-      fontSize="10"
+      fontSize={size}
       fontWeight="650"
       fill="#1c1917"
       stroke="#fbfaf7"
@@ -505,7 +505,7 @@ function Jakotukki({ node, count, X, Y }) {
   )
 }
 
-function LoopTag({ points, label, X, Y }) {
+function LoopTag({ points, label, X, Y, size = 8 }) {
   if (!points?.length || label == null) return null
   const cx = points.reduce((sum, point) => sum + point.x, 0) / points.length
   const cz = points.reduce((sum, point) => sum + point.z, 0) / points.length
@@ -514,7 +514,7 @@ function LoopTag({ points, label, X, Y }) {
   return (
     <g data-testid="loop-tag" transform={`translate(${X(cx)} ${Y(cz)})`} style={{ pointerEvents: 'none' }}>
       <rect x={-width / 2} y={-7} width={width} height={12} rx={2} fill="#fff" stroke="#c2410c" strokeWidth={0.8} />
-      <text x={0} y={2.4} textAnchor="middle" fontSize="8" fontWeight="700" fill="#9a3412">{text}</text>
+      <text x={0} y={2.4} textAnchor="middle" fontSize={size} fontWeight="700" fill="#9a3412">{text}</text>
     </g>
   )
 }
@@ -563,8 +563,10 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const leaders = []
   const labelFont = annotationFont(sheet?.k || 1, zoom, 2.3, 14)
   const flowFont = annotationFont(sheet?.k || 1, zoom, 2, 11)
+  const tagFont = paperFont(sheet?.k || 1, zoom, 2.5)
+  const nameFont = paperFont(sheet?.k || 1, zoom, 3.5)
+  const areaFont = paperFont(sheet?.k || 1, zoom, 2.5)
   const ink = Math.min(0.45, 1.1 / Math.max(zoom, 0.2))
-  const ppm = Math.abs(X(1) - X(0)) || 20
   const view = viewport && camera ? {
     x: (0 - (camera.x || 0)) / Math.max(zoom, 0.2),
     y: (0 - (camera.y || 0)) / Math.max(zoom, 0.2),
@@ -583,12 +585,13 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   roomLabels.forEach((label) => {
     const cx = X(label.x)
     const cy = Y(label.z)
-    const nameSize = Math.max(7, 2.8 * (sheet?.k || 1))
-    const w = Math.max(String(label.text || '').length * nameSize * 0.64, (label.w || 0.6) * ppm, nameSize * 2) * 1.12
-    const h = Math.max(nameSize * (label.area ? 2.45 : 1.35), (label.h || 0.3) * ppm) * 1.15
+    const nameW = Math.max(nameFont * 2, String(label.text || '').length * nameFont * 0.58)
+    const areaW = label.area ? String(label.area).length * areaFont * 0.55 : 0
+    const w = Math.max(nameW, areaW) * 1.08
+    const h = ((label.text ? nameFont : 0) + (label.area ? areaFont + nameFont * 0.2 : 0)) * 1.25
     obstacles.push({ x: cx - w / 2, y: cy - h / 2, w, h, kind: 'room' })
   })
-  const dimFont = Math.max(6.5, 2.35 * (sheet?.k || 1))
+  const dimFont = paperFont(sheet?.k || 1, zoom, 2.5)
   dimensions.forEach((dim) => {
     const off = Number.isFinite(dim.offset) ? dim.offset : 0
     const x1 = X(dim.x1 + (dim.nx || 0) * off)
@@ -602,14 +605,29 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     const h = dimFont * 1.35
     obstacles.push({ x: cx - w / 2, y: cy - h / 2, w, h, kind: 'dim' })
   })
+  const routeSegs = []
+  drawn.forEach(({ run, points }) => {
+    if (!live(run.system)) return
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1]
+      const b = points[i]
+      const riser = Math.hypot(b.x - a.x, b.z - a.z) < 0.05 && Math.abs((b.y || 0) - (a.y || 0)) > 0.08
+      routeSegs.push({ key: `${run.id}:${i}`, x1: X(a.x), y1: Y(a.z), x2: X(b.x), y2: Y(b.z), riser })
+    }
+  })
+  obstacles.push(...routeStrokeBoxes(routeSegs))
+  const flowAnchor = new Map()
   drawnNodes.forEach((node) => {
     if (!live(node.system)) return
     const cx = X(node.x)
     const cy = Y(node.z)
-    const flowPad = node.flow && !quietLabels ? flowFont * 6.2 : 0
-    const wide = (node.kind === 'ahu' ? 40 : node.kind === 'hood' ? 30 : node.kind === 'silencer' ? 26 : 20) + flowPad
+    const wide = node.kind === 'ahu' ? 40 : node.kind === 'hood' ? 30 : node.kind === 'silencer' ? 26 : 20
     const tall = node.kind === 'ahu' ? 36 : 22
-    obstacles.push({ x: cx - (wide - flowPad) / 2, y: cy - tall / 2, w: wide, h: tall, kind: 'symbol' })
+    obstacles.push({ x: cx - wide / 2, y: cy - tall / 2, w: wide, h: tall, kind: 'symbol' })
+    if (!node.flow || quietLabels) return
+    const place = placeFlowLabel(cx, cy, `${node.flow} l/s`, flowFont, Math.max(wide, tall) / 2 + 3, obstacles)
+    flowAnchor.set(node.id, place)
+    obstacles.push({ ...place.box, kind: 'label' })
   })
   const callouts = quietLabels ? [] : manifoldCallouts(plan)
   const legendX = legendBox?.x ?? (sheet.x + sheet.w - 176)
@@ -630,13 +648,14 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const a = points[i]
         const b = points[i + 1]
         const len = Math.hypot(b.x - a.x, b.z - a.z)
-        if (!best || len > best.len) best = { len, a, b }
+        if (!best || len > best.len) best = { len, a, b, index: i }
       }
-      if (!best || best.len < 0.85) return
+      if (!best || best.len < 0.7) return
       const sizeText = run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`
       const text = run.system === 'iv' && run.flow ? `${sizeText}  ${Math.round(run.flow)} l/s` : sizeText
       segments.push({
         key: run.id,
+        routeKey: `${run.id}:${(best.index || 0) + 1}`,
         kind: run.kind,
         text,
         color: runColor(run),
@@ -649,10 +668,16 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     })
     const kindOrder = { tulo: 0, poisto: 1, ulko: 2, jate: 3 }
     segments.sort((a, b) => (kindOrder[a.kind] ?? 9) - (kindOrder[b.kind] ?? 9) || b.len - a.len)
+    const labelBounds = view ? {
+      x: view.x + 4,
+      y: view.y + (chrome?.h || 0) + 2,
+      w: Math.max(40, view.w - 8),
+      h: Math.max(40, view.h - (chrome?.h || 0) - 8),
+    } : null
     placeLineLabels(segments, obstacles, {
       font: labelFont,
       minLength: labelFont * 2,
-      bounds: view,
+      bounds: labelBounds,
     }).forEach((item) => leaders.push(item))
   }
   return (
@@ -698,7 +723,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               return (
                 <g key={`riser-${run.id}-${index}`} data-testid="route-riser" style={{ pointerEvents: 'none' }}>
                   <circle cx={X(point.x)} cy={Y(point.z)} r={5.5} fill="#fff" stroke={color} strokeWidth={1.6} />
-                  {showText && <text x={X(point.x) + 8} y={Y(point.z) - 4} fontSize="9" fontWeight="700" fill={color}>{up ? 'nousu' : 'lasku'}</text>}
+                  {showText && <text x={X(point.x) + 8} y={Y(point.z) - 4} fontSize={tagFont} fontWeight="700" fill={color}>{up ? 'nousu' : 'lasku'}</text>}
                 </g>
               )
             })}
@@ -747,7 +772,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
                 )}
               </g>
             ))}
-            <SlopeMark run={{ ...run, points }} X={X} Y={Y} show={showText} />
+            <SlopeMark run={{ ...run, points }} X={X} Y={Y} show={showText} size={tagFont} />
             <CableMark
               points={points}
               text={cableMark(run)}
@@ -757,9 +782,10 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               side={run.role === 'return' ? -1 : 1}
               along={run.role === 'return' ? 0.18 : run.role === 'supply' ? 0.82 : 0.5}
               gap={run.system === 'heat' ? 0.9 : 0.55}
+              size={tagFont}
             />
             {(run.kind === 'floorheat' || run.role === 'loop') && (
-              <LoopTag points={points} label={run.loopIndex || run.outlet} X={X} Y={Y} />
+              <LoopTag points={points} label={run.loopIndex || run.outlet} X={X} Y={Y} size={tagFont} />
             )}
           </g>
         )
@@ -769,7 +795,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const ay = Y(item.anchor.z)
         const tx = X(item.x)
         const ty = Y(item.z)
-        const fontSize = Math.max(6, 2.2 * (sheet?.k || 1))
+        const fontSize = tagFont
         const half = Math.max(fontSize * 2, String(item.text).length * fontSize * 0.3)
         const shoulder = tx >= ax ? tx - half : tx + half
         return (
@@ -820,12 +846,12 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           {flashId === node.id && <circle data-testid="place-flash" r="16" fill="none" stroke="#ea580c" strokeWidth="2.4" />}
           {node.kind === 'floor-manifold'
             ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
-            : <NodeSymbol node={node} />}
+            : <NodeSymbol node={node} tagSize={tagFont} />}
           {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
-            <text data-testid="valve-flow" x={node.kind === 'hood' ? 16 : node.kind === 'ahu' ? 22 : 10} y="0.5" textAnchor="start" dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
+            <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 12} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
           ) : null}
           {node.system === 'electric' && node.circuit && node.kind !== 'panel' && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
-            <text data-testid="circuit-badge" x="11" y="-2" fontSize="9" fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{`R${node.circuit}`}</text>
+            <text data-testid="circuit-badge" x="11" y="-2" fontSize={tagFont} fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{`R${node.circuit}`}</text>
           ) : null}
         </g>
       ))}

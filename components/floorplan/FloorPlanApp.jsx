@@ -88,7 +88,8 @@ import {
 import { CadPrompt } from './CadTools'
 import { LayerDock, PlanChrome } from './PlanChrome'
 import { buildPlanPdf } from '@/lib/roominfo'
-import { applyDisplay, heatingLabelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { applyDisplay, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { paperFont } from '@/lib/annotations'
 import { DisplayPanel } from './DisplayPanel'
 import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
@@ -381,16 +382,18 @@ function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
   const block = (name ? nameSize : 0) + (area ? areaSize + 1 : 0)
   const nameY = cy - block / 2 + nameSize * 0.35
   const areaY = name ? nameY + nameSize + 1 : cy + areaSize * 0.15
+  const ink = label.halo ? '#fbfaf7' : 'none'
+  const haloW = label.halo ? Math.max(1.1, nameSize * 0.28) : 0
   return (
     <>
       {label.leader && (
         <line data-testid="room-leader" x1={X(label.leader.x)} y1={Y(label.leader.z)} x2={cx} y2={cy} stroke="#78716c" strokeWidth={0.7} />
       )}
       {name && (
-        <text x={cx} y={nameY} textAnchor="middle" fontSize={nameSize} fontWeight={700} fill="#1c1917">{name}</text>
+        <text x={cx} y={nameY} textAnchor="middle" fontSize={nameSize} fontWeight={700} fill="#1c1917" stroke={ink} strokeWidth={haloW} strokeLinejoin="round" paintOrder="stroke">{name}</text>
       )}
       {area && (
-        <text x={cx} y={areaY} textAnchor="middle" fontSize={areaSize} fill="#57534e">{area}</text>
+        <text x={cx} y={areaY} textAnchor="middle" fontSize={areaSize} fill="#57534e" stroke={ink} strokeWidth={haloW} strokeLinejoin="round" paintOrder="stroke">{area}</text>
       )}
     </>
   )
@@ -449,6 +452,7 @@ function DimLine({ dim, X, Y, fontSize, ppm }) {
         textAnchor="middle"
         dominantBaseline="middle"
         fontSize={fontSize}
+        fontWeight={400}
         fill="#292524"
         transform={vertical ? `rotate(${dimensionRotation(true)} ${labelX} ${labelY})` : undefined}
       >
@@ -2078,7 +2082,7 @@ export default function FloorPlanApp() {
     ratio: layout.ratio,
     showNames: display.roomNames,
     showAreas: display.areas,
-    obstacles: heatingLabelObstacles(plan),
+    obstacles: labelObstacles(plan, layout.scale * k),
   })
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = sheetMode === 'site' ? t('sheet.site') : (activeSystems.length === 1 ? text(locale, `service.${activeSystems[0].id}`, activeSystems[0].title) : t('sheet.plan'))
@@ -2705,7 +2709,7 @@ export default function FloorPlanApp() {
                 {sheetMode !== 'site' && plan.walls.length > 0 && (
                   <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
                     {dimLines.map((dim, index) => (
-                      <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}-${dim.x1}`} dim={dim} X={X} Y={Y} fontSize={Math.max(6.5, 2.35 * k)} ppm={layout.scale * k} />
+                      <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}-${dim.x1}`} dim={dim} X={X} Y={Y} fontSize={paperFont(k, camera.zoom || 1, 2.5)} ppm={layout.scale * k} />
                     ))}
                   </g>
                 )}
@@ -2717,7 +2721,7 @@ export default function FloorPlanApp() {
                     y={Y(tag.z)}
                     textAnchor="middle"
                     dominantBaseline="middle"
-                    fontSize={Math.max(6, 2 * k)}
+                    fontSize={paperFont(k, camera.zoom || 1, 2.5)}
                     fill="#44403c"
                     transform={tag.vertical ? `rotate(-90 ${X(tag.x)} ${Y(tag.z)})` : undefined}
                     style={{ pointerEvents: 'none' }}
@@ -2734,7 +2738,7 @@ export default function FloorPlanApp() {
                     y={Y(mark.z)}
                     textAnchor="middle"
                     dominantBaseline="middle"
-                    fontSize={Math.max(6, 1.9 * k)}
+                    fontSize={paperFont(k, camera.zoom || 1, 2.5)}
                     fill="#0f766e"
                     fontWeight={700}
                     transform={mark.vertical ? `rotate(-90 ${X(mark.x)} ${Y(mark.z)})` : undefined}
@@ -2747,7 +2751,7 @@ export default function FloorPlanApp() {
                   <g data-testid="structure-legend" style={{ pointerEvents: 'none' }}>
                     {(() => {
                       const rows = structureCatalog(plan)
-                      const font = Math.max(8, 2.4 * k)
+                      const font = paperFont(k, camera.zoom || 1, 2.5)
                       const rowH = font + 4
                       const widest = Math.max(...rows.map((row) => `${row.code}  ${row.name}  U ${Number(row.u).toFixed(2)}`.length), 16)
                       const boxW = Math.min(sheet.w * 0.46, Math.max(168, widest * font * 0.58 + 16))
@@ -2941,6 +2945,7 @@ export default function FloorPlanApp() {
                     data-testid="room-label"
                     data-name={label.roomName}
                     data-text={label.text}
+                    data-halo={label.halo ? '1' : '0'}
                     onContextMenu={(event) => {
                       event.preventDefault()
                       event.stopPropagation()
@@ -2960,7 +2965,7 @@ export default function FloorPlanApp() {
                       dragBefore.current = plan
                     }}
                   >
-                    <SheetRoomLabel label={label} X={X} Y={Y} nameSize={Math.max(7, 2.8 * k)} areaSize={Math.max(6, 2.15 * k)} />
+                    <SheetRoomLabel label={label} X={X} Y={Y} nameSize={paperFont(k, camera.zoom || 1, 3.5)} areaSize={paperFont(k, camera.zoom || 1, 2.5)} />
                   </g>
                 ))}
                 {plan.walls.length === 0 && (
