@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { ContactShadows, Edges, Grid, Html, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -1772,10 +1772,71 @@ function RouteGrips({ items, kind, selectedId, onDrag }) {
   )
 }
 
-export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, onSelect, onContext, onRouteDrag, unitSystem }) {
+function PlaceBridge({ active, onPlace, onExit, onPreview }) {
+  const { camera, gl } = useThree()
+  const handlers = useRef({})
+  handlers.current = { active, onPlace, onExit, onPreview }
+  useLayoutEffect(() => {
+    const raycaster = new THREE.Raycaster()
+    const pointer = new THREE.Vector2()
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    const hit = new THREE.Vector3()
+    let down = null
+    const aim = (event) => {
+      const rect = gl.domElement.getBoundingClientRect()
+      pointer.x = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1
+      pointer.y = -((event.clientY - rect.top) / Math.max(rect.height, 1)) * 2 + 1
+      raycaster.setFromCamera(pointer, camera)
+    }
+    const floor = () => (raycaster.ray.intersectPlane(plane, hit) ? { x: hit.x, z: hit.z } : null)
+    const onDown = (event) => {
+      if (!handlers.current.active || event.button !== 0) return
+      down = { x: event.clientX, y: event.clientY, t: Date.now(), shift: event.shiftKey }
+    }
+    const onUp = (event) => {
+      if (!down || event.button !== 0) return
+      const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y)
+      const gesture = { at: down.t, px: down.x, py: down.y, shift: down.shift }
+      down = null
+      if (!handlers.current.active || moved > 6) return
+      aim(event)
+      const spot = floor()
+      if (spot) handlers.current.onPlace?.({ ...spot, gesture })
+    }
+    const onMove = (event) => {
+      if (!handlers.current.active) return
+      aim(event)
+      const spot = floor()
+      if (spot) handlers.current.onPreview?.(spot)
+    }
+    const onMenu = (event) => {
+      if (!handlers.current.active) return
+      event.preventDefault()
+      event.stopPropagation()
+      handlers.current.onExit?.()
+    }
+    const el = gl.domElement
+    el.style.cursor = active ? 'crosshair' : ''
+    el.addEventListener('pointerdown', onDown)
+    el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('contextmenu', onMenu, true)
+    return () => {
+      el.style.cursor = ''
+      el.removeEventListener('pointerdown', onDown)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('contextmenu', onMenu, true)
+    }
+  }, [active, camera, gl])
+  return null
+}
+
+export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, onSelect, onContext, onRouteDrag, unitSystem, placeMode = false, onPlace, onExitPlace }) {
   const [theme, setTheme] = useState('technical')
   const [dims, setDims] = useState(true)
   const [heading, setHeading] = useState(0)
+  const [ghost, setGhost] = useState(null)
   const rigRef = useRef(null)
   const palette = PALETTES[theme] || PALETTES.technical
   const technical = palette.flat === true
@@ -1855,12 +1916,19 @@ export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, on
           <RouteGrips items={pipes} kind="pipe" selectedId={selectedId} onDrag={onRouteDrag} />
           <RouteGrips items={cables} kind="cable" selectedId={selectedId} onDrag={onRouteDrag} />
           {dims ? <RoomDimensions rooms={rooms} theme={palette.id} /> : null}
+          <PlaceBridge active={placeMode} onPlace={onPlace} onExit={onExitPlace} onPreview={setGhost} />
+          {placeMode && ghost && (
+            <mesh position={[ghost.x, 0.08, ghost.z]} rotation={[-Math.PI / 2, 0, 0]}>
+              <circleGeometry args={[0.28, 24]} />
+              <meshBasicMaterial color="#ea580c" transparent opacity={0.45} depthTest={false} side={THREE.DoubleSide} />
+            </mesh>
+          )}
           <OrbitControls
             makeDefault
             enableDamping
             dampingFactor={0.08}
             maxPolarAngle={Math.PI / 2.05}
-            mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: -1 }}
+            mouseButtons={{ LEFT: placeMode ? -1 : THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: -1 }}
           />
           <Frame rooms={rooms} />
           <ViewBridge rigRef={rigRef} onHeading={setHeading} />

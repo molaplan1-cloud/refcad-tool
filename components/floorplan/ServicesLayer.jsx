@@ -529,7 +529,7 @@ function siteRun(plan, run) {
   return (run.points || []).some((point) => !insideHouse(plan, point.x, point.z))
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false }) {
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null }) {
   const services = ensureServices(plan)
   const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run) && (!siteMode || siteRun(plan, run)))
   const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
@@ -752,6 +752,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           style={{ pointerEvents: interactive ? 'auto' : 'none' }}
           onContextMenu={(event) => open(event, { target: 'node', id: node.id, system: node.system })}
         >
+          {flashId === node.id && <circle data-testid="place-flash" r="16" fill="none" stroke="#ea580c" strokeWidth="2.4" />}
           {node.kind === 'floor-manifold'
             ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
             : <NodeSymbol node={node} />}

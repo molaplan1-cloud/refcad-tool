@@ -1246,6 +1246,17 @@ function pixelsPerMetre(camera, gl, world) {
   return Math.max(1, Math.hypot(dx, dy))
 }
 
+function CursorMode({ drawMode }) {
+  const gl = useThree((state) => state.gl)
+  useLayoutEffect(() => {
+    const el = gl.domElement
+    const prev = el.style.cursor
+    el.style.cursor = drawMode ? 'crosshair' : ''
+    return () => { el.style.cursor = prev }
+  }, [drawMode, gl])
+  return null
+}
+
 function FloorCursor({ point, ppm, kind }) {
   if (!point) return null
   const arm = 18 / Math.max(ppm || 40, 1)
@@ -1353,7 +1364,9 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
         return
       }
       if (moved > 6) return
-      if (handlers.current.drawMode && spot) handlers.current.onPlace?.(spot)
+      if (handlers.current.drawMode && spot) {
+        handlers.current.onPlace?.({ ...spot, px: event.clientX, py: event.clientY, shift: event.shiftKey, at: Date.now() })
+      }
       else handlers.current.onSelect?.(read())
     }
     const onMenu = (event) => {
@@ -1528,6 +1541,7 @@ export default function HouseScene({
   selected = null,
   hovered = null,
   drawMode = false,
+  placeGhost = false,
   cursor = null,
   cursorPpm = 40,
   snapKind = null,
@@ -1611,7 +1625,14 @@ export default function HouseScene({
         <FixtureMesh key={fixture.id} plan={plan} fixture={fixture} selected={selected} hovered={hovered} />
       ))}
       <Services3D plan={plan} selected={selected} hovered={hovered} />
+      <CursorMode drawMode={drawMode} />
       {drawMode && cursor && <FloorCursor point={cursor} ppm={cursorPpm} kind={snapKind} />}
+      {drawMode && placeGhost && cursor && (
+        <mesh position={[cursor.x, 0.06, cursor.z]} rotation={[-Math.PI / 2, 0, 0]} raycast={noopRaycast}>
+          <circleGeometry args={[0.18, 24]} />
+          <meshBasicMaterial color="#ea580c" transparent opacity={0.45} depthTest={false} side={THREE.DoubleSide} />
+        </mesh>
+      )}
       {draft && liveEnd && (
         <group>
           <mesh

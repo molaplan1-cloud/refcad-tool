@@ -26,9 +26,13 @@ import {
   doorOnWall,
   insideRefrigerated,
   isOutdoorCategory,
+  outlinePoints,
+  pointInOutline,
   rotateDoorWall,
   snapOutdoorUnit,
 } from '@/lib/placement'
+import { judgePlacement, removeStackedEquipment } from '@/lib/placeOnce'
+import { ModeChip, PlaceToast, modeChipText, placeFrame } from '@/components/mode/PlaceMode'
 import { applyOutline, bboxOf, clampGroupTranslation, cleanOrthogonal, isRectangleOutline, scaleOutline, selfIntersects, translateOutline } from '@/lib/cadDraw'
 import {
   DESIGNER_CLIPBOARD_KEY,
@@ -60,8 +64,9 @@ const iconBtn = (active) => ({
   justifyContent: 'center',
   borderRadius: 8,
   border: '1px solid transparent',
-  background: active ? '#134e4a' : 'transparent',
-  color: active ? '#ccfbf1' : '#e7e5e4',
+  background: active ? '#9a3412' : 'transparent',
+  color: active ? '#fff7ed' : '#e7e5e4',
+  boxShadow: active ? '0 0 0 2px #fdba74' : 'none',
   cursor: 'pointer',
   flexShrink: 0,
   transform: 'none',
@@ -254,11 +259,18 @@ export default function DesignerApp({
   const [showAllSizes, setShowAllSizes] = useState(false)
   const [menu, setMenu] = useState(null)
   const [tool, setTool] = useState('select')
+  const [repeatPlace, setRepeatPlace] = useState(false)
+  const [toast, setToast] = useState('')
+  const [flashId, setFlashId] = useState(null)
+  const [toolMenu, setToolMenu] = useState(null)
   const [drawType, setDrawType] = useState('chilled')
   const [view, setView] = useState('2d')
   const [selectedIds, setSelectedIds] = useState([])
   const [cad, setCad] = useState(null)
   const [placingId, setPlacingId] = useState(null)
+  const lastPlace = useRef(null)
+  const toastTimer = useRef(0)
+  const finishRef = useRef(null)
   const [notice, setNotice] = useState('')
   const [pipeOffer, setPipeOffer] = useState(null)
   const [snapOn, setSnapOn] = useState(true)
@@ -365,7 +377,7 @@ export default function DesignerApp({
         setRooms(next.rooms)
         setPipes(next.pipes)
         setCables(next.cables)
-      } else if (e.key === 'Escape') {
+      }       else if (e.key === 'Escape') {
         if (cadRef.current) {
           cadRef.current = null
           if (originScene.current) {
@@ -379,6 +391,7 @@ export default function DesignerApp({
         setPlacingId(null)
         setTool('select')
         setNotice('')
+        setMenu(null)
       } else if (e.key === 'Enter' && cadRef.current?.step === 'to') {
         confirmCad(cadRef.current.base || { x: 0, z: 0 })
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -392,7 +405,14 @@ export default function DesignerApp({
       else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 'o') beginCad('offset')
       else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 't') beginCad('stretch')
       else if (!e.ctrlKey && !e.metaKey && !e.altKey && !cadRef.current && e.key.toLowerCase() === 'n') beginCad('align')
-      else if (e.key.toLowerCase() === 'v') setTool('select')
+      else if (e.key === ' ' && !e.repeat && (placingId || tool !== 'select')) {
+        e.preventDefault()
+        setPlacingId(null)
+        setTool('select')
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'v') {
+        setPlacingId(null)
+        setTool('select')
+      }
       else if (e.key.toLowerCase() === 'r') setTool('draw')
       else if (e.key.toLowerCase() === 'p') setTool('polygon')
       else if (e.key.toLowerCase() === 'w') setTool('partition')
@@ -562,21 +582,50 @@ export default function DesignerApp({
     setNotice(inside ? `${placed.label} lisättiin väliseinänä.` : `${placed.label} lisätty. Reuna on monikulmio.`)
   }
 
-  function onPlace(roomId, x, z) {
+  function showToast(text) {
+    setToast(text)
+    window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(''), 2600)
+  }
+
+  function onPlace(roomId, x, z, gesture) {
     if (!placingId) return
+    const stamp = gesture || { at: Date.now(), px: NaN, py: NaN, shift: false }
     const current = roomsRef.current
     const room = current.find((item) => item.id === roomId)
     if (!room) return
     const eq = makeEquipment(placingId, room, x, z, current)
     const warning = eq.warning
     delete eq.warning
+    const candidate = { ...eq, x: room.x + eq.x, z: room.z + eq.z, w: eq.width, d: eq.depth, name: eq.name }
+    const items = (room.equipment || []).map((item) => ({ ...item, x: room.x + item.x, z: room.z + item.z, w: item.width, d: item.depth }))
+    const verdict = judgePlacement({
+      items,
+      candidate,
+      last: lastPlace.current,
+      gesture: stamp,
+      key: (item) => item.catalogId || '',
+    })
+    if (verdict.action === 'ignore') return
+    if (verdict.action === 'duplicate') {
+      lastPlace.current = stamp
+      showToast(`${eq.name} on jo tässä`)
+      setFlashId(verdict.existing?.id || null)
+      if (verdict.existing?.id) setSelectedIds([verdict.existing.id])
+      window.setTimeout(() => setFlashId(null), 900)
+      return
+    }
+    lastPlace.current = stamp
     pushUndo()
     setRooms(current.map((item) => (
       item.id === roomId ? { ...item, equipment: [...item.equipment, eq] } : item
     )))
     setSelectedIds([eq.id])
-    setPlacingId(null)
     setNotice(warning || `${eq.name} sijoitettiin huoneeseen ${room.label}.`)
+    if (!stamp.shift && !repeatPlace) {
+      setPlacingId(null)
+      setTool('select')
+    }
   }
 
   function commitPipes(result) {
@@ -1075,7 +1124,15 @@ export default function DesignerApp({
     cables,
     pipeKind,
     notice,
+    flashId,
+    finishRef,
+    onExitPlace: () => { setPlacingId(null); setTool('select'); setToolMenu(null) },
+    onToolMenu: (x, y) => setToolMenu({ x, y }),
   }
+
+  const designName = placing?.name || (tool === 'draw' ? 'Huone' : tool === 'polygon' ? 'Monikulmio' : tool === 'partition' ? 'Väliseinä' : tool === 'pipe' ? 'Putki' : tool === 'cable' ? 'Kaapeli' : null)
+  const designDrawing = Boolean(designName && !placing)
+  const designLabel = modeChipText({ name: designName, repeat: repeatPlace && Boolean(placing), drawing: designDrawing })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
@@ -1101,25 +1158,33 @@ export default function DesignerApp({
           {saveState === 'error' ? t('designer.error') : saveState === 'saving' ? t('designer.saving') : t('designer.saved')}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
-          <button type="button" data-testid="tool-select" title="Valitse (V)" style={iconBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-select" aria-pressed={tool === 'select' && !placing} title="Valitse (V)" style={iconBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M4 2.4 L4 13.2 L7.1 9.8 L10.4 14 L11.8 13.2 L8.5 9 L12.8 8.4 Z" /></Icon>
           </button>
-          <button type="button" data-testid="tool-draw" title="Huone, suorakulmio (R)" style={iconBtn(tool === 'draw')} onClick={() => { setTool('draw'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-draw" aria-pressed={tool === 'draw'} title="Huone, suorakulmio (R)" style={iconBtn(tool === 'draw')} onClick={() => { if (tool === 'draw') { setTool('select'); return } setTool('draw'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3.2 3.6 H12.8 V12.4 H3.2 Z" /></Icon>
           </button>
-          <button type="button" data-testid="tool-polygon" title="Monikulmio (P)" style={iconBtn(tool === 'polygon')} onClick={() => { setTool('polygon'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-polygon" aria-pressed={tool === 'polygon'} title="Monikulmio (P)" style={iconBtn(tool === 'polygon')} onClick={() => { if (tool === 'polygon') { setTool('select'); return } setTool('polygon'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3.2 11.2 L6.2 3 L13 5.2 L11 13 Z" /></Icon>
           </button>
-          <button type="button" data-testid="tool-partition" title="Väliseinä (W)" style={iconBtn(tool === 'partition')} onClick={() => { setTool('partition'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-partition" aria-pressed={tool === 'partition'} title="Väliseinä (W)" style={iconBtn(tool === 'partition')} onClick={() => { if (tool === 'partition') { setTool('select'); return } setTool('partition'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3 3.2 H13 V12.8 H8.2 V3.2" /></Icon>
           </button>
-          <button type="button" data-testid="tool-pipe" title="Putki (L)" style={iconBtn(tool === 'pipe')} onClick={() => { setTool('pipe'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-pipe" aria-pressed={tool === 'pipe'} title="Putki (L)" style={iconBtn(tool === 'pipe')} onClick={() => { if (tool === 'pipe') { setTool('select'); return } setTool('pipe'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3 12.2 H7 V4.2 H13" /></Icon>
           </button>
           <button type="button" data-testid="auto-pipe" title="Luo kylmäainepiiri laitteista" style={textBtn(false)} onClick={runAutoPipe}>Autoputkitus</button>
-          <button type="button" data-testid="tool-cable" title="Kaapeli (K)" style={iconBtn(tool === 'cable')} onClick={() => { setTool('cable'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-cable" aria-pressed={tool === 'cable'} title="Kaapeli (K)" style={iconBtn(tool === 'cable')} onClick={() => { if (tool === 'cable') { setTool('select'); return } setTool('cable'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3 4.2 H6.2 V8 H9.8 V4.2 H13 V12.2" /></Icon>
           </button>
+          <button type="button" data-testid="repeat-place" aria-pressed={repeatPlace} title="Jätä sijoitus päälle" style={{ ...textBtn(false), ...(repeatPlace ? { background: '#9a3412', color: '#fff7ed', boxShadow: '0 0 0 2px #fdba74' } : {}) }} onClick={() => setRepeatPlace((value) => !value)}>Toista</button>
+          <button type="button" data-testid="cleanup-duplicates" title="Poista päällekkäiset laitteet" style={textBtn(false)} onClick={() => {
+            const result = removeStackedEquipment(roomsRef.current)
+            if (!result.removed) { showToast('Päällekkäisiä ei löytynyt'); return }
+            pushUndo()
+            setRooms(result.rooms)
+            showToast(`Poistettiin ${result.removed} päällekkäistä`)
+          }}>Siivoa päällekkäiset</button>
         </div>
         <select aria-label="Huonetyyppi" value={drawType} onChange={(e) => setDrawType(e.target.value)} style={{ background: '#1c212b', color: '#f5f5f4', border: '1px solid transparent', borderRadius: 8, height: 32, padding: '0 8px', fontSize: 12, maxWidth: 132, flexShrink: 1 }}>
           {ROOM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
@@ -1313,13 +1378,17 @@ export default function DesignerApp({
                       key={item.id}
                       type="button"
                       data-testid={`template-${item.id}`}
-                      onClick={() => { setPlacingId(item.id); setTool('select'); setNotice(`Klikkaa huonetta: ${item.name}`) }}
+                      onClick={() => {
+                        if (placingId === item.id) { setPlacingId(null); setTool('select'); return }
+                        setPlacingId(item.id); setTool('select'); setNotice(`Klikkaa huonetta: ${item.name}`)
+                      }}
                       style={{
                         width: '100%', textAlign: 'left', marginBottom: 3, padding: '4px 6px',
                         borderRadius: 8, cursor: 'pointer', fontSize: 12, color: '#1c1917', transform: 'none',
                         display: 'flex', alignItems: 'center', gap: 8,
-                        border: placingId === item.id ? '1px solid #0f766e' : '1px solid #e7e5e4',
-                        background: placingId === item.id ? '#f0fdfa' : '#fff',
+                        border: placingId === item.id ? '1px solid #c2410c' : '1px solid #e7e5e4',
+                        background: placingId === item.id ? '#fff7ed' : '#fff',
+                        boxShadow: placingId === item.id ? 'inset 3px 0 0 #ea580c' : 'none',
                       }}
                     >
                       <TemplateThumb item={item} />
@@ -1344,7 +1413,10 @@ export default function DesignerApp({
           </div>
         </aside>
 
-        <main style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+        <main data-testid="designer-canvas-frame" data-active={designName ? 'place' : 'select'} style={{ flex: 1, minWidth: 0, position: 'relative', ...placeFrame(Boolean(designName)) }}>
+          <ModeChip name={designName} repeat={repeatPlace && Boolean(placing)} drawing={designDrawing} />
+          <PlaceToast text={toast} />
+          <div data-testid="status-tool" style={{ position: 'absolute', left: 12, top: 48, zIndex: 6, pointerEvents: 'none', fontSize: 12, fontWeight: 700, color: '#44403c', background: 'rgba(255,255,255,0.92)', borderRadius: 8, padding: '4px 8px' }}>{designLabel}</div>
           {pipeOffer && (
             <div data-testid="outdoor-move-offer" style={{ position: 'absolute', top: 12, left: 12, zIndex: 6, maxWidth: 420, padding: '10px 12px', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
               <div style={{ fontSize: 13, color: '#78350f', lineHeight: 1.4 }}>{notice}</div>
@@ -1365,11 +1437,17 @@ export default function DesignerApp({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%' }}>
               <PlanView {...planProps} />
               <div style={{ borderLeft: '1px solid #d6d3d1' }}>
-                <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
+                <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} placeMode={Boolean(placing)} onPlace={(spot) => {
+                  const host = (rooms || []).find((room) => pointInOutline(spot.x, spot.z, outlinePoints(room))) || [...rooms].sort((a, b) => Math.hypot(a.x - spot.x, a.z - spot.z) - Math.hypot(b.x - spot.x, b.z - spot.z))[0]
+                  if (host) onPlace(host.id, spot.x, spot.z, spot.gesture)
+                }} onExitPlace={() => { setPlacingId(null); setTool('select') }} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
               </div>
             </div>
           ) : view === '3d' ? (
-            <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
+            <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} placeMode={Boolean(placing)} onPlace={(spot) => {
+              const host = (rooms || []).find((room) => pointInOutline(spot.x, spot.z, outlinePoints(room))) || [...rooms].sort((a, b) => Math.hypot(a.x - spot.x, a.z - spot.z) - Math.hypot(b.x - spot.x, b.z - spot.z))[0]
+              if (host) onPlace(host.id, spot.x, spot.z, spot.gesture)
+            }} onExitPlace={() => { setPlacingId(null); setTool('select') }} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
           ) : (
             <PlanView {...planProps} />
           )}
@@ -1516,6 +1594,11 @@ export default function DesignerApp({
           />
         </aside>}
       </div>
+      {toolMenu && (
+        <div data-testid="tool-menu" style={{ position: 'fixed', left: toolMenu.x, top: toolMenu.y, zIndex: 80, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 10, padding: 6, boxShadow: '0 12px 28px rgba(28,25,23,0.16)' }} onMouseDown={(event) => event.stopPropagation()}>
+          <button type="button" data-testid="ctx-finish" onClick={() => { finishRef.current?.(); setToolMenu(null) }} style={{ display: 'block', padding: '7px 10px', border: 'none', background: 'transparent', fontWeight: 700, cursor: 'pointer' }}>Lopeta</button>
+        </div>
+      )}
       {menu && (
         <ContextMenu
           menu={menu}

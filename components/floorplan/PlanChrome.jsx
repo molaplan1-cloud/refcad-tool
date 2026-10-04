@@ -25,6 +25,21 @@ const rib = (active) => ({
   whiteSpace: 'nowrap',
 })
 
+const toolStyle = (active) => ({
+  height: 28,
+  padding: '0 10px',
+  borderRadius: 6,
+  border: `1px solid ${active ? '#c2410c' : '#e7e5e4'}`,
+  background: active ? '#9a3412' : '#fff',
+  color: active ? '#fff7ed' : '#1c1917',
+  fontSize: 12,
+  fontWeight: active ? 800 : 650,
+  cursor: 'pointer',
+  flexShrink: 0,
+  whiteSpace: 'nowrap',
+  boxShadow: active ? '0 0 0 3px #fdba74' : 'none',
+})
+
 const itemStyle = (active) => ({
   height: 28,
   padding: '0 8px',
@@ -97,7 +112,7 @@ export function PlanChrome({
   onPartitions, onCloseRoom, onYardTool, onNorth, onGrid, onAngle, onZoomOut, onZoomIn, onZoomFit,
   onClearances, onWallMode, onRoofMode, onSceneStyle, onSystem, onKind, onSvcTool, onFloorHeating,
   onFinish, onRoute, onRewire, onSchedule, onDiagram, onRewireWater, onRewireHeat, onHeatTable,
-  onHeatSchematic, onPdf, onServicePdf, onCommand, onSelectType, onCadLayer,
+  onHeatSchematic,   onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup,
 }) {
   const [open, setOpen] = useState(null)
   const close = () => setOpen(null)
@@ -110,16 +125,17 @@ export function PlanChrome({
   const onSite = mode === 'site'
   const onSheet = onPlan || onSite
 
+  const selectOn = tool === 'select' && !placing && !svcTool && !yardTool
   const drawTools = (style) => (
     <>
-      <button type="button" data-testid="tool-select" style={style(tool === 'select' && !placing)} onClick={() => { close(); onTool('select') }}>{t('tool.select')}</button>
-      <button type="button" data-testid="tool-exterior" style={style(tool === 'exterior')} onClick={() => { close(); onTool('exterior') }}>{t('tool.exterior')}</button>
-      <button type="button" data-testid="tool-interior" style={style(tool === 'interior')} onClick={() => { close(); onTool('interior') }}>{t('tool.interior')}</button>
-      <button type="button" data-testid="tool-door" style={style(tool === 'door')} onClick={() => { close(); onTool('door') }}>{t('tool.door')}</button>
-      <button type="button" data-testid="tool-window" style={style(tool === 'window')} onClick={() => { close(); onTool('window') }}>{t('tool.window')}</button>
-      <button type="button" data-testid="tool-room" style={style(tool === 'room' && roomShape === 'rect')} onClick={() => { close(); onRoomRect() }}>{t('tool.room')}</button>
-      <button type="button" data-testid="tool-room-poly" style={style(tool === 'room' && roomShape === 'poly')} onClick={() => { close(); onRoomPoly() }}>{t('tool.polygon')}</button>
-      <button type="button" data-testid="tool-detect" style={style(tool === 'detect')} onClick={() => { close(); onTool('detect') }}>{t('tool.detect')}</button>
+      <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={style(selectOn)} onClick={() => { close(); onTool('select') }}>{t('tool.select')}</button>
+      <button type="button" data-testid="tool-exterior" aria-pressed={tool === 'exterior'} style={style(tool === 'exterior')} onClick={() => { close(); onTool('exterior') }}>{t('tool.exterior')}</button>
+      <button type="button" data-testid="tool-interior" aria-pressed={tool === 'interior'} style={style(tool === 'interior')} onClick={() => { close(); onTool('interior') }}>{t('tool.interior')}</button>
+      <button type="button" data-testid="tool-door" aria-pressed={tool === 'door'} style={style(tool === 'door')} onClick={() => { close(); onTool('door') }}>{t('tool.door')}</button>
+      <button type="button" data-testid="tool-window" aria-pressed={tool === 'window'} style={style(tool === 'window')} onClick={() => { close(); onTool('window') }}>{t('tool.window')}</button>
+      <button type="button" data-testid="tool-room" aria-pressed={tool === 'room' && roomShape === 'rect'} style={style(tool === 'room' && roomShape === 'rect')} onClick={() => { close(); onRoomRect() }}>{t('tool.room')}</button>
+      <button type="button" data-testid="tool-room-poly" aria-pressed={tool === 'room' && roomShape === 'poly'} style={style(tool === 'room' && roomShape === 'poly')} onClick={() => { close(); onRoomPoly() }}>{t('tool.polygon')}</button>
+      <button type="button" data-testid="tool-detect" aria-pressed={tool === 'detect'} style={style(tool === 'detect')} onClick={() => { close(); onTool('detect') }}>{t('tool.detect')}</button>
       <label style={{ ...style(false), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
         <input data-testid="room-partitions" type="checkbox" checked={partitions} onChange={(event) => onPartitions(event.target.checked)} />
         {t('partition.create')}
@@ -216,6 +232,7 @@ export function PlanChrome({
         <Menu id="edit" label={t('menu.edit')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="undo" title={t('edit.undo')} style={menuItem(false)} onClick={() => { close(); onUndo() }}>{t('edit.undo')}</button>
           <button type="button" data-testid="redo" title={t('edit.redo')} style={menuItem(false)} onClick={() => { close(); onRedo() }}>{t('edit.redo')}</button>
+          <button type="button" data-testid="cleanup-duplicates" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>Siivoa päällekkäiset</button>
         </Menu>
         <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="open-display" style={menuItem(false)} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
@@ -287,8 +304,15 @@ export function PlanChrome({
       {mode !== 'facade' && (
         <div data-testid="tool-ribbon" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '4px 8px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto' }}>
-            {onPlan && <Group>{drawTools(rib)}</Group>}
-            {onSite && <Group>{yardTools(rib)}</Group>}
+            {(onPlan || mode === '3d') && <Group>{drawTools(toolStyle)}</Group>}
+            {onSite && <Group>{yardTools(toolStyle)}</Group>}
+            {mode !== 'facade' && (
+              <Group>
+                <button type="button" data-testid="ribbon-service-node" aria-pressed={svcTool === 'node'} style={toolStyle(svcTool === 'node')} onClick={() => onSvcTool('node')}>Piste</button>
+                <button type="button" data-testid="ribbon-service-run" aria-pressed={svcTool === 'run'} style={toolStyle(svcTool === 'run')} onClick={() => onSvcTool('run')}>Linja</button>
+                <button type="button" data-testid="repeat-place" aria-pressed={repeat} title="Jätä työkalu päälle seuraavaa sijoitusta varten" style={toolStyle(repeat)} onClick={() => onRepeat?.(!repeat)}>Toista</button>
+              </Group>
+            )}
             {mode === '3d' && (
               <Group>
                 <span style={{ fontSize: 11, color: '#78716c' }}>{t('view3d.walls')}</span>

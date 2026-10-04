@@ -390,6 +390,10 @@ export default function PlanView({
   cables = [],
   pipeKind = 'suction',
   notice,
+  flashId = null,
+  finishRef = null,
+  onExitPlace,
+  onToolMenu,
 }) {
   const hostRef = useRef(null)
   const viewRef = useRef({ scale: 36, offsetX: 480, offsetY: 320 })
@@ -411,7 +415,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
-    onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch,
+    onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu,
   }
 
   const setCamera = (next) => {
@@ -508,6 +512,8 @@ export default function PlanView({
       const tag = event.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (event.code === 'Space') {
+        const busy = propsRef.current.placing || (propsRef.current.tool && propsRef.current.tool !== 'select')
+        if (busy) return
         event.preventDefault()
         setSpaceDown(event.type === 'keydown')
         return
@@ -865,6 +871,17 @@ export default function PlanView({
       return
     }
     if (event.button === 2) {
+      const p = propsRef.current
+      if (p.placing) {
+        event.preventDefault()
+        p.onExitPlace?.()
+        return
+      }
+      if (p.tool && p.tool !== 'select') {
+        event.preventDefault()
+        p.onToolMenu?.(event.clientX, event.clientY)
+        return
+      }
       gesture.current = {
         kind: 'right',
         sx: event.clientX,
@@ -946,7 +963,9 @@ export default function PlanView({
       if (!room && outdoor) {
         room = [...p.rooms].sort((a, b) => Math.hypot(a.x - world.x, a.z - world.z) - Math.hypot(b.x - world.x, b.z - world.z))[0]
       }
-      if (room) p.onPlace(room.id, world.x, world.z)
+      if (room) {
+        p.onPlace(room.id, world.x, world.z, { at: Date.now(), px: event.clientX, py: event.clientY, shift: event.shiftKey })
+      }
       return
     }
     const routeHandle = event.target?.dataset?.routeHandle
@@ -1034,6 +1053,35 @@ export default function PlanView({
       return
     }
     gesture.current = { kind: 'marquee', x1: world.x, z1: world.z, shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey }
+  }
+
+  if (finishRef) {
+    finishRef.current = () => {
+      const points = polyRef.current
+      const drawingGesture = gesture.current?.kind === 'draw'
+      if (drawingGesture) {
+        const g = gesture.current
+        gesture.current = null
+        setDraft(null)
+        onCreateRect?.(g.x1, g.z1, g.x2, g.z2)
+        return
+      }
+      const route = tool === 'pipe' || tool === 'cable'
+      if (route && points.length >= 2) {
+        onCreateRoute?.(points)
+        setPoly([])
+        return
+      }
+      if (!route && points.length >= 4) {
+        onCreatePolygon?.(points)
+        setPoly([])
+        return
+      }
+      gesture.current = null
+      setDraft(null)
+      setPoly([])
+      onExitPlace?.()
+    }
   }
 
   const { minor, major } = gridSpec(view.scale)
@@ -1149,6 +1197,7 @@ export default function PlanView({
                   const ez = room.z + eq.z
                   return (
                     <g key={eq.id} data-eq={eq.id} data-cat={eq.category} data-style={eq.style || ''} transform={`translate(${ex} ${ez}) rotate(${eq.rotation || 0})`}>
+                      {flashId === eq.id && <rect data-testid="place-flash" x={-eq.width / 2 - 0.06} y={-eq.depth / 2 - 0.06} width={eq.width + 0.12} height={eq.depth + 0.12} fill="none" stroke="#ea580c" strokeWidth={0.04} />}
                       <EquipmentMark eq={eq} scale={view.scale} />
                     </g>
                   )
@@ -1489,6 +1538,20 @@ export default function PlanView({
               strokeWidth={1.4 / view.scale}
               strokeDasharray={draft.mode === 'crossing' ? `${7 / view.scale} ${4 / view.scale}` : undefined}
             />
+          )}
+          {placing && cursor && (
+            <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${cursor.x} ${cursor.z})`}>
+              <rect
+                x={-(placing.width || 0.6) / 2}
+                y={-(placing.depth || 0.6) / 2}
+                width={placing.width || 0.6}
+                height={placing.depth || 0.6}
+                fill="#ea580c33"
+                stroke="#ea580c"
+                strokeDasharray={`${0.08} ${0.05}`}
+                strokeWidth={0.03}
+              />
+            </g>
           )}
           {cursor?.kind && (
             <g>
