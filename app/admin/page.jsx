@@ -119,7 +119,9 @@ export default function AdminPage() {
                     ) : (user.validUntil || '—')}</td>
                     <td style={{ padding: '12px' }}>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>Kuittaa maksu</button>
+                        {(status === 'Odottaa maksun vahvistusta' || status === 'Vanhentunut') && user.role !== 'admin' && user.role !== 'demo' && (
+                          <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>Uusi / kuittaa</button>
+                        )}
                         <button type="button" data-testid="admin-edit" style={quiet} onClick={() => setEditing(open ? null : user.id)}>{open ? 'Sulje' : 'Muokkaa'}</button>
                         <button type="button" data-testid="admin-disable" style={quiet} onClick={() => patch(user.id, { disabled: !user.disabled })}>{user.disabled ? 'Ota käyttöön' : 'Poista käytöstä'}</button>
                       </div>
