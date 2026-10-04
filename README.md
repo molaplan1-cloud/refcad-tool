@@ -1,19 +1,32 @@
 # RefCAD Tool
 
-Professional cold room designer (SaaS) with 3D isometric view, heat-load calculation, drag-and-drop equipment, dimensions, and PDF export. Built with Next.js 14 App Router + JWT auth + multi-user projects.
+Browser CAD for cold rooms, houses and halls. The landing page introduces the product, the project-type picker opens one drawing workspace, and paid workspaces stay closed until an admin confirms the payment.
 
 ## Features
 
-- **SupaCAD-style landing page** — warm cyan/blue gradient with isometric 3D illustration
-- **Multi-user with JWT auth** — bcrypt-hashed passwords, signed JWT cookies, 7-day sessions
-- **Projects dashboard** — CRUD projects per user, auto-save to disk
-- **Cold Room Designer** — 2D plan view (SVG) + 3D isometric view (SVG)
-- **Drag-and-drop equipment** — doors, evaporators, condensers, units, racks
-- **Auto-snap** — doors snap to nearest wall; evaporators hang from ceiling
-- **Dimensions** — measure and display in mm/m
-- **Heat load calculation** — based on room type (chilled/frozen/blast chiller/blast freezer/fresh)
-- **Right-click context menu** — move, copy, delete equipment
-- **PDF export** — generates branded PDF with room specs
+- **Landing page** — cold rooms, houses and halls, plus an indicative price list
+- **Project types** — kylmiö, liikerakennus, omakotitalo, rivitalo, paritalo, halli
+- **Floor plan** — free without an account. Prints carry the watermark `RefCAD – DEMO / ILMAINEN VERSIO`
+- **Paid workspaces** — Sähkö, LVI, IV, Piha and Kylmätekniikka after the payment is marked received
+- **Auth** — bcrypt password hashes and httpOnly JWT sessions (7 days). No Supabase project is required on Vercel
+- **Admin** — the admin account does not draw. It lists, creates, disables and deletes users, sets the plan, confirms a payment and sets validity dates
+- **Cold room designer** — evaporator, condensing unit, piping and load calculation stay on `/suunnittelu`
+
+## Accounts and environment
+
+The repository is public. Do not commit passwords or `.env.local`.
+
+Set these in the Vercel project environment before deploy. Locally, put the same names in `.env.local` (gitignored):
+
+- `AUTH_SECRET` — random string, at least 32 characters (`openssl rand -hex 32`)
+- `ADMIN_EMAIL` — admin login. This account opens the admin panel and cannot draw
+- `ADMIN_PASSWORD` — plaintext only in the environment. The app stores a bcrypt hash
+- `DEMO_USERNAME` — showcase login. Full features, watermarked prints
+- `DEMO_PASSWORD` — plaintext only in the environment
+
+If `ADMIN_EMAIL` / `ADMIN_PASSWORD` or `DEMO_USERNAME` / `DEMO_PASSWORD` are unset, that account is not created. A missing `AUTH_SECRET` refuses logins instead of falling back to a shared demo user.
+
+Prices on the site are indicative. There is no card payment: the user requests a plan and the admin marks the payment received.
 
 ## Cold room types
 
@@ -45,7 +58,7 @@ Professional cold room designer (SaaS) with 3D isometric view, heat-load calcula
 ```bash
 npm install --legacy-peer-deps
 cp .env.production.example .env.local
-# Edit .env.local — set AUTH_SECRET to a random 32+ char string
+# Edit .env.local — set AUTH_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD, DEMO_USERNAME and DEMO_PASSWORD
 npm run dev
 # Open http://localhost:3000
 ```
@@ -58,7 +71,7 @@ The simplest path:
 
 1. Sign up at https://vercel.com (free)
 2. Import the `molaplan1-cloud/refcad-tool` repo
-3. Set `AUTH_SECRET` env var
+3. Set `AUTH_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `DEMO_USERNAME` and `DEMO_PASSWORD` in the Vercel environment. Do not put the password values in the repo.
 4. Deploy
 
 First build takes ~1 minute, subsequent deploys ~30 seconds.
@@ -67,13 +80,18 @@ First build takes ~1 minute, subsequent deploys ~30 seconds.
 
 ```
 app/
-  page.jsx              # SupaCAD-style landing
+  page.jsx              # Landing page
+  uusi/                 # Project type picker
+  admin/                # User and payment admin
+  pohjakuva/            # Floor-plan workspace
+  suunnittelu/          # Cold-room designer
   login/, signup/       # Auth pages
-  projects/             # Dashboard + [id] designer
-  api/                  # Auth + projects CRUD
+  api/                  # Auth, admin and projects
 lib/
-  auth.js               # JWT + bcrypt helpers
-  db.js                 # JSON-file based DB
+  auth.js               # bcrypt + JWT sessions
+  seed.js               # Env-only admin and demo accounts
+  access.js             # Plans, project types, watermark rule
+  db.js                 # JSON file, or Vercel KV when configured
 scripts/
   check-lockfile.js     # pre-build lockfile validator
 .github/workflows/

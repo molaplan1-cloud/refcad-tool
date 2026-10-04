@@ -26,7 +26,7 @@ export default function LoginClient() {
         setLoading(false)
         return
       }
-      router.push('/projects')
+      router.push(data.user?.role === 'admin' ? '/admin' : '/uusi')
     } catch (e) {
       setError('Verkkovirhe')
       setLoading(false)
@@ -56,8 +56,8 @@ export default function LoginClient() {
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '14px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>Sähköposti</label>
-            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="esimerkki@refcad.fi"
+            <label style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>Sähköposti tai käyttäjätunnus</label>
+            <input type="text" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nimi@yritys.fi"
               style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f1f5f9', fontSize: '14px' }} />
           </div>
           <div style={{ marginBottom: '20px' }}>

@@ -7,9 +7,8 @@ export const dynamic = 'force-dynamic'
 
 export default async function ProjectsPage() {
   const user = await getCurrentUser()
-  // Auth disabled in demo mode — getCurrentUser always returns demo user.
-  // Keep this guard so adding auth back later is one-line.
   if (!user) redirect('/login')
+  if (user.role === 'admin') redirect('/admin')
   const projects = await listProjects(user.id)
   return <ProjectsClient user={user} initialProjects={projects} />
 }

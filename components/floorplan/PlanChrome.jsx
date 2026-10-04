@@ -117,6 +117,7 @@ export function PlanChrome({
   onHeatSchematic,   onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup, onRemoveAuto, onStraighten,
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
   doorHand = { swing: 1, inward: false, doorStyle: 'hinged', slideMount: 'pocket', panels: 1 }, onDoorHand,
+  access = null,
 }) {
   const [open, setOpen] = useState(null)
   const close = () => setOpen(null)
@@ -216,7 +217,7 @@ export function PlanChrome({
         <span style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 8, background: '#1c212b' }}>
           <button type="button" data-testid="view-floor-2d" style={modeTab(mode === 'plan')} onClick={() => onMode('plan')}>{t('mode.plan')}</button>
-          <button type="button" data-testid="view-site" style={modeTab(mode === 'site')} onClick={() => onMode('site')}>{t('view.site')}</button>
+          <button type="button" data-testid="view-site" disabled={access && !access.workspaces.includes('piha')} style={modeTab(mode === 'site')} onClick={() => { if (!access || access.workspaces.includes('piha')) onMode('site') }}>{t('view.site')}</button>
           <button type="button" data-testid="view-floor-3d" style={modeTab(mode === '3d')} onClick={() => onMode('3d')}>3D</button>
           <button type="button" data-testid="view-facade" style={modeTab(mode === 'facade')} onClick={() => onMode('facade')}>{t('view.facade')}</button>
         </div>
@@ -227,11 +228,17 @@ export function PlanChrome({
         <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
       </header>
       <div data-testid="workspace-tabs" style={{ display: 'flex', alignItems: 'center', gap: 4, height: 36, padding: '0 8px', background: '#14181f' }}>
-        {WORKSPACES.map((item) => (
-          <button key={item.id} type="button" data-testid={`workspace-${item.id}`} aria-pressed={workspace === item.id} style={workspaceTab(workspace === item.id)} onClick={() => onWorkspace?.(item.id)}>
-            {item.name}
-          </button>
-        ))}
+        {WORKSPACES.map((item) => {
+          const allowed = !access || access.workspaces.includes(item.id)
+          return (
+            <button key={item.id} type="button" data-testid={`workspace-${item.id}`} aria-pressed={workspace === item.id} disabled={!allowed} style={{ ...workspaceTab(workspace === item.id), opacity: allowed ? 1 : 0.4 }} onClick={() => { if (allowed) onWorkspace?.(item.id) }}>
+              {item.name}
+            </button>
+          )
+        })}
+        {access?.workspaces.includes('kylma') && (
+          <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), textDecoration: 'none' }}>Kylmätekniikka</a>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 32, padding: '0 6px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
         <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen}>

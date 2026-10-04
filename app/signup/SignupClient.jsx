@@ -19,7 +19,13 @@ export default function SignupClient() {
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name })
+        body: JSON.stringify({
+          email,
+          password,
+          name,
+          plan: new URLSearchParams(window.location.search).get('plan') || '',
+          cycle: new URLSearchParams(window.location.search).get('cycle') || 'month',
+        })
       })
       const data = await res.json()
       if (!res.ok) {
@@ -27,7 +33,7 @@ export default function SignupClient() {
         setLoading(false)
         return
       }
-      router.push('/projects')
+      router.push('/uusi')
     } catch (e) {
       setError('Verkkovirhe')
       setLoading(false)
