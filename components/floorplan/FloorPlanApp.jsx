@@ -92,6 +92,8 @@ import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './Floo
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
 import { ServiceDrawing, ServiceMenu } from './ServicesLayer'
+import { ModeChip, PlaceToast, modeChipText, placeFrame } from '@/components/mode/PlaceMode'
+import { judgePlacement, placeServiceNode, removeStacked, fixtureKey } from '@/lib/placeOnce'
 import { ElectricPanel } from './ElectricPanel'
 import { HeatingPanel } from './HeatingPanel'
 import { COVER_TYPES } from '@/lib/covers'
@@ -127,7 +129,6 @@ import {
 } from '@/lib/yard'
 import {
   PLACEABLES,
-  addServiceNode,
   addServiceRun,
   deleteServiceNode,
   deleteServiceRun,
@@ -176,8 +177,9 @@ const sideBtn = (active) => ({
   textAlign: 'left',
   padding: '7px 8px',
   borderRadius: 8,
-  border: active ? '1px solid #0f766e' : '1px solid transparent',
-  background: active ? '#f0fdfa' : 'transparent',
+  border: active ? '1px solid #c2410c' : '1px solid transparent',
+  background: active ? '#fff7ed' : 'transparent',
+  boxShadow: active ? 'inset 3px 0 0 #ea580c' : 'none',
   color: '#1c1917',
   fontSize: 13,
   fontWeight: 600,
@@ -264,6 +266,22 @@ function SnapMark({ snap, X, Y, zoom }) {
       </g>
     </g>
   )
+}
+
+function yardPlacesOne(id) {
+  if (!id) return false
+  if (id.startsWith('plant:') || id.startsWith('object:') || id.startsWith('building:')) return true
+  if (id.startsWith('ground:')) return GROUND_TOOLS.find((item) => item.id === id.slice(7))?.mode === 'point'
+  return false
+}
+
+const TOOL_LABELS = {
+  exterior: 'Ulkoseinä',
+  interior: 'Väliseinä',
+  door: 'Ovi',
+  window: 'Ikkuna',
+  room: 'Huone',
+  detect: 'Tunnista huone',
 }
 
 function sheetPixels(size, plan, site = false) {
@@ -581,6 +599,9 @@ export default function FloorPlanApp() {
   const [hover, setHover] = useState(null)
   const [tool, setTool] = useState('select')
   const [placing, setPlacing] = useState(null)
+  const [repeatPlace, setRepeatPlace] = useState(false)
+  const [toast, setToast] = useState('')
+  const [flashId, setFlashId] = useState(null)
   const [fixtureQuery, setFixtureQuery] = useState('')
   const [draft, setDraft] = useState(null)
   const [cursor, setCursor] = useState(null)
@@ -643,6 +664,10 @@ export default function FloorPlanApp() {
   const panRef = useRef(null)
   const dragGrab = useRef(null)
   const spaceRef = useRef(false)
+  const lastPlace = useRef(null)
+  const toastTimer = useRef(0)
+  const flashTimer = useRef(0)
+  const endDrawingRef = useRef(() => {})
   const suppressMenu = useRef(false)
   const altRef = useRef(false)
   altRef.current = altDown
@@ -702,6 +727,31 @@ export default function FloorPlanApp() {
     observer.observe(node)
     return () => observer.disconnect()
   }, [view])
+
+  const exitToSelect = useCallback(() => {
+    setTool('select')
+    setPlacing(null)
+    setSvcTool(null)
+    setYardTool(null)
+    setDraft(null)
+    setPoly([])
+    setSvcPoints([])
+    setYardPoints([])
+    setDrawGuide(null)
+    setRedrawId(null)
+  }, [])
+
+  const showToast = useCallback((text) => {
+    setToast(text)
+    window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(''), 2600)
+  }, [])
+
+  const flashItem = useCallback((id) => {
+    setFlashId(id || null)
+    window.clearTimeout(flashTimer.current)
+    if (id) flashTimer.current = window.setTimeout(() => setFlashId(null), 900)
+  }, [])
 
   const commit = useCallback((next) => {
     setPlan((current) => {
@@ -925,6 +975,18 @@ export default function FloorPlanApp() {
   }
 
   const openHitMenu = (hit, event, spot) => {
+    const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || yardPlacesOne(yardTool))
+    const drawing = Boolean(tool === 'exterior' || tool === 'interior' || tool === 'room' || tool === 'detect' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool)))
+    if (placingOne) {
+      event.preventDefault()
+      exitToSelect()
+      return
+    }
+    if (drawing) {
+      event.preventDefault()
+      setMenu({ x: event.clientX, y: event.clientY, kind: 'tool' })
+      return
+    }
     if (spot) {
       const joint = cornerJoint(plan.walls, spot, Math.max(0.32, 18 / Math.max(spot.ppm || ppm2d, 0.001)))
       if (joint) {
@@ -1100,6 +1162,20 @@ export default function FloorPlanApp() {
   }
 
   const onContextMenu = (event) => {
+    const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || yardPlacesOne(yardTool))
+    const drawing = Boolean(tool === 'exterior' || tool === 'interior' || tool === 'room' || tool === 'detect' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool)))
+    if (placingOne) {
+      event.preventDefault()
+      event.stopPropagation()
+      exitToSelect()
+      return
+    }
+    if (drawing) {
+      event.preventDefault()
+      event.stopPropagation()
+      setMenu({ x: event.clientX, y: event.clientY, kind: 'tool' })
+      return
+    }
     if (suppressMenu.current) {
       event.preventDefault()
       suppressMenu.current = false
@@ -1143,26 +1219,44 @@ export default function FloorPlanApp() {
     setYardPoints([])
   }
 
-  const placeAt = (world, ppm) => {
+  const placeAt = (world, ppm, gesture = null) => {
+    const stamp = gesture || { at: Date.now(), px: NaN, py: NaN, shift: false }
     const visual = describeSnap(world, ppm)
     const point = visual?.point || world
+    const keep = Boolean(stamp.shift || repeatPlace)
+    const blocked = (items, candidate, keyFn, onHit) => {
+      const verdict = judgePlacement({ items, candidate, last: lastPlace.current, gesture: stamp, key: keyFn })
+      if (verdict.action === 'ignore') return true
+      if (verdict.action === 'duplicate') {
+        lastPlace.current = stamp
+        showToast(`${candidate.name || 'Kohde'} on jo tässä`)
+        flashItem(verdict.existing?.id)
+        onHit?.(verdict.existing)
+        return true
+      }
+      lastPlace.current = stamp
+      return false
+    }
+    const finishSingle = () => { if (!keep) exitToSelect() }
     if (yardTool) {
-      if (yardTool.startsWith('plant:')) {
-        commit(addPlant(plan, yardTool.slice(6), point.x, point.z))
-        return
-      }
-      if (yardTool.startsWith('object:')) {
-        commit(addObject(plan, yardTool.slice(7), point.x, point.z))
-        return
-      }
-      if (yardTool.startsWith('building:')) {
-        commit(addBuilding(plan, yardTool.slice(9), point.x, point.z))
+      if (yardTool.startsWith('plant:') || yardTool.startsWith('object:') || yardTool.startsWith('building:')) {
+        const kind = yardTool.startsWith('plant:') ? yardTool.slice(6) : yardTool.startsWith('object:') ? yardTool.slice(7) : yardTool.slice(9)
+        const collection = yardTool.startsWith('plant:') ? 'plants' : yardTool.startsWith('object:') ? 'objects' : 'buildings'
+        const list = ensureYard(plan)[collection] || []
+        const name = yardTool.startsWith('plant:') ? (PLANTS.find((item) => item.id === kind)?.name || 'Kasvi') : yardTool.startsWith('object:') ? (OBJECTS.find((item) => item.id === kind)?.name || 'Kaluste') : (BUILDINGS.find((item) => item.id === kind)?.name || 'Rakennus')
+        if (blocked(list, { kind, x: point.x, z: point.z, name }, (item) => item.kind, (existing) => choose({ kind: 'yard', id: existing.id, collection }))) return
+        const next = yardTool.startsWith('plant:') ? addPlant(plan, kind, point.x, point.z) : yardTool.startsWith('object:') ? addObject(plan, kind, point.x, point.z) : addBuilding(plan, kind, point.x, point.z)
+        commit(next)
+        const created = (ensureYard(next)[collection] || []).slice(-1)[0]
+        if (created) choose({ kind: 'yard', id: created.id, collection })
+        finishSingle()
         return
       }
       if (yardTool.startsWith('ground:')) {
         const spec = GROUND_TOOLS.find((item) => item.id === yardTool.slice(7))
         if (spec?.mode === 'point') {
           commit(addGroundDraw(plan, spec.id, [point]))
+          finishSingle()
           return
         }
       }
@@ -1183,7 +1277,7 @@ export default function FloorPlanApp() {
       const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES[0]
       const snapped = snapServicePoint(world, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system })
       if (svcTool === 'node') {
-        commit(addServiceNode(plan, {
+        const node = {
           system: spec.system,
           kind: spec.kind,
           role: spec.role,
@@ -1194,7 +1288,21 @@ export default function FloorPlanApp() {
           pointType: spec.pointType,
           x: snapped.x,
           z: snapped.z,
-        }))
+        }
+        const result = placeServiceNode(plan, node, stamp, lastPlace.current)
+        if (!result.placed) {
+          if (result.verdict.action === 'duplicate') {
+            lastPlace.current = stamp
+            showToast(`${spec.name || 'Kohde'} on jo tässä`)
+            flashItem(result.verdict.existing?.id)
+            if (result.verdict.existing) choose({ kind: 'service', service: { target: 'node', id: result.verdict.existing.id, system: result.verdict.existing.system } })
+          }
+          return
+        }
+        lastPlace.current = result.last
+        commit(result.plan)
+        if (result.created) choose({ kind: 'service', service: { target: 'node', id: result.created.id, system: result.created.system } })
+        finishSingle()
         return
       }
       setSvcPoints((points) => {
@@ -1239,18 +1347,56 @@ export default function FloorPlanApp() {
     }
     if (tool === 'door' || tool === 'window') {
       const along = visual?.wall ? visual : snapAlongWall(world, plan.walls, Math.max(12 / Math.max(ppm, 0.001), 0.35), !altRef.current)
-      if (along?.wall) commit(refreshHeat(addOpening(plan, along.wall.id, along.point || point, tool)))
+      if (!along?.wall) return
+      if (blocked([], { name: tool === 'door' ? 'Ovi' : 'Ikkuna', x: 0, z: 0 }, () => 'opening')) return
+      const before = (plan.openings || []).length
+      const next = refreshHeat(addOpening(plan, along.wall.id, along.point || point, tool))
+      if ((next.openings || []).length === before) {
+        showToast(`${tool === 'door' ? 'Ovi' : 'Ikkuna'} on jo tässä`)
+        return
+      }
+      commit(next)
+      const created = next.openings[next.openings.length - 1]
+      if (created) choose({ kind: 'opening', id: created.id })
+      finishSingle()
       return
     }
     if (placing) {
       const radius = Math.max(12 / Math.max(ppm, 0.001), 0.45)
-      const next = addFixture(plan, placing, point.x, point.z, radius)
-      commit(next)
-      const created = next.fixtures[next.fixtures.length - 1]
-      setSelectedFixture(created?.id || null)
-      setPick(created ? { kind: 'fixture', id: created.id } : null)
-      setPlacing(null)
+      const drafted = addFixture(plan, placing, point.x, point.z, radius)
+      const created = drafted.fixtures[drafted.fixtures.length - 1]
+      const spec = FIXTURES.find((item) => item.id === placing)
+      if (!created) return
+      if (blocked(plan.fixtures || [], { ...created, name: spec?.name || 'Kaluste' }, fixtureKey, (existing) => {
+        setSelectedFixture(existing.id)
+        setPick({ kind: 'fixture', id: existing.id })
+      })) return
+      commit(drafted)
+      setSelectedFixture(created.id)
+      setPick({ kind: 'fixture', id: created.id })
+      finishSingle()
     }
+  }
+
+  endDrawingRef.current = (world) => {
+    if ((tool === 'exterior' || tool === 'interior') && draft) {
+      const end = drawGuide || world
+      if (end && segmentLength(draft, end) > 0.05) commit(refreshHeat(addWall(plan, draft, end, tool)))
+    } else if (tool === 'room' && roomShape === 'poly' && poly.length >= 3) {
+      closeRoom(poly)
+    } else if (tool === 'room' && draft && world) {
+      closeRoom([
+        draft,
+        { x: world.x, z: draft.z },
+        world,
+        { x: draft.x, z: world.z },
+      ])
+    } else if (svcTool === 'run' && svcPoints.length >= 2) {
+      finishServiceRun()
+    } else if (yardTool && !yardPlacesOne(yardTool) && yardPoints.length >= 2) {
+      finishYard(yardPoints)
+    }
+    exitToSelect()
   }
 
   const beginPan = (event) => {
@@ -1265,6 +1411,7 @@ export default function FloorPlanApp() {
       return
     }
     if (event.button === 2) {
+      if (placing || svcTool || yardTool || tool !== 'select') return
       const world = toWorld(event)
       const hit = hitTest(plan, world)
       const serviceHit = hitService(plan, world)
@@ -1306,7 +1453,12 @@ export default function FloorPlanApp() {
       return
     }
     if (svcTool || yardTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing) {
-      placeAt(world, ppm2d)
+      const drawing = tool === 'room' || tool === 'exterior' || tool === 'interior' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool))
+      if (event.detail >= 2 && drawing) {
+        endDrawingRef.current(world)
+        return
+      }
+      placeAt(world, ppm2d, { at: Date.now(), px: event.clientX, py: event.clientY, shift: event.shiftKey })
       return
     }
     const serviceHit = hitService(plan, world)
@@ -1360,9 +1512,11 @@ export default function FloorPlanApp() {
         })
         return
       }
+      const engaged = Boolean(placing || svcTool || yardTool || tool !== 'select')
       if (event.key === ' ' && !event.repeat) {
         event.preventDefault()
-        spaceRef.current = true
+        if (engaged) exitToSelect()
+        else spaceRef.current = true
         return
       }
       if (view === '2d' && (event.key === '+' || event.key === '=')) {
@@ -1410,26 +1564,16 @@ export default function FloorPlanApp() {
       }
       if (event.key === 'Escape') {
         if (command) cancelCommand()
-        setDraft(null)
-        setPoly([])
-        setPlacing(null)
+        exitToSelect()
         setMenu(null)
-        setSvcPoints([])
-        setSvcTool(null)
-        setRedrawId(null)
-        setYardPoints([])
-        setYardTool(null)
         setElectricView(null)
         setHeatView(null)
         if (!command) remember([])
       } else if (event.key === 'Enter' && command?.step === 'to') {
         confirmCommand(snappedPoint(cursor || command.base || { x: 0, z: 0 }))
-      } else if (event.key === 'Enter' && svcTool === 'run' && svcPoints.length >= 2) {
-        finishServiceRun()
-      } else if (event.key === 'Enter' && tool === 'room' && poly.length >= 3) {
-        closeRoom(poly)
-      } else if (event.key === 'Enter' && yardTool && yardPoints.length >= ((yardTool === 'path' || yardTool === 'drive' || yardTool === 'parking' || yardTool === 'fence' || (yardTool.startsWith('ground:') && GROUND_TOOLS.find((item) => item.id === yardTool.slice(7))?.mode === 'line')) ? 2 : 3)) {
-        finishYard(yardPoints)
+      } else if (event.key === 'Enter' && engaged && !command) {
+        event.preventDefault()
+        endDrawingRef.current(cursor)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && picks.length) {
         commit(deleteSelection(plan, picks))
         remember([])
@@ -1466,9 +1610,10 @@ export default function FloorPlanApp() {
         const preset = event.key === '1' ? 'plain' : event.key === '2' ? 'measure' : 'all'
         const sheet = sheetMode === 'site' ? 'site' : 'plan'
         setPlan((current) => applyDisplay(current, { preset }, sheet))
-      } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'v' && !command && tool === 'select') {
+      } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'v') {
         event.preventDefault()
-        setDisplayOpen((open) => !open)
+        if (engaged) exitToSelect()
+        else if (!command && tool === 'select') setDisplayOpen((open) => !open)
       } else if (!event.ctrlKey && !event.metaKey && !event.altKey && !command && tool === 'select') {
         const key = event.key.toLowerCase()
         const shortcut = { m: 'move', c: 'copy', e: 'rotate', s: 'scale', f: 'mirror', b: 'array', o: 'offset', t: 'stretch', n: 'align', d: 'measure' }[key]
@@ -1494,7 +1639,7 @@ export default function FloorPlanApp() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [commit, plan, selectedFixture, undo, redoChange, tool, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode])
+  }, [commit, plan, selectedFixture, undo, redoChange, tool, placing, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode, exitToSelect])
 
   const loadHouse = (house, roomName, panel) => {
     const next = { ...house, services: ensureServices(house) }
@@ -1565,7 +1710,7 @@ export default function FloorPlanApp() {
 
   const onPlace3d = (spot) => {
     setMenu(null)
-    placeAt({ x: spot.x, z: spot.z }, spot.ppm)
+    placeAt({ x: spot.x, z: spot.z }, spot.ppm, { at: spot.at || Date.now(), px: spot.px, py: spot.py, shift: Boolean(spot.shift) })
   }
 
   const onFixtureDrag3d = (id, spot, phase) => {
@@ -1800,33 +1945,20 @@ export default function FloorPlanApp() {
   const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
-  const status = redrawId
-    ? t('status.redraw')
-    : svcTool === 'run'
-    ? t('status.run')
-    : svcTool === 'node'
-      ? t('status.node', { name: spec?.name || t('select.object') })
-    : liveEnd
-    ? t('status.length', { mm: formatMm(liveLength) })
-    : yardTool
-      ? yardToolLabel(yardTool)
-      : placing
-      ? t('status.fixture')
-      : tool === 'room' && roomShape === 'poly'
-        ? t('status.roomPoly')
-        : tool === 'room'
-          ? t('status.room')
-          : tool === 'detect'
-            ? t('status.detect')
-            : tool === 'exterior'
-        ? t('status.exterior')
-        : tool === 'interior'
-          ? t('status.interior')
-          : tool === 'door'
-            ? t('status.door')
-            : tool === 'window'
-              ? t('status.window')
-              : t('status.select')
+  const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || yardPlacesOne(yardTool))
+  const drawingTool = Boolean(!placingOne && (tool === 'exterior' || tool === 'interior' || tool === 'room' || tool === 'detect' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool))))
+  const activeName = placing
+    ? (FIXTURES.find((item) => item.id === placing)?.name || 'Kaluste')
+    : svcTool
+      ? (spec?.name || 'Talotekniikka')
+      : yardTool
+        ? yardToolLabel(yardTool)
+        : (TOOL_LABELS[tool] || null)
+  const modeLabel = modeChipText({ name: activeName, repeat: repeatPlace && placingOne, drawing: drawingTool })
+  const engaged = Boolean(activeName)
+  const status = engaged
+    ? `${modeLabel}${liveEnd ? ` · ${formatMm(liveLength)}` : ''}`
+    : t('status.select')
 
   const px = (metres) => metres * layout.scale * k
 
@@ -1866,13 +1998,25 @@ export default function FloorPlanApp() {
           else { setView('2d'); setSheetMode('plan'); setYardTool(null); setYardPoints([]) }
         }}
         onTool={(next) => {
+          if (next === 'select' || (next === tool && !placing && !svcTool && !yardTool)) {
+            exitToSelect()
+            return
+          }
           setTool(next)
           setPlacing(null)
+          setSvcTool(null)
+          setYardTool(null)
           if (next === 'select' || next === 'door' || next === 'window') setDraft(null)
           if (next === 'detect') { setDraft(null); setPoly([]) }
         }}
-        onRoomRect={() => { setTool('room'); setRoomShape('rect'); setPlacing(null); setPoly([]) }}
-        onRoomPoly={() => { setTool('room'); setRoomShape('poly'); setPlacing(null); setDraft(null) }}
+        onRoomRect={() => {
+          if (tool === 'room' && roomShape === 'rect') { exitToSelect(); return }
+          setTool('room'); setRoomShape('rect'); setPlacing(null); setSvcTool(null); setYardTool(null); setPoly([])
+        }}
+        onRoomPoly={() => {
+          if (tool === 'room' && roomShape === 'poly') { exitToSelect(); return }
+          setTool('room'); setRoomShape('poly'); setPlacing(null); setSvcTool(null); setYardTool(null); setDraft(null)
+        }}
         onUndo={undo}
         onRedo={redoChange}
         onNew={() => { setMenu(null); setNewOpen(true) }}
@@ -1885,7 +2029,10 @@ export default function FloorPlanApp() {
         onPaper={(paper) => setPlan({ ...plan, paper })}
         onPartitions={setPartitions}
         onCloseRoom={() => closeRoom(poly)}
-        onYardTool={(id) => { setYardTool(id); setTool('select'); setPlacing(null); setYardPoints([]) }}
+        onYardTool={(id) => {
+          if (!id || id === yardTool) { exitToSelect(); return }
+          setYardTool(id); setTool('select'); setPlacing(null); setSvcTool(null); setYardPoints([])
+        }}
         onNorth={(north) => commit(updateYardItem(plan, 'north', 'north', { north }))}
         onGrid={setGridStep}
         onAngle={setAngleStep}
@@ -1909,9 +2056,11 @@ export default function FloorPlanApp() {
         }}
         onKind={setSvcKind}
         onSvcTool={(next) => {
+          if (!next || next === svcTool) { exitToSelect(); return }
           setSvcTool(next)
           setTool('select')
           setPlacing(null)
+          setYardTool(null)
           setDraft(null)
           setPoly([])
           const current = PLACEABLES.find((item) => item.id === svcKind)
@@ -1952,6 +2101,14 @@ export default function FloorPlanApp() {
         onCommand={beginCommand}
         onSelectType={(type) => remember(targetsByType(plan, type))}
         onCadLayer={(layer) => beginCommand('layer', layer)}
+        repeat={repeatPlace}
+        onRepeat={setRepeatPlace}
+        onCleanup={() => {
+          const result = removeStacked(plan)
+          if (!result.removed) { showToast('Päällekkäisiä ei löytynyt'); return }
+          commit(result.plan)
+          showToast(`Poistettiin ${result.removed} päällekkäistä`)
+        }}
       />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -1985,7 +2142,10 @@ export default function FloorPlanApp() {
                     event.dataTransfer.setData('text/plain', item.id)
                     event.dataTransfer.effectAllowed = 'copy'
                   }}
-                  onClick={() => { setPlacing(item.id); setTool('select'); setDraft(null) }}
+                  onClick={() => {
+                    if (placing === item.id) { exitToSelect(); return }
+                    setPlacing(item.id); setTool('select'); setSvcTool(null); setYardTool(null); setDraft(null)
+                  }}
                 >
                   {item.name}
                   <span style={{ display: 'block', fontWeight: 500, color: '#78716c', fontSize: 11 }}>{Math.round(item.w * 1000)} × {Math.round(item.d * 1000)} mm</span>
@@ -2008,7 +2168,10 @@ export default function FloorPlanApp() {
                     event.dataTransfer.setData('text/plain', item.id)
                     event.dataTransfer.effectAllowed = 'copy'
                   }}
-                  onClick={() => { setPlacing(item.id); setTool('select'); setDraft(null) }}
+                  onClick={() => {
+                    if (placing === item.id) { exitToSelect(); return }
+                    setPlacing(item.id); setTool('select'); setSvcTool(null); setYardTool(null); setDraft(null)
+                  }}
                 >
                   {item.name}
                   <span style={{ display: 'block', fontWeight: 500, color: '#78716c', fontSize: 11 }}>{Math.round(item.w * 1000)} × {Math.round(item.d * 1000)} mm</span>
@@ -2080,12 +2243,14 @@ export default function FloorPlanApp() {
                   setDrawGuide(null)
                 }}
               />
-            ) : status}
+            ) : <span data-testid="status-tool">{status}</span>}
           </div>
           {view === 'facade' ? (
             <FacadeView plan={plan} side={facadeSideId} onSide={setFacadeSideId} onApply={setPlan} onCommit={commit} />
           ) : view === '2d' ? (
-            <div ref={hostRef} style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative' }}>
+            <div ref={hostRef} data-testid="plan-canvas-frame" data-active={engaged ? 'place' : 'select'} style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative', ...placeFrame(engaged) }}>
+              <ModeChip name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />
+              <PlaceToast text={toast} />
               <svg
                 ref={svgRef}
                 data-testid="floor-plan-svg"
@@ -2096,7 +2261,7 @@ export default function FloorPlanApp() {
                 onPointerDown={onPointerDown}
                 onPointerUp={onPointerUp}
                 onContextMenu={onContextMenu}
-                style={{ display: 'block', cursor: tool === 'select' && !placing && !svcTool && !yardTool ? 'default' : 'crosshair', touchAction: 'none' }}
+                style={{ display: 'block', cursor: engaged ? 'crosshair' : 'default', touchAction: 'none' }}
               >
                 <defs>
                   <pattern id="poche" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -2192,6 +2357,7 @@ export default function FloorPlanApp() {
                         setMenu({ x: event.clientX, y: event.clientY, kind: 'fixture', id: fixture.id, at: { x: fixture.x, z: fixture.z } })
                       }}
                     >
+                      {flashId === fixture.id && <circle data-testid="place-flash" r={Math.max(w, d) / 2 + 8} fill="none" stroke="#ea580c" strokeWidth={2.4} />}
                       {hearth && (
                         <rect
                           data-testid="hearth-plate"
@@ -2460,6 +2626,7 @@ export default function FloorPlanApp() {
                   onRouteDown={(event, hit) => beginRouteDrag(hit.id, hit.mode, hit.index, toWorld(event))}
                   preview={svcTool === 'run' ? { points: svcPoints, cursor: cursor ? snapServicePoint(cursor, plan, { mode: 'free', system: svcSystem }) : null } : null}
                   onContext={openServiceMenu}
+                  flashId={flashId}
                 />
                 {sheetMode !== 'site' && roomLabels.map((label) => (
                   <g
@@ -2519,6 +2686,22 @@ export default function FloorPlanApp() {
                   />
                 )}
                 <SnapMark snap={snapVisual} X={X} Y={Y} zoom={camera.zoom} />
+                {engaged && cursor && (
+                  <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${X((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).x)} ${Y((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).z)})`}>
+                    <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
+                    {placing && (
+                      <rect
+                        x={-px((FIXTURES.find((item) => item.id === placing)?.w || 0.6)) / 2}
+                        y={-px((FIXTURES.find((item) => item.id === placing)?.d || 0.6)) / 2}
+                        width={px(FIXTURES.find((item) => item.id === placing)?.w || 0.6)}
+                        height={px(FIXTURES.find((item) => item.id === placing)?.d || 0.6)}
+                        fill="#ea580c22"
+                        stroke="#ea580c"
+                        strokeWidth={1 / Math.max(camera.zoom, 0.2)}
+                      />
+                    )}
+                  </g>
+                )}
                 {sheetMode !== 'site' && <AngleMarks marks={cornerAngles(plan.walls)} X={X} Y={Y} zoom={camera.zoom} />}
                 </g>
               </svg>
@@ -2532,7 +2715,9 @@ export default function FloorPlanApp() {
               )}
             </div>
           ) : (
-            <div ref={hostRef} data-testid="floor-3d" style={{ flex: 1, minHeight: 0, position: 'relative', background: '#e7e5e4' }}>
+            <div ref={hostRef} data-testid="floor-3d" data-active={engaged ? 'place' : 'select'} style={{ flex: 1, minHeight: 0, position: 'relative', background: '#e7e5e4', ...placeFrame(engaged) }}>
+              <ModeChip name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />
+              <PlaceToast text={toast} />
               <HouseScene
                 plan={plan}
                 wallMode={wallMode}
@@ -2540,7 +2725,8 @@ export default function FloorPlanApp() {
                 fitToken={fitToken}
                 selected={pick}
                 hovered={hover}
-                drawMode={!svcTool && (tool !== 'select' || Boolean(placing))}
+                drawMode={engaged}
+                placeGhost={placingOne}
                 cursor={snapVisual?.point || cursor}
                 cursorPpm={cursorPpm}
                 snapKind={snapVisual?.kind || null}
@@ -2664,6 +2850,15 @@ export default function FloorPlanApp() {
         />
       )}
       <FloorMenu menu={menu} plan={plan} onApply={setPlan} onCommit={commit} onNavigate={onMenuNavigate} />
+      {menu?.kind === 'tool' && (
+        <div
+          data-testid="tool-menu"
+          style={{ position: 'fixed', left: menu.x, top: menu.y, zIndex: 80, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 10, boxShadow: '0 12px 28px rgba(28,25,23,0.16)', padding: 6 }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button type="button" data-testid="ctx-finish" onClick={() => { endDrawingRef.current(cursor); setMenu(null) }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', border: 'none', background: 'transparent', fontWeight: 700, cursor: 'pointer' }}>Lopeta</button>
+        </div>
+      )}
       <ServiceMenu menu={menu} plan={plan} onApply={commit} onCommit={commit} onClose={() => setMenu(null)} onProperties={() => onMenuNavigate('properties')} onRedraw={beginRedraw} onCad={beginCommand} />
     </div>
   )
