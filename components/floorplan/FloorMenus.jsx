@@ -1598,6 +1598,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
           °
         </label>
         <CadSep />
+        <CadItem testid="ctx-shift-wall" onClick={() => onNavigate('cad:shift-wall')}>Siirrä seinä</CadItem>
         <CadItem testid="ctx-split" onClick={() => act(splitWall(plan, wall.id, menu.at || { x: (wall.a.x + wall.b.x) / 2, z: (wall.a.z + wall.b.z) / 2 }), true)}>Jaa seinä</CadItem>
         <CadItem testid="ctx-door" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'door'), true)}>Lisää ovi</CadItem>
         <CadItem testid="ctx-window" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'window'), true)}>Lisää ikkuna</CadItem>
