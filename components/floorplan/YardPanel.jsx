@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { usePlanLocale } from '@/components/i18n/Locale'
 import { COVER_FRAMES, COVER_GLASS, COVER_ROOFS, COVER_SIDES, COVER_TINTS, COVER_TYPES, normalizeCover } from '@/lib/covers'
 import { groundWarnings } from '@/lib/groundworks'
@@ -21,6 +22,12 @@ import {
   objectSpec,
   plotMetrics,
   rotateYardItem,
+  formatTerraceLevels,
+  patchTerrace,
+  terraceElevations,
+  terraceInputMm,
+  terraceRailingEnabled,
+  terraceStepsEnabled,
   updateYardItem,
   yardItem,
   yardTitle,
@@ -40,6 +47,78 @@ function Field({ label, children }) {
 
 function remove(plan, selection) {
   return deleteYardItem(plan, selection.collection, selection.id)
+}
+
+export function TerraceLevelControl({ plan, item, onCommit, idPrefix = 'terrace' }) {
+  const shown = terraceInputMm(item)
+  const [draft, setDraft] = useState(null)
+  if (!item) return null
+  const elev = terraceElevations(item)
+  const note = formatTerraceLevels(item)
+  const label = elev.datum === 'ground' ? 'Korkeus maanpinnasta (mm)' : 'Korkeus suhteessa lattiaan (mm)'
+  return (
+    <div data-testid={`${idPrefix}-level-fields`}>
+      <Field label={label}>
+        <input
+          data-testid={`${idPrefix}-level`}
+          style={inputStyle}
+          type="number"
+          step="10"
+          value={draft == null ? shown : draft}
+          onFocus={() => setDraft(String(shown))}
+          onBlur={() => setDraft(null)}
+          onChange={(event) => {
+            const raw = event.target.value
+            setDraft(raw)
+            if (raw === '' || raw === '-') return
+            const number = Number(raw)
+            if (!Number.isFinite(number)) return
+            onCommit(patchTerrace(plan, item.id, { inputMm: number, levelDatum: elev.datum }))
+          }}
+        />
+      </Field>
+      <Field label="Mitan nollakohta">
+        <select
+          data-testid={`${idPrefix}-datum`}
+          style={inputStyle}
+          value={elev.datum}
+          onChange={(event) => onCommit(patchTerrace(plan, item.id, { levelDatum: event.target.value }))}
+        >
+          <option value="floor">Lattiasta</option>
+          <option value="ground">Maanpinnasta</option>
+        </select>
+      </Field>
+      <div data-testid={`${idPrefix}-note`} style={{ fontSize: 12, fontWeight: 700, margin: '4px 0 8px' }}>{note}</div>
+      {elev.suggestRailing && (
+        <div data-testid={`${idPrefix}-railing-hint`} style={{ fontSize: 12, color: '#44403c', marginBottom: 6 }}>
+          Ehdotus: kaide, putoamiskorkeus yli 500 mm. Voit jättää pois.
+        </div>
+      )}
+      {elev.suggestSteps && (
+        <div data-testid={`${idPrefix}-steps-hint`} style={{ fontSize: 12, color: '#44403c', marginBottom: 6 }}>
+          Portaat, kun korkeusero maahan tai lattiaan on yli 200 mm.
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function PihaTerraceLevels({ plan, selection, onCommit }) {
+  const terraces = ensureYard(plan).terraces
+  if (!terraces.length) return null
+  const selected = selection?.kind === 'yard' && selection.collection === 'terraces'
+    ? terraces.find((item) => item.id === selection.id)
+    : null
+  return (
+    <div data-testid="piha-terrace-levels" style={{ marginBottom: 10 }}>
+      {terraces.map((item) => (
+        <div key={item.id} data-testid="piha-level-row" data-level={formatTerraceLevels(item)} style={{ fontSize: 12, margin: '0 4px 4px' }}>
+          Terassi {formatTerraceLevels(item)}
+        </div>
+      ))}
+      {selected && <TerraceLevelControl key={selected.id} plan={plan} item={selected} onCommit={onCommit} idPrefix="piha" />}
+    </div>
+  )
 }
 
 export function YardFields({ plan, selection, onCommit }) {
@@ -63,13 +142,14 @@ export function YardFields({ plan, selection, onCommit }) {
       )}
       {selection.collection === 'terraces' && item && (
         <>
+          <TerraceLevelControl key={item.id} plan={plan} item={item} onCommit={onCommit} />
           <Field label="Materiaali">
             <select data-testid="yard-material" style={inputStyle} value={item.material || 'wood'} onChange={(event) => commit({ material: event.target.value })}>
               {TERRACE_MATERIALS.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
             </select>
           </Field>
-          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input data-testid="yard-railing" type="checkbox" checked={item.railing !== false} onChange={(event) => commit({ railing: event.target.checked })} />Kaide</label>
-          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input data-testid="yard-steps" type="checkbox" checked={Boolean(item.steps)} onChange={(event) => commit({ steps: event.target.checked })} />Portaat</label>
+          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input data-testid="yard-railing" type="checkbox" checked={terraceRailingEnabled(item)} onChange={(event) => onCommit(patchTerrace(plan, item.id, { railing: event.target.checked }))} />Kaide</label>
+          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input data-testid="yard-steps" type="checkbox" checked={terraceStepsEnabled(item)} onChange={(event) => onCommit(patchTerrace(plan, item.id, { steps: event.target.checked }))} />Portaat</label>
         </>
       )}
       {selection.collection === 'paths' && item && (
@@ -284,8 +364,10 @@ export function YardFields({ plan, selection, onCommit }) {
 
 export function YardMenuBody({ plan, menu, onCommit, onNavigate }) {
   const selection = { kind: 'yard', collection: menu.collection, id: menu.id }
+  const terrace = menu.collection === 'terraces' ? yardItem(plan, 'terraces', menu.id) : null
   return (
     <>
+      {terrace && <TerraceLevelControl key={terrace.id} plan={plan} item={terrace} onCommit={onCommit} idPrefix="ctx" />}
       <button type="button" data-testid="ctx-properties" style={btn} onClick={() => onNavigate('properties')}>Ominaisuudet…</button>
       {(menu.collection === 'objects' || menu.collection === 'buildings') && (
         <button type="button" data-testid="ctx-rotate" style={btn} onClick={() => onCommit(rotateYardItem(plan, menu.collection, menu.id))}>Kierrä</button>

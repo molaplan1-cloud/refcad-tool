@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePlanLocale } from '@/components/i18n/Locale'
 import { finishesOf } from '@/lib/finishes'
+import { ensureYard, terraceFacade } from '@/lib/yard'
 import { text } from '@/lib/i18n'
 import { northAngle, sideCompass } from '@/lib/orientation'
 import {
@@ -169,6 +170,40 @@ function FacadeHeights({ X, Y, length, wallH, ridge, openings }) {
   )
 }
 
+function FacadeTerrace({ view, X, Y, metres }) {
+  const deckColor = view.material === 'concrete' ? '#a8a29e' : view.material === 'paving' ? '#d6d3d1' : '#c4a574'
+  const width = Math.max(0.2, view.u1 - view.u0)
+  const underside = view.deckY - view.thickness
+  const sunken = view.deckY < view.groundY - 0.02
+  const raised = underside > view.groundY + 0.03
+  const railY = Math.max(view.deckY, view.groundY) + 1
+  return (
+    <g data-testid="facade-terrace" data-level={view.label}>
+      {sunken && (
+        <rect x={X(view.u0)} y={Y(view.groundY)} width={metres(width)} height={metres(view.groundY - underside)} fill="#d6d3d1" stroke="#1c1917" strokeWidth={0.7} />
+      )}
+      {raised && view.supports.kind === 'plinth' && (
+        <rect x={X(view.u0)} y={Y(underside)} width={metres(width)} height={metres(underside - view.groundY)} fill="#a8a29e" stroke="#1c1917" strokeWidth={0.6} />
+      )}
+      {raised && view.supports.kind === 'posts' && [0.12, 0.88].map((t) => (
+        <line key={t} data-testid="facade-post" x1={X(view.u0 + width * t)} y1={Y(view.groundY)} x2={X(view.u0 + width * t)} y2={Y(underside)} stroke="#57534e" strokeWidth={2.2} />
+      ))}
+      <rect data-testid="facade-deck" x={X(view.u0)} y={Y(view.deckY)} width={metres(width)} height={metres(view.thickness)} fill={deckColor} stroke="#1c1917" strokeWidth={0.9} />
+      {view.steps.enabled && (
+        <g data-testid="facade-terrace-steps" data-count={view.steps.count}>
+          {view.steps.treads.map((tread, index) => {
+            const u = (view.u0 + view.u1) / 2
+            const half = view.steps.width / 2
+            return <line key={index} x1={X(u - half)} y1={Y(tread.top)} x2={X(u + half)} y2={Y(tread.top)} stroke="#1c1917" strokeWidth={1.15} />
+          })}
+        </g>
+      )}
+      {view.railing && <line data-testid="facade-railing" x1={X(view.u0 + 0.08)} y1={Y(railY)} x2={X(view.u1 - 0.08)} y2={Y(railY)} stroke="#1c1917" strokeWidth={1.4} />}
+      <text data-testid="facade-terrace-level" data-level={view.label} x={X((view.u0 + view.u1) / 2)} y={Y(Math.min(view.deckY, view.groundY) - view.thickness - 0.22)} textAnchor="middle" fontSize="11" fontWeight="700" fill="#1c1917">{view.label}</text>
+    </g>
+  )
+}
+
 function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd, roofType, roofId, fill, edge, fascia, gutter, pattern }) {
   const style = { fill: fill || '#9aa6b2', edge: edge || '#1e293b', fascia: fascia || '#f4f1ea' }
   const tiled = pattern === 'tile' || pattern === 'tile-metal' || roofId === 'tile' || roofId === 'clay-tile' || roofId === 'concrete-tile'
@@ -286,10 +321,11 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
   const wallH = layout.height
   const rise = roof.rise
   const ridge = Math.round((wallH + rise) * 100) / 100
+  const terraceViews = ensureYard(plan).terraces.map((item) => terraceFacade(plan, item, side)).filter(Boolean)
   const contentLeft = -overhang - 0.15
   const contentRight = layout.length + overhang + 1.7
   const contentTop = ridge + 0.4
-  const contentBottom = -0.85
+  const contentBottom = terraceViews.reduce((min, view) => Math.min(min, view.deckY - view.thickness - 0.85), -0.85)
   const worldW = contentRight - contentLeft
   const worldH = contentTop - contentBottom
   const pageW = 420
@@ -514,6 +550,7 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
               strokeDasharray="4 3"
             />
           )}
+          {terraceViews.map((view) => <FacadeTerrace key={view.id} view={view} X={X} Y={Y} metres={metres} />)}
           <FacadeHeights X={X} Y={Y} metres={metres} length={layout.length} wallH={wallH} ridge={ridge} openings={layout.openings} />
           {(areas.length > 0 || plinth.height > 0) && (
             <g data-testid="facade-legend">

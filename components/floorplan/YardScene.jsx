@@ -2,12 +2,144 @@
 
 import { useMemo } from 'react'
 import * as THREE from 'three'
+import { Html } from '@react-three/drei'
 import { coverMembers, normalizeCover, roofLook } from '@/lib/covers'
 import { visualBoreholeDepth, yardHasUnderground } from '@/lib/groundworks'
 import { layerVisible } from '@/lib/services'
-import { buildingSpec, ensureYard, footprint, hasYard, objectSpec, plantSpec, yardBounds } from '@/lib/yard'
+import {
+  RAILING_HEIGHT,
+  buildingSpec,
+  ensureYard,
+  formatTerraceLevels,
+  hasYard,
+  objectSpec,
+  plantSpec,
+  sunkenTerraceRings,
+  terraceElevations,
+  terraceRailingEnabled,
+  terraceSteps,
+  terraceSupports,
+  yardBounds,
+} from '@/lib/yard'
 
 function noop() {}
+
+function deckGeometry(points, top, thickness) {
+  const contour = (points || []).map((point) => new THREE.Vector2(point.x, -point.z))
+  const ccw = THREE.ShapeUtils.isClockWise(contour) ? contour.slice().reverse() : contour.slice()
+  const geom = new THREE.ExtrudeGeometry(new THREE.Shape(ccw), { depth: thickness, bevelEnabled: false })
+  geom.rotateX(-Math.PI / 2)
+  geom.translate(0, top - thickness, 0)
+  geom.computeBoundingSphere()
+  return geom
+}
+
+export function SiteGround({ cx, cz, width, depth, y = 0, color = '#c4b89a', holes = [], opacity = 1, transparent = false, depthWrite = true, basic = false }) {
+  const holeKey = holes.map((ring) => (ring || []).map((point) => `${point.x},${point.z}`).join(' ')).join('|')
+  const geo = useMemo(() => {
+    if (!holes.length) return null
+    const x0 = cx - width / 2
+    const x1 = cx + width / 2
+    const south = -(cz + depth / 2)
+    const north = -(cz - depth / 2)
+    const shape = new THREE.Shape()
+    shape.moveTo(x0, south)
+    shape.lineTo(x0, north)
+    shape.lineTo(x1, north)
+    shape.lineTo(x1, south)
+    shape.closePath()
+    holes.forEach((ring) => {
+      if (!ring || ring.length < 3) return
+      const contour = ring.map((point) => new THREE.Vector2(point.x, -point.z))
+      const clockwise = THREE.ShapeUtils.isClockWise(contour) ? contour : contour.slice().reverse()
+      shape.holes.push(new THREE.Path(clockwise))
+    })
+    const geometry = new THREE.ShapeGeometry(shape)
+    geometry.rotateX(-Math.PI / 2)
+    geometry.translate(0, y, 0)
+    geometry.computeBoundingSphere()
+    return geometry
+  }, [cx, cz, width, depth, y, holeKey, holes.length])
+  const material = basic
+    ? <meshBasicMaterial color={color} transparent={transparent} opacity={opacity} depthWrite={depthWrite} side={THREE.DoubleSide} />
+    : <meshStandardMaterial color={color} transparent={transparent} opacity={opacity} depthWrite={depthWrite} side={THREE.DoubleSide} />
+  if (!geo) {
+    return (
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, y, cz]} raycast={noop}>
+        <planeGeometry args={[width, depth]} />
+        {material}
+      </mesh>
+    )
+  }
+  return (
+    <mesh geometry={geo} raycast={noop} frustumCulled={false}>
+      {material}
+    </mesh>
+  )
+}
+
+function TerraceMesh({ plan, item }) {
+  const elev = terraceElevations(item)
+  const steps = terraceSteps(item, plan)
+  const supports = terraceSupports(item, plan)
+  const railing = terraceRailingEnabled(item)
+  const color = item.material === 'concrete' ? '#a8a29e' : item.material === 'composite' ? '#78716c' : item.material === 'paving' ? '#d6d3d1' : '#c4a574'
+  const skirt = item.material === 'wood' || item.material === 'composite' ? '#8a7355' : '#a8a29e'
+  const pointKey = (item.points || []).map((point) => `${point.x},${point.z}`).join(';')
+  const deck = useMemo(() => deckGeometry(item.points, elev.deckY, elev.thickness), [pointKey, elev.deckY, elev.thickness, item.points])
+  const center = (item.points || []).reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 })
+  center.x /= item.points.length
+  center.z /= item.points.length
+  const railBase = Math.max(elev.deckY, elev.groundY)
+  return (
+    <group>
+      <mesh geometry={deck} castShadow receiveShadow frustumCulled={false}>
+        <meshStandardMaterial color={color} roughness={0.78} />
+      </mesh>
+      {supports.kind === 'posts' && supports.posts.map((point, index) => {
+        const height = Math.max(0.05, supports.to - supports.from)
+        return (
+          <mesh key={`post-${index}`} position={[point.x, supports.from + height / 2, point.z]} castShadow>
+            <boxGeometry args={[0.09, height, 0.09]} />
+            <meshStandardMaterial color="#57534e" />
+          </mesh>
+        )
+      })}
+      {supports.kind === 'plinth' && supports.edges.map((edge, index) => {
+        const height = Math.max(0.04, supports.to - supports.from)
+        return (
+          <mesh key={`plinth-${index}`} position={[edge.mx, supports.from + height / 2, edge.mz]} rotation={[0, Math.atan2(edge.ux, edge.uz), 0]} castShadow>
+            <boxGeometry args={[0.14, height, Math.max(0.2, edge.len)]} />
+            <meshStandardMaterial color={skirt} />
+          </mesh>
+        )
+      })}
+      {steps.enabled && steps.treads.map((tread, index) => (
+        <mesh key={`step-${index}`} position={[tread.x, tread.top - steps.riser / 2, tread.z]} rotation={[0, tread.yaw, 0]} castShadow receiveShadow>
+          <boxGeometry args={[steps.going * 0.96, Math.max(0.04, steps.riser), steps.width]} />
+          <meshStandardMaterial color={color} roughness={0.8} />
+        </mesh>
+      ))}
+      {railing && supports.edges.map((edge, index) => (
+        <group key={`rail-${index}`}>
+          <mesh position={[edge.mx, railBase + RAILING_HEIGHT, edge.mz]} rotation={[0, Math.atan2(edge.ux, edge.uz), 0]}>
+            <boxGeometry args={[0.045, 0.04, Math.max(0.2, edge.len - 0.08)]} />
+            <meshStandardMaterial color="#44403c" />
+          </mesh>
+          {[0.12, 0.5, 0.88].map((t) => (
+            <mesh key={t} position={[edge.a.x + (edge.b.x - edge.a.x) * t, railBase + RAILING_HEIGHT / 2, edge.a.z + (edge.b.z - edge.a.z) * t]}>
+              <boxGeometry args={[0.045, RAILING_HEIGHT, 0.045]} />
+              <meshStandardMaterial color="#44403c" />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      <Html position={[center.x, railBase + 0.42, center.z]} center style={{ pointerEvents: 'none' }}>
+        <div data-testid="terrace-level-3d" style={{ fontSize: 13, fontWeight: 750, color: '#1c1917', background: 'rgba(251,250,247,0.92)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>{formatTerraceLevels(item)}</div>
+      </Html>
+    </group>
+  )
+}
 
 function Ribbon({ points, width, color, y = 0.03, thickness = 0.04, pick }) {
   const list = points || []
@@ -393,17 +525,12 @@ export default function YardScene({ plan, selected }) {
   const active = (collection, id) => selected?.kind === 'yard' && selected.collection === collection && selected.id === id
   const buried = yardHasUnderground(yard) && layerVisible(plan, 'ground')
   const groundOpacity = buried ? 0.35 : 1
+  const holes = sunkenTerraceRings(plan)
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.004, cz]} raycast={noop}>
-        <planeGeometry args={[w + 1.2, d + 1.2]} />
-        <meshStandardMaterial color="#c4b89a" transparent={buried} opacity={groundOpacity} depthWrite={!buried} />
-      </mesh>
+      <SiteGround cx={cx} cz={cz} width={w + 1.2} depth={d + 1.2} y={0.004} color="#c4b89a" holes={holes} transparent={buried} opacity={groundOpacity} depthWrite={!buried} />
       {yard.plot && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.008, cz]} raycast={noop}>
-          <planeGeometry args={[w, d]} />
-          <meshStandardMaterial color="#d9e7c4" transparent={buried} opacity={groundOpacity} depthWrite={!buried} />
-        </mesh>
+        <SiteGround cx={cx} cz={cz} width={w} depth={d} y={0.008} color="#d9e7c4" holes={holes} transparent={buried} opacity={groundOpacity} depthWrite={!buried} />
       )}
       {yard.beds.map((bed) => {
         const center = bed.points.reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 })
@@ -418,28 +545,7 @@ export default function YardScene({ plan, selected }) {
           </mesh>
         )
       })}
-      {yard.terraces.map((item) => {
-        const center = item.points.reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 })
-        center.x /= item.points.length
-        center.z /= item.points.length
-        const spanX = Math.max(...item.points.map((point) => point.x)) - Math.min(...item.points.map((point) => point.x))
-        const spanZ = Math.max(...item.points.map((point) => point.z)) - Math.min(...item.points.map((point) => point.z))
-        const color = item.material === 'concrete' ? '#a8a29e' : item.material === 'composite' ? '#78716c' : item.material === 'paving' ? '#d6d3d1' : '#c4a574'
-        return (
-          <group key={item.id}>
-            <mesh position={[center.x, 0.16, center.z]}>
-              <boxGeometry args={[spanX, 0.28, spanZ]} />
-              <meshStandardMaterial color={color} />
-            </mesh>
-            {item.railing !== false && footprint({ x: center.x, z: center.z, w: spanX, d: spanZ }).map((corner, index) => (
-              <mesh key={index} position={[corner.x, 0.55, corner.z]}>
-                <boxGeometry args={[0.06, 0.7, 0.06]} />
-                <meshStandardMaterial color="#44403c" />
-              </mesh>
-            ))}
-          </group>
-        )
-      })}
+      {yard.terraces.map((item) => <TerraceMesh key={item.id} plan={plan} item={item} />)}
       {yard.paths.map((item) => (
         <Ribbon
           key={item.id}

@@ -31,8 +31,8 @@ import {
   zoneCovering,
 } from '@/lib/floorplan'
 import Services3D from './Services3D'
-import YardScene from './YardScene'
-import { hasYard, sceneBounds } from '@/lib/yard'
+import YardScene, { SiteGround } from './YardScene'
+import { hasYard, sceneBounds, sunkenTerraceRings } from '@/lib/yard'
 import { yardHasUnderground } from '@/lib/groundworks'
 import { layerVisible } from '@/lib/services'
 import { labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
@@ -1797,10 +1797,19 @@ export default function HouseScene({
       <directionalLight position={[-8, 6, -6]} intensity={0.12} />
       <ContactShadows position={[cx, 0.012, cz]} opacity={0.58} scale={Math.max(22, span * 1.35)} blur={2.4} far={7} />
       <GroundShade cx={cx} cz={cz} w={Math.max(house.maxX - house.minX + 1.4, 8)} h={Math.max(house.maxZ - house.minZ + 1.4, 8)} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.02, cz]} raycast={noopRaycast}>
-        <planeGeometry args={[Math.max(24, span * 1.4), Math.max(24, span * 1.4)]} />
-        <meshBasicMaterial color="#efe8d8" transparent={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground')} opacity={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground') ? 0.35 : 1} depthWrite={!(yardHasUnderground(plan.yard) && layerVisible(plan, 'ground'))} />
-      </mesh>
+      <SiteGround
+        cx={cx}
+        cz={cz}
+        width={Math.max(24, span * 1.4)}
+        depth={Math.max(24, span * 1.4)}
+        y={-0.02}
+        color="#efe8d8"
+        holes={sunkenTerraceRings(plan)}
+        basic
+        transparent={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground')}
+        opacity={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground') ? 0.35 : 1}
+        depthWrite={!(yardHasUnderground(plan.yard) && layerVisible(plan, 'ground'))}
+      />
       <YardScene plan={plan} selected={selected} />
       <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2) / (drawMode ? 0.5 : 1)), '#b7b1a4', '#e4e0d8']} position={[cx, 0, cz]} />
       {visibleRooms(plan).map((room) => {

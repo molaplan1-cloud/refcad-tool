@@ -17,8 +17,11 @@ import {
   formatSquare,
   objectSpec,
   plantSpec,
+  formatTerraceLevels,
   plotMetrics,
   setbackList,
+  terraceRailingEnabled,
+  terraceSteps,
 } from '@/lib/yard'
 
 function pts(points, X, Y) {
@@ -336,8 +339,12 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
       {yard.terraces.map((item) => {
         const material = TERRACE_MATERIALS.find((entry) => entry.id === item.material) || TERRACE_MATERIALS[0]
         const ring = inset(item.points, 0.9)
+        const center = centroid(item.points)
+        const level = formatTerraceLevels(item)
+        const steps = terraceSteps(item, plan)
+        const edge = steps.edge
         return (
-          <g key={item.id} data-testid="yard-terrace">
+          <g key={item.id} data-testid="yard-terrace" data-level={level}>
             <defs>
               <clipPath id={`terrace-${item.id}`}>
                 <polygon points={pts(item.points, X, Y)} />
@@ -353,18 +360,17 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
                   <line key={index} x1={X(item.points[0].x) - 20} x2={X(item.points[2]?.x || item.points[0].x) + 20} y1={Y(item.points[0].z) + index * 6} y2={Y(item.points[0].z) + index * 6} />
                 ))}
             </g>
-            {item.railing !== false && <polygon points={pts(ring, X, Y)} fill="none" stroke="#1c1917" strokeWidth={0.9} />}
-            {item.steps && item.points.length >= 4 && (
-              <g stroke="#1c1917" strokeWidth={0.9}>
-                {[0.25, 0.5, 0.75].map((t) => {
-                  const a = item.points[2]
-                  const b = item.points[3]
-                  const p = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t }
-                  const q = { x: p.x + (centroid(item.points).x - p.x) * 0.08, z: p.z + (p.z < centroid(item.points).z ? -0.35 : 0.35) }
-                  return <line key={t} x1={X(item.points[2].x)} y1={Y(q.z)} x2={X(item.points[3].x)} y2={Y(q.z)} />
+            {terraceRailingEnabled(item) && <polygon points={pts(ring, X, Y)} fill="none" stroke="#1c1917" strokeWidth={0.9} />}
+            {steps.enabled && edge && (
+              <g data-testid="terrace-steps" stroke="#1c1917" strokeWidth={0.9}>
+                {steps.treads.map((tread, index) => {
+                  const hx = edge.ux * steps.width / 2
+                  const hz = edge.uz * steps.width / 2
+                  return <line key={index} x1={X(tread.x - hx)} y1={Y(tread.z - hz)} x2={X(tread.x + hx)} y2={Y(tread.z + hz)} />
                 })}
               </g>
             )}
+            <text data-testid="terrace-level" data-level={level} x={X(center.x)} y={Y(center.z)} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1c1917" stroke="#fbfaf7" strokeWidth={3} paintOrder="stroke">{level}</text>
           </g>
         )
       })}
@@ -629,7 +635,7 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
 export function yardToolLabel(tool) {
   if (!tool) return ''
   if (tool === 'plot') return 'Tontti: napsauta kulmat, sulje ensimmäiseen pisteeseen tai paina Enter.'
-  if (tool === 'terrace') return 'Terassi: piirrä monikulmio. Se voi tarttua seinään.'
+  if (tool === 'terrace') return 'Terassi: piirrä monikulmio. Korkeus lattiaan nähden, oletus −50 mm.'
   if (tool === 'path' || tool === 'drive' || tool === 'parking') {
     const name = PATH_KINDS.find((item) => item.id === tool)?.name || 'Reitti'
     return `${name}: napsauta pisteet, päätä Enterillä.`
