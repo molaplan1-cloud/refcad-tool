@@ -286,39 +286,52 @@ function AngleMarks({ marks, X, Y, zoom }) {
 function SnapMark({ snap, X, Y, zoom }) {
   if (!snap?.point || !snap.kind || snap.kind === 'grid') return null
   const s = 1 / (zoom || 1)
+  const accent = '#ea580c'
   const label = snap.label || ''
+  const onWall = snap.kind === 'perpendicular' || snap.kind === 'face'
   return (
     <g data-testid="snap-indicator" data-kind={snap.kind} style={{ pointerEvents: 'none' }}>
       {(snap.guides || []).map((guide, index) => (
-        <line
-          key={`${guide.x1}-${guide.z1}-${index}`}
-          data-testid="align-guide"
-          x1={X(guide.x1)}
-          y1={Y(guide.z1)}
-          x2={X(guide.x2)}
-          y2={Y(guide.z2)}
-          stroke="#0f766e"
-          strokeWidth={1.15 * s}
-          strokeDasharray={`${5 * s} ${4 * s}`}
-        />
+        <g key={`${guide.x1}-${guide.z1}-${index}`}>
+          <line
+            x1={X(guide.x1)}
+            y1={Y(guide.z1)}
+            x2={X(guide.x2)}
+            y2={Y(guide.z2)}
+            stroke="#fff"
+            strokeWidth={5 * s}
+            strokeLinecap="butt"
+          />
+          <line
+            data-testid="align-guide"
+            x1={X(guide.x1)}
+            y1={Y(guide.z1)}
+            x2={X(guide.x2)}
+            y2={Y(guide.z2)}
+            stroke={accent}
+            strokeWidth={2 * s}
+            strokeDasharray={`${9 * s} ${5 * s}`}
+          />
+        </g>
       ))}
       <g transform={`translate(${X(snap.point.x)} ${Y(snap.point.z)}) scale(${s})`}>
-        {snap.kind === 'corner' && <rect data-testid="snap-corner" x={-6} y={-6} width={12} height={12} fill="#f0fdfa" stroke="#0f766e" strokeWidth={2} />}
-        {snap.kind === 'midpoint' && <polygon data-testid="snap-midpoint" points="0,-8 7,6 -7,6" fill="#f0fdfa" stroke="#0f766e" strokeWidth={1.7} />}
-        {snap.kind === 'perpendicular' && <path data-testid="snap-perpendicular" d="M-8 3 H3 V-8" fill="none" stroke="#0f766e" strokeWidth={2} />}
+        <circle r={11} fill="#fff" stroke="#fff" strokeWidth={2} />
+        {snap.kind === 'corner' && <rect data-testid="snap-corner" x={-6} y={-6} width={12} height={12} fill="#fff7ed" stroke={accent} strokeWidth={2} />}
+        {snap.kind === 'midpoint' && <polygon data-testid="snap-midpoint" points="0,-8 7,6 -7,6" fill="#fff7ed" stroke={accent} strokeWidth={2} />}
+        {onWall && <path data-testid="snap-perpendicular" d="M-8 4 H4 V-8" fill="none" stroke={accent} strokeWidth={2} strokeLinecap="square" />}
         {snap.kind === 'intersection' && (
-          <g data-testid="snap-intersection" stroke="#0f766e" strokeWidth={2}>
+          <g data-testid="snap-intersection" stroke={accent} strokeWidth={2} strokeLinecap="square">
             <line x1="-6" y1="-6" x2="6" y2="6" />
             <line x1="-6" y1="6" x2="6" y2="-6" />
           </g>
         )}
-        {snap.kind !== 'corner' && snap.kind !== 'midpoint' && snap.kind !== 'perpendicular' && snap.kind !== 'intersection' && (
-          <circle r={5} fill="none" stroke="#0f766e" strokeWidth={1.7} />
+        {snap.kind !== 'corner' && snap.kind !== 'midpoint' && !onWall && snap.kind !== 'intersection' && (
+          <circle r={6} fill="#fff7ed" stroke={accent} strokeWidth={2} />
         )}
         {label && (
-          <g data-testid="snap-tooltip" transform="translate(12 -18)">
-            <rect x="0" y="-11" width={label.length * 6.4 + 10} height="16" rx="3" fill="#fbfaf7" stroke="#0f766e" strokeWidth="1" />
-            <text x="5" y="1" fontSize="11" fontWeight="700" fill="#0f766e">{label}</text>
+          <g data-testid="snap-tooltip" transform="translate(14 -22)">
+            <rect x="0" y="-12" width={label.length * 7.2 + 12} height="18" rx="3" fill="#fff" stroke={accent} strokeWidth="2" />
+            <text x="6" y="1" fontSize="12" fontWeight="700" fill="#9a3412">{label}</text>
           </g>
         )}
       </g>
