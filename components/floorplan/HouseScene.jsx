@@ -10,6 +10,7 @@ import {
   materialOf,
   openingColour,
   doorLeafPose,
+  doorStyleOf,
   facadeCells,
   facadeFlashings,
   facadeWorld,
@@ -686,6 +687,46 @@ function WallMesh({ plan, mode, selected, hovered }) {
   )
 }
 
+function DoorFrame({ width, height, depth, jamb, pick, realistic }) {
+  const frameD = Math.min(0.16, depth)
+  return (
+    <>
+      <mesh userData={{ pick }} position={[0, height / 2, 0]}>
+        <boxGeometry args={[width, height, Math.max(0.12, depth)]} />
+        <meshStandardMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <Solid args={[0.05, height, frameD]} position={[-width / 2, height / 2, 0]} color={jamb} pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
+      <Solid args={[0.05, height, frameD]} position={[width / 2, height / 2, 0]} color={jamb} pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
+      <Solid args={[width, 0.05, frameD]} position={[0, height - 0.025, 0]} color={jamb} pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
+    </>
+  )
+}
+
+function SwingLeaf({ hingeX, extend, rotY, leafW, leafH, height, color, pick, mark, realistic, glass = false }) {
+  return (
+    <group position={[hingeX, 0, 0]} rotation={[0, rotY, 0]}>
+      {glass ? (
+        <>
+          <Solid args={[leafW, 0.06, 0.04]} position={[extend * leafW / 2, leafH + 0.01, 0]} color={color} pick={pick} mark={mark} realistic={realistic} edges={!realistic} roughness={0.45} />
+          <Solid args={[leafW, 0.06, 0.04]} position={[extend * leafW / 2, 0.05, 0]} color={color} pick={pick} realistic={realistic} edges={!realistic} roughness={0.45} />
+          <Solid args={[0.05, leafH, 0.04]} position={[extend * 0.03, leafH / 2, 0]} color={color} pick={pick} realistic={realistic} edges={!realistic} roughness={0.45} />
+          <Solid args={[0.05, leafH, 0.04]} position={[extend * (leafW - 0.03), leafH / 2, 0]} color={color} pick={pick} realistic={realistic} edges={!realistic} roughness={0.45} />
+          <mesh position={[extend * leafW / 2, leafH / 2, 0]} raycast={noopRaycast}>
+            <boxGeometry args={[Math.max(0.08, leafW - 0.1), Math.max(0.2, leafH - 0.14), 0.012]} />
+            <meshStandardMaterial color="#b7d4ee" roughness={0.08} metalness={0.2} transparent opacity={0.55} />
+          </mesh>
+        </>
+      ) : (
+        <Solid args={[leafW, leafH, 0.045]} position={[extend * leafW / 2, leafH / 2 + 0.02, 0]} color={color} pick={pick} mark={mark} realistic={realistic} edges={!realistic} roughness={0.5} />
+      )}
+      <mesh position={[extend * (leafW - 0.12), height * 0.48, 0.04]} raycast={noopRaycast} castShadow={realistic}>
+        <boxGeometry args={[0.03, 0.16, 0.035]} />
+        <meshStandardMaterial color="#1c1917" metalness={0.45} roughness={0.35} />
+      </mesh>
+    </group>
+  )
+}
+
 function OpeningMesh({ plan, opening, selected, hovered }) {
   const wall = (plan.walls || []).find((item) => item.id === opening.wallId)
   if (!wall) return null
@@ -761,38 +802,75 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
   }
   if (opening.kind === 'door') {
     const mark = markOf(selected, hovered, pick)
-    const pose = doorLeafPose(opening, outward)
-    const { hingeX, extend, rotY } = pose
-    const leafW = Math.max(0.25, width - 0.1)
-    const leafH = Math.max(0.5, height - 0.08)
-    const frameD = Math.min(0.16, depth)
+    const style = doorStyleOf(opening)
     const face = realistic ? colour.color : '#f8fafc'
     const jamb = realistic ? '#e7e5e4' : '#e2e8f0'
+    const leafH = Math.max(0.5, height - 0.08)
+    const slide = (opening.swing || 1) >= 0 ? 1 : -1
+    const faceZ = (opening.inward ? -outward : outward) * (depth / 2 + 0.04)
+    const leafProps = { height, color: face, pick, mark, realistic }
+    let body = null
+    if (style === 'double') {
+      const leafW = Math.max(0.22, width / 2 - 0.06)
+      const left = doorLeafPose({ ...opening, swing: 1, width }, outward)
+      const right = doorLeafPose({ ...opening, swing: -1, width }, outward)
+      body = (
+        <>
+          <SwingLeaf hingeX={-width / 2} extend={left.extend} rotY={left.rotY} leafW={leafW} leafH={leafH} {...leafProps} />
+          <SwingLeaf hingeX={width / 2} extend={right.extend} rotY={right.rotY} leafW={leafW} leafH={leafH} {...leafProps} />
+        </>
+      )
+    } else if (style === 'glass') {
+      const pose = doorLeafPose(opening, outward)
+      body = <SwingLeaf hingeX={pose.hingeX} extend={pose.extend} rotY={pose.rotY} leafW={Math.max(0.25, width - 0.1)} leafH={leafH} glass {...leafProps} />
+    } else if (style === 'folding') {
+      const count = 4
+      const panelW = width / count
+      body = (
+        <>
+          {Array.from({ length: count }, (_, index) => (
+            <group key={index} position={[-width / 2 + panelW * (index + 0.5), 0, faceZ * 0.65]} rotation={[0, (index % 2 === 0 ? 0.7 : -0.7) * slide, 0]}>
+              <Solid args={[panelW * 0.9, leafH, 0.03]} position={[0, leafH / 2 + 0.02, 0]} color={face} pick={pick} mark={index === 0 ? mark : undefined} realistic={realistic} edges={!realistic} roughness={0.5} />
+            </group>
+          ))}
+        </>
+      )
+    } else if (style === 'sliding' || style === 'patio') {
+      const panels = style === 'patio' ? 2 : (opening.panels === 2 ? 2 : 1)
+      const pocket = style === 'sliding' && opening.slideMount !== 'surface'
+      const panelW = panels === 2 ? width / 2 - 0.04 : width * 0.92
+      const shift = slide * (panels === 2 ? width * 0.22 : width * 0.38)
+      const z = pocket ? outward * 0.02 : faceZ
+      const glassPanel = (x, key, moved) => (
+        <group key={key} position={[x, 0, z]}>
+          <Solid args={[panelW, 0.05, 0.04]} position={[0, leafH + 0.01, 0]} color={style === 'patio' ? '#d6d3d1' : face} pick={pick} realistic={realistic} edges={!realistic} roughness={0.4} />
+          <Solid args={[panelW, 0.05, 0.04]} position={[0, 0.05, 0]} color={style === 'patio' ? '#d6d3d1' : face} pick={pick} realistic={realistic} edges={!realistic} roughness={0.4} />
+          <mesh position={[0, leafH / 2, 0]} raycast={noopRaycast}>
+            <boxGeometry args={[Math.max(0.08, panelW - 0.08), Math.max(0.2, leafH - 0.12), 0.015]} />
+            <meshStandardMaterial color={style === 'patio' ? '#c5e4f7' : face} roughness={style === 'patio' ? 0.06 : 0.5} metalness={style === 'patio' ? 0.15 : 0.02} transparent={style === 'patio'} opacity={style === 'patio' ? 0.62 : 1} />
+          </mesh>
+          {moved && <mesh position={[slide * panelW * 0.28, height * 0.48, 0.03]} raycast={noopRaycast}><boxGeometry args={[0.08, 0.04, 0.03]} /><meshStandardMaterial color="#1c1917" /></mesh>}
+        </group>
+      )
+      body = (
+        <>
+          <Solid args={[width + (panels === 2 ? width * 0.55 : width * 0.7), 0.025, 0.03]} position={[shift * 0.35, height - 0.02, z]} color="#a8a29e" pick={pick} realistic={realistic} edges={!realistic} roughness={0.45} />
+          {panels === 2 ? (
+            <>
+              {glassPanel(slide > 0 ? -width / 4 : width / 4, 'fixed', false)}
+              {glassPanel((slide > 0 ? width / 4 : -width / 4) + shift * 0.35, 'moved', true)}
+            </>
+          ) : glassPanel(shift, 'panel', true)}
+        </>
+      )
+    } else {
+      const pose = doorLeafPose(opening, outward)
+      body = <SwingLeaf hingeX={pose.hingeX} extend={pose.extend} rotY={pose.rotY} leafW={Math.max(0.25, width - 0.1)} leafH={leafH} {...leafProps} />
+    }
     return (
       <group position={[frameX, 0, frameZ]} rotation={[0, yaw, 0]}>
-        <mesh userData={{ pick }} position={[0, height / 2, 0]}>
-          <boxGeometry args={[width, height, Math.max(0.12, depth)]} />
-          <meshStandardMaterial transparent opacity={0} depthWrite={false} />
-        </mesh>
-        <Solid args={[0.05, height, frameD]} position={[-width / 2, height / 2, 0]} color={jamb} pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
-        <Solid args={[0.05, height, frameD]} position={[width / 2, height / 2, 0]} color={jamb} pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
-        <Solid args={[width, 0.05, frameD]} position={[0, height - 0.025, 0]} color={jamb} pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
-        <group position={[hingeX, 0, 0]} rotation={[0, rotY, 0]}>
-          <Solid
-            args={[leafW, leafH, 0.045]}
-            position={[extend * leafW / 2, leafH / 2 + 0.02, 0]}
-            color={face}
-            pick={pick}
-            mark={mark}
-            realistic={realistic}
-            edges={!realistic}
-            roughness={0.5}
-          />
-          <mesh position={[extend * (leafW - 0.14), height * 0.48, 0.05]} raycast={noopRaycast} castShadow={realistic}>
-            <boxGeometry args={[0.035, 0.22, 0.04]} />
-            <meshStandardMaterial color="#1c1917" metalness={0.45} roughness={0.35} />
-          </mesh>
-        </group>
+        <DoorFrame width={width} height={height} depth={depth} jamb={jamb} pick={pick} realistic={realistic} />
+        {body}
       </group>
     )
   }
