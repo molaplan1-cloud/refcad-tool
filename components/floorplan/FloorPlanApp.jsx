@@ -7,6 +7,7 @@ import {
   MATERIALS,
   ROOF_TYPES,
   addFixture,
+  addedFixture,
   addOpening,
   addWall,
   claddingAreas,
@@ -1696,7 +1697,7 @@ export default function FloorPlanApp() {
     if (placing) {
       const radius = Math.max(12 / Math.max(ppm, 0.001), 0.45)
       const drafted = addFixture(plan, placing, point.x, point.z, radius)
-      const created = drafted.fixtures[drafted.fixtures.length - 1]
+      const created = addedFixture(plan, drafted, placing)
       const spec = FIXTURES.find((item) => item.id === placing)
       if (!created) return
       if (blocked(plan.fixtures || [], { ...created, name: spec?.name || 'Kaluste' }, fixtureKey, (existing) => {
@@ -1706,6 +1707,7 @@ export default function FloorPlanApp() {
       commit(drafted)
       setSelectedFixture(created.id)
       setPick({ kind: 'fixture', id: created.id })
+      setPanel('object')
       finishSingle()
     }
   }
@@ -2228,10 +2230,11 @@ export default function FloorPlanApp() {
     const radius = Math.max(12 / Math.max(spot.ppm, 0.001), 0.45)
     const next = addFixture(plan, type, spot.x, spot.z, radius)
     commit(next)
-    const created = next.fixtures[next.fixtures.length - 1]
+    const created = addedFixture(plan, next, type)
     if (created) {
       setSelectedFixture(created.id)
       setPick({ kind: 'fixture', id: created.id })
+      setPanel('object')
     }
     setPlacing(null)
   }
@@ -2289,7 +2292,7 @@ export default function FloorPlanApp() {
     }
     if (action === 'paste' && clip.current && menu?.at) {
       const next = addFixture(plan, clip.current.type, menu.at.x, menu.at.z)
-      const fixture = next.fixtures[next.fixtures.length - 1]
+      const fixture = addedFixture(plan, next, clip.current.type)
       if (fixture && clip.current.w) {
         commit({
           ...next,
