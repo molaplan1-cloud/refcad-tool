@@ -14,7 +14,10 @@ import {
   ROOF_TYPES,
   STANDARD_SCALES,
   WALL_STRUCTURES,
+  addFacadeSplit,
   addOpening,
+  applyFacadePreset,
+  assignFacadeCell,
   applyRoomType,
   defaultRoomSetpoint,
   faceSide,
@@ -439,20 +442,39 @@ export function RoofFields({ plan, onApply }) {
   )
 }
 
-function ZoneFields({ plan, id, onApply, onCommit }) {
+function ZoneFields({ plan, id, selection, onApply, onCommit }) {
   const { t } = usePlanLocale(plan)
-  const zone = (plan.facades || []).find((item) => item.id === id)
-  if (!zone) return null
-  const look = surfaceLook(plan, zone.materialId, { color: zone.color, colorCode: zone.colorCode })
+  const stored = (plan.facades || []).find((item) => item.id === id)
+  const cell = stored || selection
+  if (!cell?.side && !stored) return null
+  const target = {
+    side: cell.side || selection?.side,
+    u0: selection?.u0 ?? cell.u0,
+    u1: selection?.u1 ?? cell.u1,
+    y0: selection?.y0 ?? cell.y0,
+    y1: selection?.y1 ?? cell.y1,
+    materialId: selection?.materialId || cell.materialId,
+    zoneId: stored?.id || selection?.zoneId || null,
+    color: cell.color,
+    colorCode: cell.colorCode,
+  }
+  if (!target.side || !Number.isFinite(target.u0)) return null
+  const look = surfaceLook(plan, target.materialId, { color: target.color, colorCode: target.colorCode })
+  const paint = (patch) => onCommit(assignFacadeCell(plan, target, patch))
   return (
     <div data-testid="zone-fields">
+      <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 8 }}>Julkisivuvyöhyke</div>
       <Field label="Materiaali">
-        <select data-testid="zone-material" style={inputStyle} value={zone.materialId} onChange={(event) => onApply(updateFacadeZone(plan, id, { materialId: event.target.value }))}>
+        <select data-testid="zone-material" style={inputStyle} value={target.materialId || 'brick-yellow'} onChange={(event) => paint({ materialId: event.target.value })}>
           {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.group}: {item.name}</option>)}
         </select>
       </Field>
-      <ColorField testid="zone-color" label={t('finish.paint')} customLabel={t('finish.custom')} color={zone.color || look.color} onChange={({ color, code }) => onApply(updateFacadeZone(plan, id, { color, colorCode: code }))} />
-      <MenuBtn testid="ctx-delete" onClick={() => onCommit(deleteFacadeZone(plan, id))}>Poista vyöhyke</MenuBtn>
+      <ColorField testid="zone-color" label={t('finish.paint')} customLabel={t('finish.custom')} color={target.color || look.color} onChange={({ color, code }) => paint({ materialId: target.materialId, color, colorCode: code })} />
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+        <MenuBtn testid="zone-above" onClick={() => onCommit(applyFacadePreset(plan, target.side, 'above', 'wood-horizontal'))}>Ikkunan yläpuoli</MenuBtn>
+        <MenuBtn testid="zone-band" onClick={() => onCommit(applyFacadePreset(plan, target.side, 'band', 'brick-yellow'))}>Ikkunoiden välinen kaista</MenuBtn>
+      </div>
+      {stored && <MenuBtn testid="ctx-delete" onClick={() => onCommit(deleteFacadeZone(plan, stored.id))}>Poista vyöhyke</MenuBtn>}
     </div>
   )
 }
@@ -537,7 +559,7 @@ export function SelectionPanel({ plan, selection, picks, onApply, onCommit, onCl
   else if (selection.kind === 'roof') body = <RoofFields plan={plan} onApply={onApply} />
   else if (selection.kind === 'house') body = <HouseSettings plan={plan} onApply={onApply} />
   else if (selection.kind === 'yard') body = <YardFields plan={plan} selection={selection} onCommit={onCommit} />
-  else if (selection.kind === 'zone') body = <ZoneFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
+  else if (selection.kind === 'zone') body = <ZoneFields plan={plan} id={selection.id} selection={selection} onApply={onApply} onCommit={onCommit} />
   else if (selection.kind === 'service') {
     body = (
       <ServiceMenu
@@ -1551,19 +1573,24 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
         <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(removeFixture(plan, fixture.id))}>Poista</CadItem>
       </>
     )
-  } else if (menu.kind === 'zone' && zone) {
-    const current = CLADDING.find((item) => item.id === zone.materialId)
+  } else if (menu.kind === 'zone' && (zone || menu.side)) {
+    const cell = zone || { id: menu.id, side: menu.side, u0: menu.u0, u1: menu.u1, y0: menu.y0, y1: menu.y1, materialId: menu.materialId, zoneId: menu.zoneId }
+    const current = CLADDING.find((item) => item.id === cell.materialId)
     title = current ? `Julkisivuvyöhyke: ${current.name}` : 'Julkisivuvyöhyke'
     body = (
       <>
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
         <Flyout label="Verhous" testid="ctx-cladding">
           {CLADDING.map((item) => (
-            <CadItem key={item.id} onClick={() => onApply(updateFacadeZone(plan, zone.id, { materialId: item.id }))}>{item.name}</CadItem>
+            <CadItem key={item.id} onClick={() => onCommit(assignFacadeCell(plan, cell, { materialId: item.id }))}>{item.name}</CadItem>
           ))}
         </Flyout>
+        <CadItem testid="ctx-above" onClick={() => act(applyFacadePreset(plan, cell.side, 'above', 'wood-horizontal'))}>Ikkunan yläpuoli</CadItem>
+        <CadItem testid="ctx-band" onClick={() => act(applyFacadePreset(plan, cell.side, 'band', 'brick-yellow'))}>Ikkunoiden välinen kaista</CadItem>
         <CadSep />
-        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteFacadeZone(plan, zone.id))}>Poista</CadItem>
+        <CadItem testid="ctx-split-h" onClick={() => act(addFacadeSplit(plan, cell.side, 'h', Number.isFinite(menu.y) ? menu.y : (cell.y0 + cell.y1) / 2))}>Jaa vaakaviivalla</CadItem>
+        <CadItem testid="ctx-split-v" onClick={() => act(addFacadeSplit(plan, cell.side, 'v', Number.isFinite(menu.u) ? menu.u : (cell.u0 + cell.u1) / 2))}>Jaa pystyviivalla</CadItem>
+        {zone && <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteFacadeZone(plan, zone.id))}>Poista</CadItem>}
       </>
     )
   } else if (menu.kind === 'roof') {

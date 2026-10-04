@@ -14,6 +14,7 @@ import {
   cornerJoint,
   deleteOpening,
   facadeSide,
+  facadeHitFromWorld,
   deleteRoom,
   deleteWall,
   detectRoomAt,
@@ -892,7 +893,18 @@ export default function FloorPlanApp() {
     }
     const item = hit.kind === 'service'
       ? { kind: hit.service?.target === 'run' ? 'run' : 'node', id: hit.service?.id, service: hit.service }
-      : { kind: hit.kind, id: hit.id || hit.kind, collection: hit.collection }
+      : {
+        kind: hit.kind,
+        id: hit.id || hit.kind,
+        collection: hit.collection,
+        side: hit.side,
+        u0: hit.u0,
+        u1: hit.u1,
+        y0: hit.y0,
+        y1: hit.y1,
+        materialId: hit.materialId,
+        zoneId: hit.zoneId,
+      }
     selectHits([item], mods)
   }
 
@@ -1009,6 +1021,7 @@ export default function FloorPlanApp() {
     if (point.kind === 'service') {
       setMenu({ x: event.clientX, y: event.clientY, kind: 'service', service: point.service })
     } else {
+      const face = point.point ? facadeHitFromWorld(plan, point.point) : null
       setMenu({
         x: event.clientX,
         y: event.clientY,
@@ -1016,6 +1029,15 @@ export default function FloorPlanApp() {
         id: point.id || point.kind,
         collection: point.collection,
         at: point.at,
+        side: point.side || face?.side,
+        u0: point.u0,
+        u1: point.u1,
+        y0: point.y0,
+        y1: point.y1,
+        materialId: point.materialId,
+        zoneId: point.zoneId,
+        u: face?.u,
+        y: face?.y ?? point.point?.y,
       })
     }
     if (point.kind !== 'canvas') choose(point)
@@ -2395,7 +2417,19 @@ export default function FloorPlanApp() {
             ) : <span data-testid="status-tool">{status}</span>}
           </div>
           {view === 'facade' ? (
-            <FacadeView plan={plan} side={facadeSideId} onSide={setFacadeSideId} onApply={setPlan} onCommit={commit} />
+            <FacadeView
+              plan={plan}
+              side={facadeSideId}
+              selected={pick}
+              onSide={setFacadeSideId}
+              onApply={setPlan}
+              onCommit={commit}
+              onSelect={(cell) => {
+                setPicks([{ kind: 'zone', id: cell.id }])
+                setPick({ kind: 'zone', ...cell })
+                setPanel('object')
+              }}
+            />
           ) : view === '2d' ? (
             <div ref={hostRef} data-testid="plan-canvas-frame" data-active={engaged ? 'place' : 'select'} style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative', ...placeFrame(engaged) }}>
               <ModeChip workspace={workspaceName} name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />

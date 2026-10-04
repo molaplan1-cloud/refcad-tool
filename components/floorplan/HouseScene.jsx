@@ -10,6 +10,11 @@ import {
   materialOf,
   openingColour,
   doorLeafPose,
+  facadeCells,
+  facadeFlashings,
+  facadeWorld,
+  mergedFacadeSkins,
+  surfaceLook,
   planBounds,
   plinthLook,
   pointInPolygon,
@@ -20,10 +25,8 @@ import {
   roofOutline,
   roomForWallSide,
   segmentLength,
-  surfaceLook,
   thicknessOf,
   visibleRooms,
-  wallCladdingPieces,
   wallPieces,
   zoneCovering,
 } from '@/lib/floorplan'
@@ -433,20 +436,163 @@ function Solid({ args, position, rotation, color, map, bump = null, opacity = 1,
   )
 }
 
+function skinMaps(look, u0, y0, span, height, flipU) {
+  const board = Math.max(0.07, (look.boardWidthMm || 145) / 1000)
+  const brick = look.pattern === 'brick'
+  const unitX = brick ? 1.14 : look.pattern === 'boards-v' || look.pattern === 'batten' ? board * 4 : look.pattern === 'seam' || look.pattern === 'corrugated' ? 0.8 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.64 : 0.6
+  const unitY = brick ? 0.68 : look.pattern === 'boards-h' ? board * 4 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.36 : look.pattern === 'seam' ? 0.8 : 0.4
+  const key = `skin:${look.pattern}:${look.color}:${look.mortar || ''}:${look.painted ? 1 : 0}:${look.boardWidthMm || 0}:${u0.toFixed(3)}:${y0.toFixed(3)}:${span.toFixed(3)}:${height.toFixed(3)}:${flipU ? 1 : 0}`
+  if (textureCache.has(key)) return textureCache.get(key)
+  const baseKey = `skin-base:${look.pattern}:${look.color}:${look.mortar || ''}:${look.painted ? 1 : 0}:${look.boardWidthMm || 0}`
+  if (!textureCache.has(baseKey)) textureCache.set(baseKey, brick ? brickMaps(look) : paintCanvas(look))
+  const base = textureCache.get(baseKey)
+  const map = base.clone()
+  map.wrapS = THREE.RepeatWrapping
+  map.wrapT = THREE.RepeatWrapping
+  map.colorSpace = THREE.SRGBColorSpace
+  map.repeat.set((flipU ? -1 : 1) * Math.max(0.05, span / unitX), Math.max(0.05, height / unitY))
+  map.offset.set(flipU ? (u0 + span) / unitX : u0 / unitX, y0 / unitY)
+  map.needsUpdate = true
+  let bump = null
+  if (base.userData?.bump) {
+    bump = base.userData.bump.clone()
+    bump.wrapS = THREE.RepeatWrapping
+    bump.wrapT = THREE.RepeatWrapping
+    bump.repeat.copy(map.repeat)
+    bump.offset.copy(map.offset)
+    bump.needsUpdate = true
+    map.userData = { bump }
+  }
+  const value = { map, bump }
+  textureCache.set(key, value)
+  return value
+}
+
+function facadeFrame(plan, item, offset) {
+  const p0 = facadeWorld(plan, item.side, item.u0, item.plane, item.nx, item.nz, offset)
+  const p1 = facadeWorld(plan, item.side, item.u1, item.plane, item.nx, item.nz, offset)
+  const span = Math.max(0.05, Math.hypot(p1.x - p0.x, p1.z - p0.z))
+  const yaw = Math.atan2(item.nx, item.nz)
+  const ax = Math.cos(yaw)
+  const az = -Math.sin(yaw)
+  const alongX = (p1.x - p0.x) / span
+  const alongZ = (p1.z - p0.z) / span
+  const flipU = ax * alongX + az * alongZ < 0
+  return {
+    span,
+    yaw,
+    flipU,
+    position: [(p0.x + p1.x) / 2, 0, (p0.z + p1.z) / 2],
+  }
+}
+
+function CellOutline({ plan, cell, skins }) {
+  const skin = skins.find((item) => item.side === cell.side && Math.abs((item.plane || 0) - (cell.plane || 0)) < 0.04 && cell.u0 >= item.u0 - 0.03 && cell.u1 <= item.u1 + 0.03)
+  const frame = facadeFrame(plan, { ...cell, plane: skin?.plane ?? cell.plane, nx: skin?.nx ?? cell.nx, nz: skin?.nz ?? cell.nz }, (thicknessOf({ kind: 'exterior' }, plan) / 2) + 0.03)
+  const height = Math.max(0.05, cell.y1 - cell.y0)
+  const y = (cell.y0 + cell.y1) / 2
+  const t = 0.014
+  const bars = [
+    [frame.span, t, 0, height / 2],
+    [frame.span, t, 0, -height / 2],
+    [t, height, -frame.span / 2, 0],
+    [t, height, frame.span / 2, 0],
+  ]
+  return (
+    <group position={[frame.position[0], y, frame.position[2]]} rotation={[0, frame.yaw, 0]}>
+      {bars.map((bar, index) => (
+        <mesh key={index} position={[bar[2], bar[3], 0.01]} raycast={noopRaycast}>
+          <boxGeometry args={[bar[0], bar[1], 0.008]} />
+          <meshBasicMaterial color="#0f766e" />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function FacadeSkins({ plan, mode, selected, hovered }) {
+  if (mode === 'hidden') return null
+  const realistic = finishesOf(plan).sceneStyle !== 'technical' && mode === 'solid'
+  const plinthH = plinthLook(plan).height
+  const skins = mergedFacadeSkins(plan).flatMap((skin) => {
+    const y0 = Math.max(skin.y0, plinthH)
+    if (skin.y1 - y0 < 0.02) return []
+    return [{ ...skin, y0 }]
+  })
+  const cells = ['north', 'east', 'south', 'west'].flatMap((side) => facadeCells(plan, side).map((cell) => {
+    const skin = skins.find((item) => item.side === side && cell.u0 >= item.u0 - 0.04 && cell.u1 <= item.u1 + 0.04 && cell.y0 >= item.y0 - 0.04 && cell.y1 <= item.y1 + 0.04)
+    return { ...cell, plane: skin?.plane ?? 0, nx: skin?.nx ?? 0, nz: skin?.nz ?? 1 }
+  }))
+  const half = thicknessOf({ kind: 'exterior' }, plan) / 2
+  const flashings = facadeFlashings(plan)
+  const active = selected?.kind === 'zone' ? selected : null
+  return (
+    <group>
+      {skins.map((skin) => {
+        const look = surfaceLook(plan, skin.materialId, { color: skin.color, colorCode: skin.colorCode })
+        const height = Math.max(0.05, skin.y1 - skin.y0)
+        const frame = facadeFrame(plan, skin, half + 0.012)
+        const maps = realistic ? skinMaps(look, skin.u0, skin.y0, frame.span, height, frame.flipU) : null
+        return (
+          <mesh key={`skin-${skin.side}-${skin.plane}-${skin.u0}-${skin.y0}-${skin.materialId}`} position={[frame.position[0], (skin.y0 + skin.y1) / 2, frame.position[2]]} rotation={[0, frame.yaw, 0]} raycast={noopRaycast} castShadow={realistic} receiveShadow={realistic}>
+            <planeGeometry args={[frame.span, height]} />
+            <meshStandardMaterial
+              color={maps ? '#ffffff' : look.color}
+              map={maps?.map || null}
+              bumpMap={maps?.bump || null}
+              bumpScale={maps?.bump ? 0.012 : 0}
+              roughness={look.pattern === 'brick' ? 0.86 : 0.72}
+              metalness={0.02}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        )
+      })}
+      {flashings.filter((joint) => joint.y > plinthH + 0.02).map((joint) => {
+        const frame = facadeFrame(plan, { ...joint, u0: joint.u0, u1: joint.u1 }, half + 0.028)
+        return (
+          <mesh key={`flash-${joint.side}-${joint.y}-${joint.u0}`} position={[frame.position[0], joint.y, frame.position[2]]} rotation={[0, frame.yaw, 0]} raycast={noopRaycast} castShadow>
+            <boxGeometry args={[Math.max(0.05, frame.span), 0.028, 0.02]} />
+            <meshStandardMaterial color="#6e6862" roughness={0.45} metalness={0.35} />
+          </mesh>
+        )
+      })}
+      {cells.map((cell) => {
+        const frame = facadeFrame(plan, cell, half + 0.02)
+        const height = Math.max(0.05, cell.y1 - cell.y0)
+        const pick = { kind: 'zone', id: cell.id, side: cell.side, u0: cell.u0, u1: cell.u1, y0: cell.y0, y1: cell.y1, materialId: cell.materialId, zoneId: cell.zoneId }
+        const on = active && (active.id === cell.id || (active.side === cell.side && Math.abs(active.u0 - cell.u0) < 0.03 && Math.abs(active.y0 - cell.y0) < 0.03))
+        const hot = hovered?.kind === 'zone' && hovered.id === cell.id
+        return (
+          <group key={cell.id}>
+            <mesh position={[frame.position[0], (cell.y0 + cell.y1) / 2, frame.position[2]]} rotation={[0, frame.yaw, 0]} userData={{ pick }}>
+              <planeGeometry args={[frame.span, height]} />
+              <meshBasicMaterial transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} />
+            </mesh>
+            {(on || hot) && <CellOutline plan={plan} cell={cell} skins={skins} />}
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
 function WallMesh({ plan, mode, selected, hovered }) {
   if (mode === 'hidden') return null
   const opacity = mode === 'ghost' ? 0.14 : 1
   return (
     <group>
+      <FacadeSkins plan={plan} mode={mode} selected={selected} hovered={hovered} />
       {(plan.walls || []).flatMap((wall) => {
         const len = segmentLength(wall.a, wall.b) || 1
         const dx = (wall.b.x - wall.a.x) / len
         const dz = (wall.b.z - wall.a.z) / len
         const yaw = Math.atan2(-dz, dx)
         const thick = thicknessOf(wall, plan)
-        const pieces = wall.kind === 'exterior'
-          ? wallCladdingPieces(wall, plan)
-          : wallPieces(wall, plan.openings, plan.floorHeight, plan.walls)
+        const shell = wall.kind !== 'interior' && wall.kind !== 'partition'
+        const pieces = shell
+          ? wallPieces(wall, plan.openings, plan.floorHeight, plan.walls, plan)
+          : wallPieces(wall, plan.openings, plan.floorHeight, plan.walls, plan)
         const plinth = plinthLook(plan)
         const realistic = finishesOf(plan).sceneStyle !== 'technical' && mode === 'solid'
         const slices = pieces.flatMap((piece) => {
@@ -469,12 +615,12 @@ function WallMesh({ plan, mode, selected, hovered }) {
             : null
           const plinthFace = piece.plinthBand ? plinth : null
           const finish = cladding || plinthFace || adjacentInterior(plan, wall, piece)
-          const map = realistic && (cladding || plinthFace)
+          const map = shell ? null : realistic && (cladding || plinthFace)
             ? repeatedCladding(cladding || { ...plinthFace, boardWidthMm: 145, painted: false, mortar: plinthFace.color }, span, height)
             : realistic && wall.kind !== 'exterior' ? finishTexture('interior', finish.id) : null
-          const zone = wall.kind === 'exterior' ? zoneCovering(plan, wall, (piece.from + piece.to) / 2, y) : null
-          const pick = zone ? { kind: 'zone', id: zone.id, wallId: wall.id } : { kind: 'wall', id: wall.id }
-          const onThisWall = (item) => item?.kind === 'wall' && item.id === wall.id
+          const zone = !shell ? null : zoneCovering(plan, wall, Math.max(0, (piece.from + piece.to) / 2), y)
+          const pick = shell ? null : (zone ? { kind: 'zone', id: zone.id, wallId: wall.id } : { kind: 'wall', id: wall.id })
+          const onThisWall = (item) => !shell && item?.kind === 'wall' && item.id === wall.id
           const mark = samePick(selected, pick) || onThisWall(selected)
             ? 'selected'
             : samePick(hovered, pick) || onThisWall(hovered)
@@ -496,7 +642,7 @@ function WallMesh({ plan, mode, selected, hovered }) {
                 mark={mark}
                 realistic={realistic}
                 roughness={cladding?.pattern === 'brick' ? 0.86 : 0.72}
-                edges={!realistic}
+                edges={!shell && !realistic}
               />
               {['left', 'right'].map((side) => {
                 if (!roomForWallSide(plan, wall, side)) return null
@@ -1352,7 +1498,7 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
       for (const hit of hits) {
         let node = hit.object
         while (node) {
-          if (node.userData?.pick) return node.userData.pick
+          if (node.userData?.pick) return { ...node.userData.pick, point: { x: hit.point.x, y: hit.point.y, z: hit.point.z } }
           node = node.parent
         }
       }
@@ -1496,13 +1642,30 @@ function Dressing({ plan }) {
     const top = wall.height || plan.floorHeight || 2.6
     const boardH = Math.max(0.2, top - plinth.height)
     const yaw = Math.atan2(-dz, dx)
-    ;[0.07, Math.max(0.08, len - 0.07)].forEach((dist, index) => {
-      const point = pointAt(wall, Math.min(len, dist))
+    ;[wall.a, wall.b].forEach((at, index) => {
+      const far = index === 0 ? wall.b : wall.a
+      const dirLen = Math.hypot(far.x - at.x, far.z - at.z) || 1
+      const dirx = (far.x - at.x) / dirLen
+      const dirz = (far.z - at.z) / dirLen
+      let angled = false
+      let colinear = false
+      ;(plan.walls || []).forEach((other) => {
+        if (other.id === wall.id || other.kind === 'interior' || other.kind === 'partition') return
+        const otherFar = Math.hypot(other.a.x - at.x, other.a.z - at.z) < 0.08 ? other.b : Math.hypot(other.b.x - at.x, other.b.z - at.z) < 0.08 ? other.a : null
+        if (!otherFar) return
+        const olen = Math.hypot(otherFar.x - at.x, otherFar.z - at.z) || 1
+        const dot = dirx * ((otherFar.x - at.x) / olen) + dirz * ((otherFar.z - at.z) / olen)
+        if (Math.abs(dot) > 0.96) colinear = true
+        else angled = true
+      })
+      if (colinear && !angled) return
+      const key = `${Math.round(at.x * 20)}:${Math.round(at.z * 20)}`
+      if (trims.some((item) => item.key === `corner-${key}`)) return
       trims.push({
-        key: `${wall.id}-corner-${index}`,
-        position: [point.x + nx * (thick / 2 + 0.015), plinth.height + boardH / 2, point.z + nz * (thick / 2 + 0.015)],
+        key: `corner-${key}`,
+        position: [at.x + nx * (thick / 2 + 0.012), plinth.height + boardH / 2, at.z + nz * (thick / 2 + 0.012)],
         rotation: [0, yaw, 0],
-        args: [0.12, boardH, 0.028],
+        args: [0.045, boardH, 0.02],
       })
     })
     ;(plan.openings || []).filter((opening) => opening.wallId === wall.id).forEach((opening) => {

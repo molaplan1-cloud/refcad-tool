@@ -9,14 +9,19 @@ import {
   CLADDING,
   FACADE_SIDES,
   addFacadeBand,
+  addFacadeSplit,
   addFacadeZone,
   applyBrickBelowWoodAbove,
   applyFacadePreset,
+  assignFacadeCell,
   buildElevationPdf,
   claddingOf,
   deleteFacadeZone,
+  facadeCells,
+  facadeFlashings,
   facadeLayout,
   facadePaints,
+  mergeFacadeRects,
   formatArea,
   formatMm,
   openingColour,
@@ -24,7 +29,6 @@ import {
   roofLook,
   roofModel,
   surfaceLook,
-  updateFacadeZone,
 } from '@/lib/floorplan'
 
 const inputStyle = {
@@ -247,7 +251,7 @@ function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd,
   )
 }
 
-export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
+export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSelect, selected }) {
   const { t, locale } = usePlanLocale(plan)
   const north = northAngle(plan)
   const hostRef = useRef(null)
@@ -323,11 +327,6 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
       y: contentTop - ((py - sheet.y) / k - oyMm) / mm,
     }
   }
-  const hitZone = (point) => {
-    const zones = [...(layout.zones || [])].reverse()
-    return zones.find((zone) => point.u >= zone.u0 && point.u <= zone.u1 && point.y >= zone.y0 && point.y <= zone.y1) || null
-  }
-
   const onPointerDown = (event) => {
     if (event.button !== 0) return
     setMenu(null)
@@ -336,6 +335,12 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
       setDraft(point)
       return
     }
+    if (tool === 'split-h' || tool === 'split-v') {
+      onCommit(addFacadeSplit(plan, side, tool === 'split-v' ? 'v' : 'h', tool === 'split-v' ? point.u : point.y))
+      return
+    }
+    const cell = [...facadeCells(plan, side)].reverse().find((item) => point.u >= item.u0 && point.u <= item.u1 && point.y >= item.y0 && point.y <= item.y1)
+    if (cell) onSelect?.(cell)
     setMenu(null)
   }
   const onPointerMove = (event) => {
@@ -382,14 +387,16 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
           <button type="button" data-testid="facade-presets" title={t('facade.above')} style={chip(ribbon === 'preset')} onClick={() => setRibbon(ribbon === 'preset' ? null : 'preset')}>Vyöhykkeet</button>
           {ribbon === 'preset' && (
             <div style={{ position: 'absolute', top: 32, left: 0, zIndex: 20, minWidth: 220, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 8, padding: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}>
-              <button type="button" data-testid="facade-preset-above" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'above')); setRibbon(null) }}>{t('facade.above')}</button>
               <button type="button" data-testid="facade-preset-plinth" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'plinth')); setRibbon(null) }}>{t('facade.plinth')}</button>
-              <button type="button" data-testid="facade-preset-band" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'band')); setRibbon(null) }}>{t('facade.band')}</button>
               <button type="button" data-testid="facade-brick-wood" style={menuBtn} onClick={() => { onCommit(applyBrickBelowWoodAbove(plan, side)); setRibbon(null) }}>{t('facade.brickWood')}</button>
               <button type="button" data-testid="facade-rect" style={menuBtn} onClick={() => { setTool(tool === 'rect' ? 'select' : 'rect'); setRibbon(null) }}>{t('facade.rect')}</button>
             </div>
           )}
         </span>
+        <button type="button" data-testid="facade-preset-above" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'above', 'wood-horizontal'))}>{t('facade.above')}</button>
+        <button type="button" data-testid="facade-preset-band" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'band', 'brick-yellow'))}>{t('facade.band')}</button>
+        <button type="button" data-testid="facade-split-h" style={chip(tool === 'split-h')} onClick={() => setTool(tool === 'split-h' ? 'select' : 'split-h')}>Vaakajako</button>
+        <button type="button" data-testid="facade-split-v" style={chip(tool === 'split-v')} onClick={() => setTool(tool === 'split-v' ? 'select' : 'split-v')}>Pystyjako</button>
         <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
           <span>mm</span>
           <input aria-label="Vyöhykkeen alareuna" style={{ ...inputStyle, width: 58 }} type="number" value={band.y0} onChange={(event) => setBand({ ...band, y0: Number(event.target.value) })} />
@@ -416,8 +423,9 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
           onContextMenu={(event) => {
             event.preventDefault()
             const point = toFacade(event)
-            const zone = hitZone(point)
-            setMenu({ kind: zone ? 'zone' : 'facade', id: zone?.id, x: event.clientX, y: event.clientY, at: point })
+            const cell = [...facadeCells(plan, side)].reverse().find((item) => point.u >= item.u0 && point.u <= item.u1 && point.y >= item.y0 && point.y <= item.y1)
+            if (cell) onSelect?.(cell)
+            setMenu({ kind: cell ? 'zone' : 'facade', id: cell?.id, cell, x: event.clientX, y: event.clientY, at: point })
           }}
           style={{ display: 'block', background: '#d6d3d1', touchAction: 'none', cursor: tool === 'rect' ? 'crosshair' : 'default' }}
         >
@@ -426,18 +434,50 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
           <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
           <line x1={X(-overhang - 0.8)} y1={Y(-0.06)} x2={X(layout.length + overhang + 1.1)} y2={Y(-0.06)} stroke="#44403c" strokeWidth={2.4} />
           <line x1={X(-overhang - 0.35)} y1={Y(0)} x2={X(layout.length + overhang + 0.45)} y2={Y(0)} stroke="#1c1917" strokeWidth={1.3} />
-          {visiblePaints.map((piece, index) => (
+          {mergeFacadeRects(visiblePaints.map((piece) => ({ ...piece, color: piece.look.color, colorCode: piece.look.code || '' }))).map((piece) => {
+            const sample = visiblePaints.find((item) => item.materialId === piece.materialId && item.look.color === piece.color)
+            return (
+              <rect
+                key={`${piece.materialId}-${piece.u0}-${piece.y0}-${piece.u1}`}
+                data-testid="facade-skin"
+                x={X(piece.u0)}
+                y={Y(piece.y1)}
+                width={Math.max(0, metres(piece.u1 - piece.u0))}
+                height={Math.max(0, metres(piece.y1 - piece.y0))}
+                fill={realistic && sample ? `url(#clad-${sample.key})` : '#f8fafc'}
+                stroke="none"
+              />
+            )
+          })}
+          {facadeFlashings(plan).filter((joint) => joint.side === side).map((joint) => (
             <rect
-              key={`${piece.wallId}-${index}-${piece.y0}`}
-              x={X(piece.u0)}
-              y={Y(piece.y1)}
-              width={Math.max(0, metres(piece.u1 - piece.u0))}
-              height={Math.max(0, metres(piece.y1 - piece.y0))}
-              fill={realistic ? `url(#clad-${piece.key})` : '#f8fafc'}
-              stroke="#44403c"
-              strokeWidth="0.35"
+              key={`flash-${joint.y}-${joint.u0}`}
+              data-testid="facade-flashing"
+              x={X(joint.u0)}
+              y={Y(joint.y + 0.02)}
+              width={metres(joint.u1 - joint.u0)}
+              height={Math.max(1.2, metres(0.028))}
+              fill="#6e6862"
+              stroke="none"
             />
           ))}
+          {(plan.facadeSplits || []).filter((item) => item.side === side).map((item) => (
+            item.axis === 'v'
+              ? <line key={item.id} data-testid="facade-split" x1={X(item.at)} y1={Y(0)} x2={X(item.at)} y2={Y(wallH)} stroke="#0f766e" strokeWidth={0.8} strokeDasharray="5 3" />
+              : <line key={item.id} data-testid="facade-split" x1={X(0)} y1={Y(item.at)} x2={X(layout.length)} y2={Y(item.at)} stroke="#0f766e" strokeWidth={0.8} strokeDasharray="5 3" />
+          ))}
+          {selected?.kind === 'zone' && selected.side === side && (
+            <rect
+              data-testid="facade-zone-selected"
+              x={X(selected.u0)}
+              y={Y(selected.y1)}
+              width={Math.max(0, metres(selected.u1 - selected.u0))}
+              height={Math.max(0, metres(selected.y1 - selected.y0))}
+              fill="none"
+              stroke="#0f766e"
+              strokeWidth={1.6}
+            />
+          )}
           <rect data-testid="facade-plinth" x={X(0)} y={Y(plinth.height)} width={metres(layout.length)} height={metres(plinth.height)} fill={realistic ? 'url(#clad-plinth)' : '#f8fafc'} stroke="#1c1917" strokeWidth={0.9} />
           <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(wallH)} stroke={realistic ? finish.trimColor : '#1c1917'} strokeWidth={3} />
           <line x1={X(layout.length)} y1={Y(0)} x2={X(layout.length)} y2={Y(wallH)} stroke={realistic ? finish.trimColor : '#1c1917'} strokeWidth={3} />
@@ -516,27 +556,34 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
             onPointerDown={(event) => event.stopPropagation()}
           >
             <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{menu.kind === 'zone' ? 'Vyöhyke' : 'Julkisivu'}</div>
-            {menu.kind === 'zone' && (
+            {menu.kind === 'zone' && menu.cell && (
               <>
                 <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>
                   Materiaali
                   <select
                     data-testid="facade-zone-material"
                     style={{ ...inputStyle, width: '100%', marginTop: 4 }}
-                    value={(plan.facades || []).find((zone) => zone.id === menu.id)?.materialId || 'brick-red'}
-                    onChange={(event) => onApply(updateFacadeZone(plan, menu.id, { materialId: event.target.value }))}
+                    value={menu.cell.materialId || 'brick-yellow'}
+                    onChange={(event) => onCommit(assignFacadeCell(plan, menu.cell, { materialId: event.target.value }))}
                   >
                     {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.group}: {item.name}</option>)}
                   </select>
                 </label>
-                <button type="button" data-testid="facade-zone-delete" onClick={() => { onCommit(deleteFacadeZone(plan, menu.id)); setMenu(null) }} style={menuBtn}>Poista</button>
+                <button type="button" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'above', 'wood-horizontal')); setMenu(null) }}>{t('facade.above')}</button>
+                <button type="button" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'band', 'brick-yellow')); setMenu(null) }}>{t('facade.band')}</button>
+                {(() => {
+                  const zone = (plan.facades || []).find((item) => item.id === menu.cell.zoneId)
+                  const exact = zone && Math.abs(zone.u0 - menu.cell.u0) < 0.04 && Math.abs(zone.u1 - menu.cell.u1) < 0.04 && Math.abs(zone.y0 - menu.cell.y0) < 0.04 && Math.abs(zone.y1 - menu.cell.y1) < 0.04
+                  if (!exact) return null
+                  return <button type="button" data-testid="facade-zone-delete" onClick={() => { onCommit(deleteFacadeZone(plan, zone.id)); setMenu(null) }} style={menuBtn}>Poista</button>
+                })()}
               </>
             )}
             {menu.kind === 'facade' && (
               <>
-                <button type="button" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'above')); setMenu(null) }}>Aukkojen yläpuolinen vyöhyke</button>
+                <button type="button" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'above', 'wood-horizontal')); setMenu(null) }}>{t('facade.above')}</button>
                 <button type="button" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'plinth')); setMenu(null) }}>Ikkunoiden alapuolinen sokkeli</button>
-                <button type="button" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'band')); setMenu(null) }}>Ikkunanauha</button>
+                <button type="button" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'band', 'brick-yellow')); setMenu(null) }}>{t('facade.band')}</button>
                 <button type="button" style={menuBtn} onClick={() => { setTool('rect'); setMenu(null) }}>Piirrä suorakulmio</button>
               </>
             )}
