@@ -1,11 +1,30 @@
 'use client'
 
+import { useEffect } from 'react'
+import StaleDeployNotice from '@/components/StaleDeployNotice'
+import { isStaleChunkError, recoverStaleDeploy } from '@/lib/staleDeploy'
+
 // Global error boundary for the root layout.
 // Cloudflare's @cloudflare/next-on-pages 1.13.15 flags /_error as missing
 // edge runtime if no explicit global error page exists. This must be a Client
 // Component and must include html/body tags (it replaces the root layout).
 
 export default function GlobalError({ error, reset }) {
+  const stale = isStaleChunkError(error)
+  useEffect(() => {
+    if (stale) recoverStaleDeploy()
+  }, [stale])
+
+  if (stale) {
+    return (
+      <html lang="fi">
+        <body style={{ margin: 0 }}>
+          <StaleDeployNotice />
+        </body>
+      </html>
+    )
+  }
+
   return (
     <html lang="fi">
       <body

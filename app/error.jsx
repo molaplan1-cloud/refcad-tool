@@ -1,5 +1,9 @@
 'use client'
 
+import { useEffect } from 'react'
+import StaleDeployNotice from '@/components/StaleDeployNotice'
+import { isStaleChunkError, recoverStaleDeploy } from '@/lib/staleDeploy'
+
 // Custom error page that opts into Edge runtime explicitly.
 // next-on-pages 1.13.15 also flags /_error as missing edge runtime if no
 // explicit error boundary exists. Without this file, the build fails with:
@@ -7,6 +11,21 @@
 //     - /_error
 
 export default function GlobalError({ error, reset }) {
+  const stale = isStaleChunkError(error)
+  useEffect(() => {
+    if (stale) recoverStaleDeploy()
+  }, [stale])
+
+  if (stale) {
+    return (
+      <html lang="fi">
+        <body style={{ margin: 0 }}>
+          <StaleDeployNotice />
+        </body>
+      </html>
+    )
+  }
+
   return (
     <html lang="fi">
       <body

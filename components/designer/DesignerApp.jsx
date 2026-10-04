@@ -45,6 +45,7 @@ import {
   runDesignerCommand,
   selectionBox,
 } from '@/lib/cadEdit'
+import { registerDrawingFlush } from '@/lib/staleDeploy'
 import { CadPrompt, CadToolbar, MultiProperties } from '../floorplan/CadTools'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
 import { panelSchedule } from '@/lib/sharedWalls'
@@ -295,6 +296,12 @@ export default function DesignerApp({
   cablesRef.current = cables
   selectedRef.current = selectedIds
   cadRef.current = cad
+  const nameRef = useRef(name)
+  const unitRef = useRef(unitSystem)
+  const schematicRef = useRef(schematic)
+  nameRef.current = name
+  unitRef.current = unitSystem
+  schematicRef.current = schematic
   const selectedId = selectedIds[selectedIds.length - 1] || null
   const snapFlags = { grid: snapOn, endpoint: true, midpoint: true, wall: true, ortho: true }
 
@@ -457,6 +464,20 @@ export default function DesignerApp({
     window.addEventListener('mousedown', close)
     return () => window.removeEventListener('mousedown', close)
   }, [exportOpen])
+
+  useEffect(() => {
+    if (!onPersist) return undefined
+    return registerDrawingFlush(() => {
+      onPersist({
+        name: nameRef.current,
+        rooms: roomsRef.current,
+        unitSystem: unitRef.current,
+        pipes: pipesRef.current,
+        cables: cablesRef.current,
+        schematic: schematicRef.current,
+      })
+    })
+  }, [onPersist])
 
   useEffect(() => {
     if (!onPersist) return undefined
