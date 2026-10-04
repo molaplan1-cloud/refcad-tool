@@ -136,6 +136,7 @@ export function PlanChrome({
       <button type="button" data-testid="tool-exterior" aria-pressed={tool === 'exterior'} style={style(tool === 'exterior')} onClick={() => { close(); onTool('exterior') }}>{t('tool.exterior')}</button>
       <button type="button" data-testid="tool-interior" aria-pressed={tool === 'interior'} style={style(tool === 'interior')} onClick={() => { close(); onTool('interior') }}>{t('tool.interior')}</button>
       <button type="button" data-testid="tool-door" aria-pressed={tool === 'door'} style={style(tool === 'door')} onClick={() => { close(); onTool('door') }}>{t('tool.door')}</button>
+      <button type="button" data-testid="tool-passage" aria-pressed={tool === 'passage'} style={style(tool === 'passage')} onClick={() => { close(); onTool('passage') }}>{t('tool.passage')}</button>
       <button type="button" data-testid="tool-window" aria-pressed={tool === 'window'} style={style(tool === 'window')} onClick={() => { close(); onTool('window') }}>{t('tool.window')}</button>
       <button type="button" data-testid="tool-room" aria-pressed={tool === 'room' && roomShape === 'rect'} style={style(tool === 'room' && roomShape === 'rect')} onClick={() => { close(); onRoomRect() }}>{t('tool.room')}</button>
       <button type="button" data-testid="tool-room-poly" aria-pressed={tool === 'room' && roomShape === 'poly'} style={style(tool === 'room' && roomShape === 'poly')} onClick={() => { close(); onRoomPoly() }}>{t('tool.polygon')}</button>

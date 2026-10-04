@@ -429,6 +429,7 @@ const TOOL_LABELS = {
   exterior: 'Ulkoseinä',
   interior: 'Väliseinä',
   door: 'Ovi',
+  passage: 'Oviaukko',
   window: 'Ikkuna',
   room: 'Huone',
   detect: 'Tunnista huone',
@@ -1000,7 +1001,7 @@ export default function FloorPlanApp() {
             ...parsed,
             services: ensureServices(parsed),
             yard: ensureYard(parsed),
-            rooms: detectRooms(parsed.walls, parsed.rooms || []),
+            rooms: detectRooms(parsed.walls, parsed.rooms || [], parsed.openings || []),
           }
           setPlan(straightenWalls(loaded, 0.5))
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
@@ -1176,7 +1177,7 @@ export default function FloorPlanApp() {
         enabled,
       })
     }
-    if (tool === 'door' || tool === 'window') {
+    if (tool === 'door' || tool === 'window' || tool === 'passage') {
       const along = snapAlongWall(world, walls, Math.max(radius, 0.35), enabled)
       return along.wall ? { point: along.point, kind: 'edge', guides: [], wall: along.wall } : { point: world, kind: null, guides: [] }
     }
@@ -1375,7 +1376,7 @@ export default function FloorPlanApp() {
   }
 
   const openHitMenu = (hit, event, spot) => {
-    const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || yardPlacesOne(yardTool))
+    const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || tool === 'passage' || yardPlacesOne(yardTool))
     const drawing = Boolean(tool === 'exterior' || tool === 'interior' || tool === 'room' || tool === 'detect' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool)))
     if (placingOne) {
       event.preventDefault()
@@ -1608,7 +1609,7 @@ export default function FloorPlanApp() {
   }
 
   const onContextMenu = (event) => {
-    const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || yardPlacesOne(yardTool))
+    const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || tool === 'passage' || yardPlacesOne(yardTool))
     const drawing = Boolean(tool === 'exterior' || tool === 'interior' || tool === 'room' || tool === 'detect' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool)))
     if (placingOne) {
       event.preventDefault()
@@ -1795,14 +1796,15 @@ export default function FloorPlanApp() {
       commitWallRef.current(draft, next)
       return
     }
-    if (tool === 'door' || tool === 'window') {
+    if (tool === 'door' || tool === 'window' || tool === 'passage') {
       const along = visual?.wall ? visual : snapAlongWall(world, plan.walls, Math.max(12 / Math.max(ppm, 0.001), 0.35), !altRef.current)
       if (!along?.wall) return
-      if (blocked([], { name: tool === 'door' ? 'Ovi' : 'Ikkuna', x: 0, z: 0 }, () => 'opening')) return
+      const openingName = tool === 'door' ? 'Ovi' : tool === 'passage' ? 'Oviaukko' : 'Ikkuna'
+      if (blocked([], { name: openingName, x: 0, z: 0 }, () => 'opening')) return
       const before = (plan.openings || []).length
       const next = refreshHeat(addOpening(plan, along.wall.id, along.point || point, tool, tool === 'door' ? doorHand : {}))
       if ((next.openings || []).length === before) {
-        showToast(`${tool === 'door' ? 'Ovi' : 'Ikkuna'} on jo tässä`)
+        showToast(`${openingName} on jo tässä`)
         return
       }
       commit(next)
@@ -1946,8 +1948,8 @@ export default function FloorPlanApp() {
       if (command.step === 'to') confirmCommand(point)
       return
     }
-    if (svcTool || yardTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing) {
-      if (trackRef.current?.armed === 'pick' && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)) {
+    if (svcTool || yardTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || tool === 'passage' || placing) {
+      if (trackRef.current?.armed === 'pick' && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || tool === 'passage' || placing)) {
         const visual = describeSnap(world, ppm2d)
         const corner = nearestEndpoint(plan.walls, world, snapRadius(ppm2d, 16))
         const base = corner ? { x: corner.x, z: corner.z } : (visual?.point || world)
@@ -2653,7 +2655,7 @@ export default function FloorPlanApp() {
   const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
-  const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || yardPlacesOne(yardTool))
+  const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || tool === 'passage' || yardPlacesOne(yardTool))
   const drawingTool = Boolean(!placingOne && (tool === 'exterior' || tool === 'interior' || tool === 'room' || tool === 'detect' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool))))
   const activeName = placing
     ? (FIXTURES.find((item) => item.id === placing)?.name || 'Kaluste')
@@ -3210,6 +3212,20 @@ export default function FloorPlanApp() {
                   if (!wall || wall.hidden) return null
                   const fig = openingSymbol(wall, opening, plan)
                   const selectedOpening = picks.some((item) => item.kind === 'opening' && item.id === opening.id)
+                  if (fig.kind === 'passage') {
+                    return (
+                      <g key={opening.id} data-testid="passage-mark" data-merge={opening.mergeSpaces ? '1' : '0'} data-lintel={opening.lintel ? '1' : '0'} stroke="#1c1917" fill="none" strokeLinecap="butt">
+                        {(fig.faces || []).map((line, index) => (
+                          <line key={index} data-testid="passage-face" x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+                        ))}
+                        <line data-testid="passage-jamb" x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
+                        <line data-testid="passage-jamb" x1={X(fig.jambB[0].x)} y1={Y(fig.jambB[0].z)} x2={X(fig.jambB[1].x)} y2={Y(fig.jambB[1].z)} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
+                        {!opening.mergeSpaces && (
+                          <line data-testid="passage-boundary" x1={X(fig.boundary.x1)} y1={Y(fig.boundary.z1)} x2={X(fig.boundary.x2)} y2={Y(fig.boundary.z2)} strokeWidth={1.3} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+                        )}
+                      </g>
+                    )
+                  }
                   if (fig.kind === 'window') {
                     const compass = wallBearing(plan, wall).code
                     return (

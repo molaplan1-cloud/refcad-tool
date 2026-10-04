@@ -784,6 +784,22 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
       </group>
     )
   }
+  if (opening.kind === 'passage') {
+    const beam = opening.lintel ? Math.max(0.08, opening.lintelHeight || 0.15) : 0
+    return (
+      <group position={[frameX, 0, frameZ]} rotation={[0, yaw, 0]}>
+        <mesh userData={{ pick }} position={[0, height / 2, 0]}>
+          <boxGeometry args={[width, height, Math.max(0.12, depth)]} />
+          <meshStandardMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+        <Solid args={[0.04, height, Math.min(0.12, depth)]} position={[-width / 2, height / 2, 0]} color="#e7e5e4" pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
+        <Solid args={[0.04, height, Math.min(0.12, depth)]} position={[width / 2, height / 2, 0]} color="#e7e5e4" pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
+        {beam > 0 && (
+          <Solid args={[width + 0.08, beam, Math.min(0.2, depth + 0.04)]} position={[0, height + beam / 2, 0]} color="#d6d3d1" pick={pick} realistic={realistic} edges={!realistic} roughness={0.7} />
+        )}
+      </group>
+    )
+  }
   if (opening.kind === 'door') {
     const mark = markOf(selected, hovered, pick)
     const style = doorStyleOf(opening)
