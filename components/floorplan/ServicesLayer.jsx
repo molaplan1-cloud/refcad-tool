@@ -28,6 +28,7 @@ import {
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
 import { houseBox } from '@/lib/yard'
 import { CAD_COMMANDS } from '@/lib/cadEdit'
+import { annotationFont, placeLineLabels } from '@/lib/annotations'
 import { CadItem, CadMenu, CadSep, Flyout, Segmented } from './CadMenu'
 
 const barBtn = (active) => ({
@@ -529,7 +530,7 @@ function siteRun(plan, run) {
   return (run.points || []).some((point) => !insideHouse(plan, point.x, point.z))
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null }) {
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null, legendSystems = null, zoom = 1, camera = null, viewport = null, roomLabels = [], dimensions = [] }) {
   const services = ensureServices(plan)
   const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run) && (!siteMode || siteRun(plan, run)))
   const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
@@ -548,7 +549,11 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const fittings = collectFittings(drawn
     .filter(({ run }) => run.kind !== 'floorheat' && run.kind !== 'efloor' && run.role !== 'loop')
     .map((item) => ({ ...item.run, points: item.points })))
-  const legend = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
+  const legend = SERVICE_SYSTEMS.filter((item) => (
+    (!Array.isArray(legendSystems) || legendSystems.includes(item.id))
+    && layerVisible(plan, item.id)
+    && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))
+  )).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
   const live = (system) => !Array.isArray(activeSystems) || activeSystems.includes(system)
   const open = (event, hit) => {
     event.preventDefault()
@@ -556,29 +561,56 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     onContext(event, hit)
   }
   const leaders = []
-  const bestTrunk = new Map()
-  drawn.forEach(({ run, points }) => {
-    if (!['trunk', 'main', 'header'].includes(run.role) || !run.size || points.length < 2) return
-    let longest = 0
-    let mid = null
-    let normal = { x: 0, z: -1 }
-    for (let i = 0; i < points.length - 1; i += 1) {
-      const dx = points[i + 1].x - points[i].x
-      const dz = points[i + 1].z - points[i].z
-      const len = Math.hypot(dx, dz)
-      if (len <= longest) continue
-      longest = len
-      mid = { x: (points[i].x + points[i + 1].x) / 2, z: (points[i].z + points[i + 1].z) / 2 }
-      normal = { x: -dz / (len || 1), z: dx / (len || 1) }
-    }
-    if (!mid || longest < 1.1) return
-    const prev = bestTrunk.get(run.system)
-    if (!prev || longest > prev.longest) {
-      const text = run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`
-      bestTrunk.set(run.system, { longest, mid, normal, text, color: runColor(run) })
-    }
+  const labelFont = annotationFont(sheet?.k || 1, zoom, 2.3, 14)
+  const flowFont = annotationFont(sheet?.k || 1, zoom, 2, 11)
+  const ink = Math.min(0.45, 1.1 / Math.max(zoom, 0.2))
+  const ppm = Math.abs(X(1) - X(0)) || 20
+  const view = viewport && camera ? {
+    x: (0 - (camera.x || 0)) / Math.max(zoom, 0.2),
+    y: (0 - (camera.y || 0)) / Math.max(zoom, 0.2),
+    w: (viewport.w || 0) / Math.max(zoom, 0.2),
+    h: (viewport.h || 0) / Math.max(zoom, 0.2),
+  } : null
+  const chrome = view ? {
+    x: view.x + view.w * 0.22,
+    y: view.y,
+    w: view.w * 0.56,
+    h: Math.max(18, 44 / Math.max(zoom, 0.2)),
+    kind: 'chrome',
+  } : null
+  const obstacles = []
+  if (chrome) obstacles.push(chrome)
+  roomLabels.forEach((label) => {
+    const cx = X(label.x)
+    const cy = Y(label.z)
+    const nameSize = Math.max(7, 2.8 * (sheet?.k || 1))
+    const w = Math.max(String(label.text || '').length * nameSize * 0.64, (label.w || 0.6) * ppm, nameSize * 2) * 1.12
+    const h = Math.max(nameSize * (label.area ? 2.45 : 1.35), (label.h || 0.3) * ppm) * 1.15
+    obstacles.push({ x: cx - w / 2, y: cy - h / 2, w, h, kind: 'room' })
   })
-  bestTrunk.forEach((item) => leaders.push(item))
+  const dimFont = Math.max(6.5, 2.35 * (sheet?.k || 1))
+  dimensions.forEach((dim) => {
+    const off = Number.isFinite(dim.offset) ? dim.offset : 0
+    const x1 = X(dim.x1 + (dim.nx || 0) * off)
+    const y1 = Y(dim.z1 + (dim.nz || 0) * off)
+    const x2 = X(dim.x2 + (dim.nx || 0) * off)
+    const y2 = Y(dim.z2 + (dim.nz || 0) * off)
+    const textT = Number.isFinite(dim.textT) ? dim.textT : 0.5
+    const cx = x1 + (x2 - x1) * textT
+    const cy = y1 + (y2 - y1) * textT
+    const w = Math.max(dimFont * 1.8, String(dim.label || '').length * dimFont * 0.62)
+    const h = dimFont * 1.35
+    obstacles.push({ x: cx - w / 2, y: cy - h / 2, w, h, kind: 'dim' })
+  })
+  drawnNodes.forEach((node) => {
+    if (!live(node.system)) return
+    const cx = X(node.x)
+    const cy = Y(node.z)
+    const flowPad = node.flow && !quietLabels ? flowFont * 6.2 : 0
+    const wide = (node.kind === 'ahu' ? 40 : node.kind === 'hood' ? 30 : node.kind === 'silencer' ? 26 : 20) + flowPad
+    const tall = node.kind === 'ahu' ? 36 : 22
+    obstacles.push({ x: cx - (wide - flowPad) / 2, y: cy - tall / 2, w: wide, h: tall, kind: 'symbol' })
+  })
   const callouts = quietLabels ? [] : manifoldCallouts(plan)
   const legendX = legendBox?.x ?? (sheet.x + sheet.w - 176)
   const legendW = Math.max(108, legendBox?.w ?? 160)
@@ -586,6 +618,42 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   let legendY = legendBox?.y ?? (sheet.y + 74)
   if (legendBox?.maxBottom && legendY + legendH > legendBox.maxBottom) {
     legendY = Math.max(legendBox.y ?? sheet.y + 8, legendBox.maxBottom - legendH)
+  }
+  const legendScale = Math.min(1, 13 / (10 * Math.max(zoom, 0.2)))
+  if (legendH > 0) obstacles.push({ x: legendX, y: legendY, w: legendW * legendScale, h: legendH * legendScale, kind: 'legend' })
+  if (!quietLabels) {
+    const segments = []
+    drawn.forEach(({ run, points }) => {
+      if (!live(run.system) || !['trunk', 'main', 'header'].includes(run.role) || !run.size || points.length < 2) return
+      let best = null
+      for (let i = 0; i < points.length - 1; i += 1) {
+        const a = points[i]
+        const b = points[i + 1]
+        const len = Math.hypot(b.x - a.x, b.z - a.z)
+        if (!best || len > best.len) best = { len, a, b }
+      }
+      if (!best || best.len < 0.85) return
+      const sizeText = run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`
+      const text = run.system === 'iv' && run.flow ? `${sizeText}  ${Math.round(run.flow)} l/s` : sizeText
+      segments.push({
+        key: run.id,
+        kind: run.kind,
+        text,
+        color: runColor(run),
+        ax: X(best.a.x),
+        ay: Y(best.a.z),
+        bx: X(best.b.x),
+        by: Y(best.b.z),
+        len: best.len,
+      })
+    })
+    const kindOrder = { tulo: 0, poisto: 1, ulko: 2, jate: 3 }
+    segments.sort((a, b) => (kindOrder[a.kind] ?? 9) - (kindOrder[b.kind] ?? 9) || b.len - a.len)
+    placeLineLabels(segments, obstacles, {
+      font: labelFont,
+      minLength: labelFont * 2,
+      bounds: view,
+    }).forEach((item) => leaders.push(item))
   }
   return (
     <g data-testid="service-layer">
@@ -725,19 +793,14 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           </g>
         )
       })}
-      {!quietLabels && leaders.map((item, index) => {
-        const ax = X(item.mid.x)
-        const ay = Y(item.mid.z)
-        const dir = index % 2 === 0 ? 1 : -1
-        const bx = ax + item.normal.x * 28 * dir
-        const by = ay + item.normal.z * 28 * dir
-        return (
-          <g key={item.text} style={{ pointerEvents: 'none' }}>
-            <line x1={ax} y1={ay} x2={bx} y2={by} stroke={item.color} strokeWidth={0.7} />
-            <text x={bx} y={by - 3} fontSize="9" fontWeight="700" fill={item.color} stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{item.text}</text>
-          </g>
-        )
-      })}
+      {!quietLabels && leaders.map((item) => (
+        <g key={item.key || item.text} style={{ pointerEvents: 'none' }}>
+          {item.leader && (
+            <line x1={item.anchorX} y1={item.anchorY} x2={item.x} y2={item.y} stroke={item.color} strokeWidth={ink} />
+          )}
+          <text data-testid="duct-label" x={item.x} y={item.y} textAnchor="middle" dominantBaseline="central" fontSize={labelFont} fontWeight="650" fill={item.color} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{item.text}</text>
+        </g>
+      ))}
       {fittings.bends.map((point, index) => (
         <circle key={`bend-${index}`} cx={X(point.x)} cy={Y(point.z)} r="2.2" fill="#fff" stroke="#1c1917" strokeWidth="0.8" style={{ pointerEvents: 'none' }} />
       ))}
@@ -759,10 +822,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
             ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
             : <NodeSymbol node={node} />}
           {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
-            <g style={{ pointerEvents: 'none' }}>
-              <line x1="5" y1="-3" x2="14" y2="-14" stroke={nodeColor(node)} strokeWidth="0.7" />
-              <text x="16" y="-14" fontSize="8" fontWeight="700" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth="2.2" paintOrder="stroke">{node.flow} l/s</text>
-            </g>
+            <text data-testid="valve-flow" x={node.kind === 'hood' ? 16 : node.kind === 'ahu' ? 22 : 10} y="0.5" textAnchor="start" dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
           ) : null}
           {node.system === 'electric' && node.circuit && node.kind !== 'panel' && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
             <text data-testid="circuit-badge" x="11" y="-2" fontSize="9" fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{`R${node.circuit}`}</text>
@@ -780,11 +840,11 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         />
       )}
       {legendH > 0 && (
-        <g data-testid="service-legend" style={{ pointerEvents: 'none' }}>
-          <rect x={legendX} y={legendY} width={legendW} height={legendH} fill="#ffffff" stroke="#1c1917" strokeWidth="1" />
-          <text x={legendX + 8} y={legendY + 14} fontSize="10" fontWeight="700" fill="#1c1917">Selite</text>
+        <g data-testid="service-legend" transform={`translate(${legendX} ${legendY}) scale(${legendScale})`} style={{ pointerEvents: 'none' }}>
+          <rect width={legendW} height={legendH} fill="#ffffff" stroke="#1c1917" strokeWidth={1 / legendScale} />
+          <text x={8} y={14} fontSize="10" fontWeight="700" fill="#1c1917">Selite</text>
           {legend.map((item, index) => (
-            <g key={`${item.system}-${item.name}`} transform={`translate(${legendX + 8} ${legendY + 22 + index * 15})`}>
+            <g key={`${item.system}-${item.name}`} transform={`translate(8 ${22 + index * 15})`}>
               <rect width="12" height="8" fill={item.color} stroke="#44403c" strokeWidth="0.5" />
               <text x="18" y="8" fontSize="10" fill="#1c1917">{item.name}</text>
             </g>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CAD_COMMANDS, CAD_LAYERS, sharedProperties } from '@/lib/cadEdit'
+import { CAD_COMMANDS, CAD_LAYERS, mirrorOpenings, sharedProperties } from '@/lib/cadEdit'
 import { CadItem, CadMenu, CadSep, CadStyles, Flyout, Segmented } from './CadMenu'
 import { MultiProperties } from './CadTools'
 import {
@@ -14,7 +14,10 @@ import {
   ROOF_TYPES,
   STANDARD_SCALES,
   WALL_STRUCTURES,
+  addFacadeSplit,
   addOpening,
+  applyFacadePreset,
+  assignFacadeCell,
   applyRoomType,
   defaultRoomSetpoint,
   faceSide,
@@ -32,7 +35,6 @@ import {
   deleteWall,
   duplicateFixture,
   fixtureTemplate,
-  flipOpening,
   mirrorFixture,
   removeFixture,
   rotateFixture,
@@ -440,20 +442,39 @@ export function RoofFields({ plan, onApply }) {
   )
 }
 
-function ZoneFields({ plan, id, onApply, onCommit }) {
+function ZoneFields({ plan, id, selection, onApply, onCommit }) {
   const { t } = usePlanLocale(plan)
-  const zone = (plan.facades || []).find((item) => item.id === id)
-  if (!zone) return null
-  const look = surfaceLook(plan, zone.materialId, { color: zone.color, colorCode: zone.colorCode })
+  const stored = (plan.facades || []).find((item) => item.id === id)
+  const cell = stored || selection
+  if (!cell?.side && !stored) return null
+  const target = {
+    side: cell.side || selection?.side,
+    u0: selection?.u0 ?? cell.u0,
+    u1: selection?.u1 ?? cell.u1,
+    y0: selection?.y0 ?? cell.y0,
+    y1: selection?.y1 ?? cell.y1,
+    materialId: selection?.materialId || cell.materialId,
+    zoneId: stored?.id || selection?.zoneId || null,
+    color: cell.color,
+    colorCode: cell.colorCode,
+  }
+  if (!target.side || !Number.isFinite(target.u0)) return null
+  const look = surfaceLook(plan, target.materialId, { color: target.color, colorCode: target.colorCode })
+  const paint = (patch) => onCommit(assignFacadeCell(plan, target, patch))
   return (
     <div data-testid="zone-fields">
+      <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 8 }}>Julkisivuvyöhyke</div>
       <Field label="Materiaali">
-        <select data-testid="zone-material" style={inputStyle} value={zone.materialId} onChange={(event) => onApply(updateFacadeZone(plan, id, { materialId: event.target.value }))}>
+        <select data-testid="zone-material" style={inputStyle} value={target.materialId || 'brick-yellow'} onChange={(event) => paint({ materialId: event.target.value })}>
           {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.group}: {item.name}</option>)}
         </select>
       </Field>
-      <ColorField testid="zone-color" label={t('finish.paint')} customLabel={t('finish.custom')} color={zone.color || look.color} onChange={({ color, code }) => onApply(updateFacadeZone(plan, id, { color, colorCode: code }))} />
-      <MenuBtn testid="ctx-delete" onClick={() => onCommit(deleteFacadeZone(plan, id))}>Poista vyöhyke</MenuBtn>
+      <ColorField testid="zone-color" label={t('finish.paint')} customLabel={t('finish.custom')} color={target.color || look.color} onChange={({ color, code }) => paint({ materialId: target.materialId, color, colorCode: code })} />
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+        <MenuBtn testid="zone-above" onClick={() => onCommit(applyFacadePreset(plan, target.side, 'above', 'wood-horizontal'))}>Ikkunan yläpuoli</MenuBtn>
+        <MenuBtn testid="zone-band" onClick={() => onCommit(applyFacadePreset(plan, target.side, 'band', 'brick-yellow'))}>Ikkunoiden välinen kaista</MenuBtn>
+      </div>
+      {stored && <MenuBtn testid="ctx-delete" onClick={() => onCommit(deleteFacadeZone(plan, stored.id))}>Poista vyöhyke</MenuBtn>}
     </div>
   )
 }
@@ -538,7 +559,7 @@ export function SelectionPanel({ plan, selection, picks, onApply, onCommit, onCl
   else if (selection.kind === 'roof') body = <RoofFields plan={plan} onApply={onApply} />
   else if (selection.kind === 'house') body = <HouseSettings plan={plan} onApply={onApply} />
   else if (selection.kind === 'yard') body = <YardFields plan={plan} selection={selection} onCommit={onCommit} />
-  else if (selection.kind === 'zone') body = <ZoneFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
+  else if (selection.kind === 'zone') body = <ZoneFields plan={plan} id={selection.id} selection={selection} onApply={onApply} onCommit={onCommit} />
   else if (selection.kind === 'service') {
     body = (
       <ServiceMenu
@@ -775,6 +796,45 @@ function WallFields({ plan, id, onApply, onCommit }) {
   )
 }
 
+const handBtn = (on) => ({
+  flex: 1,
+  height: 28,
+  padding: '0 10px',
+  borderRadius: 6,
+  border: `1px solid ${on ? '#0f766e' : '#d6d3d1'}`,
+  background: on ? '#0f766e' : '#fff',
+  color: on ? '#f0fdfa' : '#1c1917',
+  fontSize: 12,
+  fontWeight: 750,
+  cursor: 'pointer',
+})
+
+export function DoorHandControls({ swing = 1, inward = false, onSwing, onInward, compact = false }) {
+  const left = (swing || 1) >= 0
+  const choice = (testid, label, on, click) => (
+    <button type="button" data-testid={testid} aria-pressed={on} onClick={click} style={{ ...handBtn(on), flex: compact ? '0 0 auto' : 1, minWidth: compact ? 58 : 0 }}>{label}</button>
+  )
+  const row = (testid, label, shortcut, buttons) => (
+    <div data-testid={testid} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: compact ? 0 : 8 }}>
+      <span style={{ fontSize: 12, fontWeight: 750, color: '#1c1917', whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ display: 'flex', gap: 4, flex: compact ? '0 0 auto' : 1 }}>{buttons}</span>
+      {shortcut && <span style={{ marginLeft: compact ? 0 : 'auto', fontSize: 11, fontWeight: 650, color: '#a8a29e', whiteSpace: 'nowrap' }}>{shortcut}</span>}
+    </div>
+  )
+  return (
+    <div data-testid="door-hand" style={{ display: compact ? 'flex' : 'block', alignItems: 'center', gap: compact ? 14 : 0, marginBottom: compact ? 0 : 4 }}>
+      {row('door-handedness', 'Kätisyys:', compact ? null : 'F', <>
+        {choice('door-hand-left', 'Vasen', left, () => onSwing?.(1))}
+        {choice('door-hand-right', 'Oikea', !left, () => onSwing?.(-1))}
+      </>)}
+      {row('door-leaf', 'Aukeaa:', compact ? null : 'Shift+F', <>
+        {choice('door-leaf-in', 'Sisään', Boolean(inward), () => onInward?.(true))}
+        {choice('door-leaf-out', 'Ulos', !inward, () => onInward?.(false))}
+      </>)}
+    </div>
+  )
+}
+
 function OpeningFields({ plan, id, onApply, onCommit }) {
   const { t } = usePlanLocale(plan)
   const opening = (plan.openings || []).find((item) => item.id === id)
@@ -782,8 +842,20 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
   const patch = (next) => onApply(refreshHeat(updateOpening(plan, id, next)))
   const wall = (plan.walls || []).find((item) => item.id === opening.wallId)
   const compass = wall && wall.kind !== 'interior' ? wallBearing(plan, wall) : null
+  const left = (opening.swing || 1) >= 0
+  const setHand = (swing) => {
+    if ((swing >= 0) === left) return
+    onCommit(updateOpening(plan, id, { swing }))
+  }
+  const setLeaf = (inward) => {
+    if (Boolean(opening.inward) === inward) return
+    onCommit(updateOpening(plan, id, { inward }))
+  }
   return (
     <div>
+      {opening.kind === 'door' && (
+        <DoorHandControls swing={opening.swing} inward={opening.inward} onSwing={setHand} onInward={setLeaf} />
+      )}
       {compass && (
         <div data-testid="window-compass" data-compass={compass.code} style={{ fontSize: 13, fontWeight: 750, marginBottom: 8 }}>
           {t('opening.compass')}: {compass.code} · {t(`compass.${compass.code}`)}
@@ -837,12 +909,6 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
           )}
         </>
       )}
-      <div style={{ display: 'flex', gap: 4 }}>
-        <MenuBtn testid="opening-swing-left" onClick={() => onCommit(updateOpening(plan, id, { swing: 1 }))}>{t('opening.swingLeft')}</MenuBtn>
-        <MenuBtn testid="opening-swing-right" onClick={() => onCommit(updateOpening(plan, id, { swing: -1 }))}>{t('opening.swingRight')}</MenuBtn>
-        <MenuBtn testid="opening-leaf-out" onClick={() => onCommit(updateOpening(plan, id, { inward: false }))}>{t('opening.out')}</MenuBtn>
-        <MenuBtn testid="opening-leaf-in" onClick={() => onCommit(updateOpening(plan, id, { inward: true }))}>{t('opening.in')}</MenuBtn>
-      </div>
     </div>
   )
 }
@@ -1452,9 +1518,13 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
     body = (
       <>
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        {opening.kind === 'door' && (
+          <>
+            <CadItem testid="ctx-handedness" shortcut="F" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }]))}>Vaihda kätisyys</CadItem>
+            <CadItem testid="ctx-leaf" shortcut="Shift+F" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }], { direction: true }))}>Vaihda aukeamissuunta</CadItem>
+          </>
+        )}
         <CadEditItems onNavigate={onNavigate} />
-        <CadSep />
-        <CadItem testid="ctx-flip" onClick={() => act(flipOpening(plan, opening.id))}>Käännä</CadItem>
         <CadSep />
         <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteOpening(plan, opening.id), true)}>Poista</CadItem>
       </>
@@ -1503,19 +1573,24 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
         <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(removeFixture(plan, fixture.id))}>Poista</CadItem>
       </>
     )
-  } else if (menu.kind === 'zone' && zone) {
-    const current = CLADDING.find((item) => item.id === zone.materialId)
+  } else if (menu.kind === 'zone' && (zone || menu.side)) {
+    const cell = zone || { id: menu.id, side: menu.side, u0: menu.u0, u1: menu.u1, y0: menu.y0, y1: menu.y1, materialId: menu.materialId, zoneId: menu.zoneId }
+    const current = CLADDING.find((item) => item.id === cell.materialId)
     title = current ? `Julkisivuvyöhyke: ${current.name}` : 'Julkisivuvyöhyke'
     body = (
       <>
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
         <Flyout label="Verhous" testid="ctx-cladding">
           {CLADDING.map((item) => (
-            <CadItem key={item.id} onClick={() => onApply(updateFacadeZone(plan, zone.id, { materialId: item.id }))}>{item.name}</CadItem>
+            <CadItem key={item.id} onClick={() => onCommit(assignFacadeCell(plan, cell, { materialId: item.id }))}>{item.name}</CadItem>
           ))}
         </Flyout>
+        <CadItem testid="ctx-above" onClick={() => act(applyFacadePreset(plan, cell.side, 'above', 'wood-horizontal'))}>Ikkunan yläpuoli</CadItem>
+        <CadItem testid="ctx-band" onClick={() => act(applyFacadePreset(plan, cell.side, 'band', 'brick-yellow'))}>Ikkunoiden välinen kaista</CadItem>
         <CadSep />
-        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteFacadeZone(plan, zone.id))}>Poista</CadItem>
+        <CadItem testid="ctx-split-h" onClick={() => act(addFacadeSplit(plan, cell.side, 'h', Number.isFinite(menu.y) ? menu.y : (cell.y0 + cell.y1) / 2))}>Jaa vaakaviivalla</CadItem>
+        <CadItem testid="ctx-split-v" onClick={() => act(addFacadeSplit(plan, cell.side, 'v', Number.isFinite(menu.u) ? menu.u : (cell.u0 + cell.u1) / 2))}>Jaa pystyviivalla</CadItem>
+        {zone && <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteFacadeZone(plan, zone.id))}>Poista</CadItem>}
       </>
     )
   } else if (menu.kind === 'roof') {
