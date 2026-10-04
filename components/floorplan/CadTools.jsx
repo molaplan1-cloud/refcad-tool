@@ -109,13 +109,15 @@ export function CadPrompt({ command, readout, onChange, onApply, onCancel }) {
   const factor = command.name === 'scale'
   return (
     <div data-testid="cad-prompt" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-      <strong>{cmd?.label || command.name}</strong>
+      <strong>{command.name === 'shift-wall' ? 'Siirrä seinä' : (cmd?.label || command.name)}</strong>
       <span style={{ color: '#57534e' }}>
-        {command.name === 'mirror'
-          ? (command.step === 'base' ? 'Napsauta peilausakselin alkupiste.' : 'Napsauta peilausakselin loppupiste.')
-          : command.name === 'rotate'
-            ? (command.step === 'base' ? 'Napsauta kiertopiste.' : 'Napsauta suunta tai näppäile kulma.')
-            : command.step === 'window' ? 'Vedä ylittävä ikkuna kärkipisteiden yli.' : command.step === 'base' ? 'Napsauta peruspiste.' : command.step === 'source' ? 'Napsauta kohde, jonka ominaisuudet kopioidaan.' : 'Napsauta kohde tai näppäile arvo.'}
+        {command.name === 'shift-wall'
+          ? (command.step === 'from' ? 'Mistä: napsauta piste seinällä.' : 'Mihin: napsauta viite tai näppäile siirto.')
+          : command.name === 'mirror'
+            ? (command.step === 'base' ? 'Napsauta peilausakselin alkupiste.' : 'Napsauta peilausakselin loppupiste.')
+            : command.name === 'rotate'
+              ? (command.step === 'base' ? 'Napsauta kiertopiste.' : 'Napsauta suunta tai näppäile kulma.')
+              : command.step === 'window' ? 'Vedä ylittävä ikkuna kärkipisteiden yli.' : command.step === 'base' ? 'Napsauta peruspiste.' : command.step === 'source' ? 'Napsauta kohde, jonka ominaisuudet kopioidaan.' : 'Napsauta kohde tai näppäile arvo.'}
       </span>
       {distance && (
         <input data-testid="cad-value" inputMode="decimal" placeholder="mm" value={command.value || ''} onChange={(event) => onChange({ value: event.target.value })} onKeyDown={(event) => onFieldKey(event, onApply, onCancel)} style={{ width: 72, height: 24, borderRadius: 6, border: '1px solid #d6d3d1' }} />
@@ -125,6 +127,15 @@ export function CadPrompt({ command, readout, onChange, onApply, onCancel }) {
       )}
       {factor && (
         <input data-testid="cad-value" inputMode="decimal" placeholder="kerroin" value={command.value || ''} onChange={(event) => onChange({ value: event.target.value })} onKeyDown={(event) => onFieldKey(event, onApply, onCancel)} style={{ width: 72, height: 24, borderRadius: 6, border: '1px solid #d6d3d1' }} />
+      )}
+      {command.name === 'shift-wall' && (
+        <>
+          <select data-testid="shift-mode" value={command.distanceMode || 'offset'} onChange={(event) => onChange({ distanceMode: event.target.value })} style={{ height: 24 }}>
+            <option value="offset">Siirto</option>
+            <option value="distance">Etäisyys</option>
+          </select>
+          <input data-testid={command.distanceMode === 'distance' ? 'shift-distance' : 'shift-offset'} inputMode="decimal" placeholder="mm" value={command.value || ''} onChange={(event) => onChange({ value: event.target.value })} onKeyDown={(event) => onFieldKey(event, onApply, onCancel)} style={{ width: 72, height: 24, borderRadius: 6, border: '1px solid #d6d3d1' }} />
+        </>
       )}
       {command.name === 'copy' && (
         <input data-testid="cad-copies" type="number" min="1" value={command.copies || 1} onChange={(event) => onChange({ copies: Number(event.target.value) || 1 })} onKeyDown={(event) => onFieldKey(event, onApply, onCancel)} style={{ width: 52, height: 24, borderRadius: 6, border: '1px solid #d6d3d1' }} title="Kopioita" />
