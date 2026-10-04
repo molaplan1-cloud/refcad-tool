@@ -2,21 +2,24 @@
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { Edges, Html, Line, OrbitControls } from '@react-three/drei'
+import { ContactShadows, Edges, Html, Line, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
+import { finishesOf } from '@/lib/finishes'
 import {
-  claddingOf,
   fixtureTemplate,
-  formatArea,
   materialOf,
+  openingColour,
   planBounds,
+  plinthLook,
   pointInPolygon,
   resolveFaceMaterial,
-  roomForWallSide,
   roofFaces,
+  roofLook,
   roofModel,
   roofOutline,
+  roomForWallSide,
   segmentLength,
+  surfaceLook,
   thicknessOf,
   visibleRooms,
   wallCladdingPieces,
@@ -24,7 +27,12 @@ import {
   zoneCovering,
 } from '@/lib/floorplan'
 import Services3D from './Services3D'
+import YardScene from './YardScene'
+import { hasYard, sceneBounds } from '@/lib/yard'
+import { yardHasUnderground } from '@/lib/groundworks'
 import { layerVisible } from '@/lib/services'
+import { heatingLabelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { chimneyKind, chimneyTop, drawingOf } from '@/lib/chimney'
 
 const textureCache = new Map()
 
@@ -92,57 +100,46 @@ function finishTexture(group, id) {
     }
   }
   const tex = new THREE.CanvasTexture(canvas)
-  tex.wrapS = THREE.RepeatWrapping
-  tex.wrapT = THREE.RepeatWrapping
-  tex.colorSpace = THREE.SRGBColorSpace
+  bindTexture(tex, { color: true })
   textureCache.set(key, tex)
   return tex
 }
 
-function claddingTexture(id) {
-  const item = claddingOf(id)
-  const key = `clad:${item.id}`
-  if (textureCache.has(key)) return textureCache.get(key)
+function paintCanvas(look) {
   const canvas = document.createElement('canvas')
   canvas.width = 128
   canvas.height = 128
   const ctx = canvas.getContext('2d')
-  ctx.fillStyle = item.color
+  ctx.fillStyle = look.color || '#c4a484'
   ctx.fillRect(0, 0, 128, 128)
-  ctx.strokeStyle = 'rgba(40,24,16,0.45)'
-  ctx.lineWidth = 2
-  if (item.pattern === 'brick') {
-    const course = 16
-    for (let y = 0; y <= 128; y += course) {
-      ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(128, y)
-      ctx.stroke()
-      const shift = Math.round(y / course) % 2 ? 16 : 0
-      for (let x = -32 + shift; x < 128; x += 32) {
-        ctx.beginPath()
-        ctx.moveTo(x, y)
-        ctx.lineTo(x, y + course)
-        ctx.stroke()
+  const joint = look.painted ? 'rgba(70,55,40,0.28)' : (look.mortar || 'rgba(90,70,50,0.7)')
+  ctx.strokeStyle = joint
+  ctx.lineWidth = look.painted ? 1.2 : 2
+  if (look.pattern === 'brick') {
+    ctx.fillStyle = look.mortar || '#c8b8a4'
+    ctx.fillRect(0, 0, 128, 128)
+    const brickW = 52
+    const brickH = 22
+    const mortar = 8
+    for (let row = 0, y = mortar; y < 128; row += 1, y += brickH + mortar) {
+      const shift = row % 2 ? -(brickW + mortar) / 2 : 0
+      for (let x = shift; x < 128; x += brickW + mortar) {
+        const tone = 1.02 + ((row * 3 + Math.round(x)) % 5) * 0.05
+        ctx.fillStyle = shadeHex(look.color || '#9c341f', tone)
+        ctx.fillRect(x, y, brickW, brickH)
       }
     }
-  } else if (item.pattern === 'boards-h') {
-    for (let y = 10; y < 128; y += 10) {
-      ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(128, y)
-      ctx.stroke()
+  } else if (look.pattern === 'boards-h' || look.pattern === 'boards-v' || look.pattern === 'batten') {
+    ctx.fillStyle = 'rgba(0,0,0,0.18)'
+    if (look.pattern === 'boards-h') ctx.fillRect(0, 116, 128, 12)
+    else ctx.fillRect(116, 0, 12, 128)
+    if (look.pattern === 'batten') {
+      ctx.fillStyle = 'rgba(255,255,255,0.18)'
+      ctx.fillRect(108, 0, 6, 128)
     }
-  } else if (item.pattern === 'boards-v' || item.pattern === 'batten') {
-    const step = item.pattern === 'batten' ? 28 : 12
-    for (let x = step; x < 128; x += step) {
-      ctx.lineWidth = item.pattern === 'batten' && Math.round(x / step) % 2 === 0 ? 4 : 2
-      ctx.beginPath()
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, 128)
-      ctx.stroke()
-    }
-  } else if (item.pattern === 'stone') {
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'
+    ctx.fillRect(0, 0, 128, 8)
+  } else if (look.pattern === 'stone') {
     ctx.strokeRect(4, 4, 36, 24)
     ctx.strokeRect(44, 6, 40, 22)
     ctx.strokeRect(88, 4, 32, 26)
@@ -151,36 +148,204 @@ function claddingTexture(id) {
     ctx.strokeRect(6, 72, 40, 30)
     ctx.strokeRect(52, 74, 34, 28)
     ctx.strokeRect(92, 70, 28, 34)
-  } else if (item.pattern === 'board') {
+  } else if (look.pattern === 'board') {
     ctx.strokeRect(2, 2, 60, 60)
     ctx.strokeRect(66, 2, 60, 60)
     ctx.strokeRect(2, 66, 60, 60)
     ctx.strokeRect(66, 66, 60, 60)
+  } else if (look.pattern === 'concrete') {
+    ctx.fillStyle = 'rgba(0,0,0,0.12)'
+    for (let i = 0; i < 90; i += 1) ctx.fillRect((i * 47) % 128, (i * 29) % 128, 2, 2)
+  } else if (look.pattern === 'seam' || look.pattern === 'corrugated' || look.pattern === 'tile' || look.pattern === 'tile-metal' || look.pattern === 'felt') {
+    ctx.strokeStyle = 'rgba(0,0,0,0.28)'
+    const step = look.pattern === 'tile' || look.pattern === 'tile-metal' ? 18 : look.pattern === 'felt' ? 0 : 16
+    if (look.pattern === 'felt') {
+      ctx.fillStyle = 'rgba(0,0,0,0.08)'
+      for (let i = 0; i < 70; i += 1) ctx.fillRect((i * 19) % 128, (i * 23) % 128, 3, 2)
+    } else if (look.pattern === 'tile' || look.pattern === 'tile-metal') {
+      const tileW = look.pattern === 'tile-metal' ? 32 : 28
+      const tileH = 22
+      for (let row = 0, y = 2; y < 128; row += 1, y += tileH) {
+        const shift = row % 2 ? tileW / 2 : 0
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)'
+        ctx.beginPath()
+        ctx.moveTo(0, y + tileH - 2)
+        ctx.lineTo(128, y + tileH - 2)
+        ctx.stroke()
+        for (let x = -tileW + shift; x < 128; x += tileW) {
+          ctx.beginPath()
+          ctx.moveTo(x, y + 4)
+          ctx.quadraticCurveTo(x + tileW / 2, y - 2, x + tileW, y + 4)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.moveTo(x + tileW, y + 4)
+          ctx.lineTo(x + tileW, y + tileH - 2)
+          ctx.stroke()
+        }
+      }
+    } else {
+      for (let x = step; x < 128; x += step) {
+        ctx.beginPath()
+        ctx.moveTo(x, 0)
+        ctx.lineTo(x, 128)
+        ctx.stroke()
+      }
+    }
   } else {
-    ctx.fillStyle = 'rgba(80,60,40,0.16)'
+    ctx.fillStyle = 'rgba(80,60,40,0.12)'
     for (let i = 0; i < 40; i += 1) ctx.fillRect((i * 37) % 128, (i * 19) % 128, 2, 2)
   }
-  const tex = new THREE.CanvasTexture(canvas)
+  const tex = bindTexture(new THREE.CanvasTexture(canvas), { color: true })
+  return tex
+}
+
+function bindTexture(tex, { color = false, anisotropy = 16 } = {}) {
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
-  tex.colorSpace = THREE.SRGBColorSpace
+  if (color) tex.colorSpace = THREE.SRGBColorSpace
+  tex.generateMipmaps = true
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.anisotropy = anisotropy
+  tex.needsUpdate = true
+  return tex
+}
+
+function brickMaps(look) {
+  const moduleW = 0.285
+  const moduleH = 0.085
+  const cols = 4
+  const rows = 8
+  const worldW = cols * moduleW
+  const worldH = rows * moduleH
+  const width = 1024
+  const height = Math.round(width * (worldH / worldW))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#322f2c'
+  ctx.fillRect(0, 0, width, height)
+  const stepX = width / cols
+  const stepY = height / rows
+  const brickW = stepX * (275 / 285)
+  const brickH = stepY * (70 / 85)
+  const ox = (stepX - brickW) / 2
+  const oy = (stepY - brickH) / 2
+  const bump = document.createElement('canvas')
+  bump.width = width
+  bump.height = height
+  const bctx = bump.getContext('2d')
+  bctx.fillStyle = '#2a2a2a'
+  bctx.fillRect(0, 0, width, height)
+  bctx.fillStyle = '#d8d8d8'
+  for (let row = 0; row < rows; row += 1) {
+    const shift = row % 2 ? stepX / 2 : 0
+    for (let col = -1; col <= cols; col += 1) {
+      const tone = 0.93 + ((row * 5 + col * 3) % 7) * 0.018
+      ctx.fillStyle = shadeHex(look.color || '#9c341f', tone)
+      const x = col * stepX + shift + ox
+      const y = row * stepY + oy
+      ctx.fillRect(x, y, brickW, brickH)
+      bctx.fillRect(x, y, brickW, brickH)
+    }
+  }
+  const map = bindTexture(new THREE.CanvasTexture(canvas), { color: true })
+  const bumpMap = bindTexture(new THREE.CanvasTexture(bump))
+  map.userData = { bump: bumpMap, worldW, worldH }
+  return map
+}
+
+function shadeHex(hex, tone) {
+  const raw = String(hex || '#9c341f').replace('#', '')
+  const full = raw.length === 3 ? raw.split('').map((ch) => ch + ch).join('') : raw.padEnd(6, '0')
+  const channel = (index) => Math.max(0, Math.min(255, Math.round(parseInt(full.slice(index, index + 2), 16) * tone)))
+  return `#${[0, 2, 4].map((index) => channel(index).toString(16).padStart(2, '0')).join('')}`
+}
+
+function repeatedCladding(look, span, height) {
+  const board = Math.max(0.07, (look.boardWidthMm || 145) / 1000)
+  const brick = look.pattern === 'brick'
+  const unitX = brick ? 1.14 : look.pattern === 'boards-v' || look.pattern === 'batten' ? board * 4 : look.pattern === 'seam' || look.pattern === 'corrugated' ? 0.8 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.64 : 0.6
+  const unitY = brick ? 0.68 : look.pattern === 'boards-h' ? board * 4 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.36 : look.pattern === 'seam' ? 0.8 : 0.4
+  const rx = Math.max(0.5, Math.round((span / unitX) * 4) / 4)
+  const ry = Math.max(0.5, Math.round((height / unitY) * 4) / 4)
+  const key = `clad-repeat:${look.pattern}:${look.color}:${look.mortar}:${look.painted ? 1 : 0}:${look.boardWidthMm}:${rx}:${ry}`
+  if (textureCache.has(key)) return textureCache.get(key)
+  const tex = brick ? brickMaps(look) : paintCanvas(look)
+  tex.repeat.set(rx, ry)
+  if (tex.userData?.bump) tex.userData.bump.repeat.set(rx, ry)
+  tex.needsUpdate = true
   textureCache.set(key, tex)
   return tex
 }
 
-function repeatedCladding(id, span, height) {
-  const item = claddingOf(id)
-  const unitX = item.pattern === 'brick' ? 0.48 : item.pattern === 'boards-v' || item.pattern === 'batten' ? 0.24 : 0.6
-  const unitY = item.pattern === 'brick' ? 0.26 : item.pattern === 'boards-h' ? 0.16 : 0.4
-  const rx = Math.max(1, Math.round((span / unitX) * 2) / 2)
-  const ry = Math.max(1, Math.round((height / unitY) * 2) / 2)
-  const key = `clad-repeat:${item.id}:${rx}:${ry}`
+function GroundShade({ cx, cz, w, h }) {
+  const map = useMemo(() => groundShade(), [])
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.008, cz]} raycast={noopRaycast}>
+      <planeGeometry args={[w, h]} />
+      <meshBasicMaterial map={map} transparent depthWrite={false} />
+    </mesh>
+  )
+}
+
+function groundShade() {
+  const key = 'ground-shade'
   if (textureCache.has(key)) return textureCache.get(key)
-  const tex = claddingTexture(item.id).clone()
-  tex.wrapS = THREE.RepeatWrapping
-  tex.wrapT = THREE.RepeatWrapping
-  tex.repeat.set(rx, ry)
+  const canvas = document.createElement('canvas')
+  canvas.width = 256
+  canvas.height = 256
+  const ctx = canvas.getContext('2d')
+  const fade = ctx.createRadialGradient(128, 128, 36, 128, 128, 124)
+  fade.addColorStop(0, 'rgba(55,48,40,0.38)')
+  fade.addColorStop(0.62, 'rgba(55,48,40,0.16)')
+  fade.addColorStop(1, 'rgba(55,48,40,0)')
+  ctx.fillStyle = fade
+  ctx.fillRect(0, 0, 256, 256)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
   tex.needsUpdate = true
+  textureCache.set(key, tex)
+  return tex
+}
+
+function roofSurface(finish) {
+  const seam = finish.pattern === 'seam' || finish.pattern === 'corrugated'
+  const key = `roof-surface:${finish.pattern}:${finish.color}:${seam ? 'seam' : 'tile'}`
+  if (textureCache.has(key)) return textureCache.get(key)
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 512
+  const ctx = canvas.getContext('2d')
+  const base = finish.color || '#7f1d1d'
+  ctx.fillStyle = base
+  ctx.fillRect(0, 0, 512, 512)
+  if (seam) {
+    for (let x = 0; x < 512; x += 128) {
+      ctx.fillStyle = shadeHex(base, 0.68)
+      ctx.fillRect(x, 0, 14, 512)
+      ctx.fillStyle = shadeHex(base, 1.16)
+      ctx.fillRect(x + 14, 0, 5, 512)
+    }
+  } else {
+    const tileW = 128
+    const tileH = 80
+    for (let row = 0, y = 0; y < 520; row += 1, y += tileH) {
+      const shift = row % 2 ? tileW / 2 : 0
+      ctx.fillStyle = shadeHex(base, 0.42)
+      ctx.fillRect(0, y + tileH - 16, 512, 16)
+      for (let x = -tileW + shift; x < 512; x += tileW) {
+        ctx.fillStyle = shadeHex(base, 0.96 + ((row * 3 + x) % 5) * 0.015)
+        ctx.fillRect(x + 2, y + 2, tileW - 4, tileH - 18)
+        ctx.fillStyle = shadeHex(base, 0.72)
+        ctx.fillRect(x + tileW - 3, y + 2, 2, tileH - 18)
+      }
+    }
+  }
+  const tex = bindTexture(new THREE.CanvasTexture(canvas), { color: true })
+  const world = seam ? 1.6 : 1.28
+  tex.repeat.set(1 / world, 1 / world)
   textureCache.set(key, tex)
   return tex
 }
@@ -229,7 +394,7 @@ function outlineScale(args, mark) {
   return args.map((size) => (Math.max(size, 0.02) + pad * 2) / Math.max(size, 0.02))
 }
 
-function Solid({ args, position, rotation, color, map, opacity = 1, edges = true, pick, mark }) {
+function Solid({ args, position, rotation, color, map, bump = null, opacity = 1, edges = true, pick, mark, realistic = false, roughness = 0.82 }) {
   const transparent = opacity < 0.98
   const face = mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#ccfbf1' : color
   const edge = mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : '#1e293b'
@@ -237,22 +402,26 @@ function Solid({ args, position, rotation, color, map, opacity = 1, edges = true
     <mesh
       position={position}
       rotation={rotation}
-      castShadow={false}
-      receiveShadow={false}
+      castShadow={realistic}
+      receiveShadow={realistic}
       userData={pick ? { pick } : undefined}
       raycast={opacity < 0.5 ? noopRaycast : undefined}
     >
       <boxGeometry args={args} />
-      <meshLambertMaterial
-        color={face}
+      <meshStandardMaterial
+        color={map && !mark ? '#ffffff' : face}
         emissive={mark === 'selected' ? '#115e59' : '#000000'}
-        emissiveIntensity={mark === 'selected' ? 0.55 : 0}
+        emissiveIntensity={mark === 'selected' ? 0.35 : 0}
         map={mark || transparent ? null : map || null}
+        bumpMap={mark || transparent ? null : bump}
+        bumpScale={bump ? 0.04 : 0}
+        roughness={realistic ? roughness : 1}
+        metalness={0.02}
         transparent={transparent}
         opacity={opacity}
         depthWrite={!transparent}
       />
-      {edges && !transparent && <Edges threshold={20} color={edge} />}
+      {edges && !realistic && !transparent && <Edges threshold={20} color={edge} />}
       {mark && (
         <mesh scale={outlineScale(args, mark)} raycast={noopRaycast}>
           <boxGeometry args={args} />
@@ -277,14 +446,31 @@ function WallMesh({ plan, mode, selected, hovered }) {
         const pieces = wall.kind === 'exterior'
           ? wallCladdingPieces(wall, plan)
           : wallPieces(wall, plan.openings, plan.floorHeight, plan.walls)
-        return pieces.map((piece) => {
+        const plinth = plinthLook(plan)
+        const realistic = finishesOf(plan).sceneStyle !== 'technical' && mode === 'solid'
+        const slices = pieces.flatMap((piece) => {
+          if (wall.kind !== 'exterior' || piece.y1 <= plinth.height + 0.001) {
+            return [{ ...piece, plinthBand: wall.kind === 'exterior' && piece.y1 <= plinth.height + 0.001 }]
+          }
+          if (piece.y0 >= plinth.height - 0.001) return [{ ...piece, plinthBand: false }]
+          return [
+            { ...piece, y1: plinth.height, plinthBand: true },
+            { ...piece, y0: plinth.height, plinthBand: false },
+          ]
+        })
+        return slices.map((piece) => {
           const span = piece.to - piece.from
           const mid = pointAt(wall, (piece.from + piece.to) / 2)
           const y = (piece.y0 + piece.y1) / 2
           const height = piece.y1 - piece.y0
-          const cladding = wall.kind === 'exterior' ? claddingOf(piece.materialId || plan.exteriorId) : null
-          const finish = cladding || adjacentInterior(plan, wall, piece)
-          const map = mode !== 'solid' ? null : cladding ? repeatedCladding(cladding.id, span, height) : finishTexture('interior', finish.id)
+          const cladding = wall.kind === 'exterior' && !piece.plinthBand
+            ? surfaceLook(plan, piece.materialId || plan.exteriorId, { color: piece.color, colorCode: piece.colorCode })
+            : null
+          const plinthFace = piece.plinthBand ? plinth : null
+          const finish = cladding || plinthFace || adjacentInterior(plan, wall, piece)
+          const map = realistic && (cladding || plinthFace)
+            ? repeatedCladding(cladding || { ...plinthFace, boardWidthMm: 145, painted: false, mortar: plinthFace.color }, span, height)
+            : realistic && wall.kind !== 'exterior' ? finishTexture('interior', finish.id) : null
           const zone = wall.kind === 'exterior' ? zoneCovering(plan, wall, (piece.from + piece.to) / 2, y) : null
           const pick = zone ? { kind: 'zone', id: zone.id, wallId: wall.id } : { kind: 'wall', id: wall.id }
           const onThisWall = (item) => item?.kind === 'wall' && item.id === wall.id
@@ -293,36 +479,46 @@ function WallMesh({ plan, mode, selected, hovered }) {
             : samePick(hovered, pick) || onThisWall(hovered)
               ? 'hover'
               : null
-          const faceKey = `${wall.id}-${piece.from}-${piece.to}-${piece.y0}-${piece.y1}-${piece.materialId || 'base'}`
+          const faceKey = `${wall.id}-${piece.from}-${piece.to}-${piece.y0}-${piece.y1}-${piece.materialId || 'base'}-${piece.plinthBand ? 'plinth' : 'clad'}`
+          const faceColor = realistic ? (wall.kind === 'exterior' ? finish.color : '#d6d3d1') : '#f8fafc'
           return (
             <group key={faceKey}>
               <Solid
-                args={[span, height, thick]}
+                args={[span, height, piece.plinthBand ? thick + 0.02 : thick]}
                 position={[mid.x, y, mid.z]}
                 rotation={[0, yaw, 0]}
-                color={wall.kind === 'exterior' ? finish.color : '#d6d3d1'}
-                map={wall.kind === 'exterior' ? map : null}
+                color={faceColor}
+                map={realistic && wall.kind === 'exterior' ? map : null}
+                bump={realistic && wall.kind === 'exterior' ? map?.userData?.bump || null : null}
                 opacity={opacity}
                 pick={pick}
                 mark={mark}
+                realistic={realistic}
+                roughness={cladding?.pattern === 'brick' ? 0.86 : 0.72}
+                edges={!realistic}
               />
               {['left', 'right'].map((side) => {
                 if (!roomForWallSide(plan, wall, side)) return null
                 const matId = resolveFaceMaterial(plan, wall, side)
                 const item = materialOf('interior', matId)
                 const sign = side === 'left' ? 1 : -1
-                const shift = thick / 2 + 0.012
+                const shift = thick / 2 + 0.018
+                const skin = mode === 'solid' ? finishTexture('interior', item.id) : null
                 return (
                   <mesh
                     key={`${faceKey}-${side}`}
                     position={[mid.x + (-dz * sign) * shift, y, mid.z + (dx * sign) * shift]}
                     rotation={[0, yaw, 0]}
                     raycast={noopRaycast}
+                    castShadow={realistic}
+                    receiveShadow={realistic}
                   >
-                    <boxGeometry args={[Math.max(0.05, span - 0.02), height, 0.02]} />
-                    <meshLambertMaterial
-                      color={item.color}
-                      map={mode === 'solid' ? finishTexture('interior', item.id) : null}
+                    <boxGeometry args={[Math.max(0.05, span - 0.02), height, 0.036]} />
+                    <meshStandardMaterial
+                      color={skin ? '#ffffff' : item.color}
+                      map={skin}
+                      roughness={0.78}
+                      metalness={0.02}
                       transparent={opacity < 0.98}
                       opacity={opacity}
                     />
@@ -348,15 +544,67 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
   const sill = opening.kind === 'window' ? (Number.isFinite(opening.sill) ? opening.sill : 0.9) : 0
   const height = opening.height || (opening.kind === 'window' ? 1.2 : 2.1)
   const pick = { kind: 'opening', id: opening.id }
+  const colour = openingColour(plan, opening)
+  const realistic = finishesOf(plan).sceneStyle !== 'technical'
+  const width = Math.max(0.2, opening.width || 0.9)
+  const depth = thicknessOf(wall, plan) + 0.04
+  const frame = Math.min(0.07, width * 0.08, height * 0.08)
+  const finish = finishesOf(plan)
+  const box = planBounds(plan)
+  const cx = (box.minX + box.maxX) / 2
+  const cz = (box.minZ + box.maxZ) / 2
+  const outward = (-dz) * (mid.x - cx) + dx * (mid.z - cz) >= 0 ? 1 : -1
+  const glassH = Math.max(0.08, height - frame * 2)
+  if (realistic && opening.kind === 'window') {
+    const trim = finish.windowColor || '#f4f1ea'
+    const face = outward * (depth / 2 - 0.01)
+    const bar = (args, position) => (
+      <mesh position={position} castShadow receiveShadow raycast={noopRaycast}>
+        <boxGeometry args={args} />
+        <meshStandardMaterial color={trim} roughness={0.42} metalness={0.05} />
+      </mesh>
+    )
+    return (
+      <group position={[mid.x, sill + height / 2, mid.z]} rotation={[0, yaw, 0]}>
+        <mesh userData={{ pick }} position={[0, 0, face]}>
+          <boxGeometry args={[width, height, 0.04]} />
+          <meshStandardMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+        {bar([width + 0.04, 0.08, 0.07], [0, height / 2 - 0.04, face])}
+        {bar([width + 0.04, 0.08, 0.07], [0, -height / 2 + 0.04, face])}
+        {bar([0.08, height, 0.07], [-width / 2 + 0.04, 0, face])}
+        {bar([0.08, height, 0.07], [width / 2 - 0.04, 0, face])}
+        {bar([0.045, glassH, 0.05], [0, 0, face])}
+        <mesh position={[0, 0, face + outward * 0.02]} raycast={noopRaycast}>
+          <boxGeometry args={[Math.max(0.08, width - 0.18), Math.max(0.08, height - 0.18), 0.02]} />
+          <meshStandardMaterial color="#b7d4ee" roughness={0.08} metalness={0.25} transparent opacity={0.78} />
+        </mesh>
+        <mesh position={[0, -height / 2 - 0.03, outward * (depth / 2 + 0.04)]} raycast={noopRaycast} castShadow>
+          <boxGeometry args={[width + 0.1, 0.06, 0.16]} />
+          <meshStandardMaterial color={trim} roughness={0.5} metalness={0.04} />
+        </mesh>
+      </group>
+    )
+  }
   return (
-    <Solid
-      args={[Math.max(0.2, opening.width || 0.9), height, thicknessOf(wall, plan) + 0.03]}
-      position={[mid.x, sill + height / 2, mid.z]}
-      rotation={[0, yaw, 0]}
-      color={opening.kind === 'window' ? '#dbeafe' : '#f8fafc'}
-      pick={pick}
-      mark={markOf(selected, hovered, pick)}
-    />
+    <group position={[mid.x, sill + height / 2, mid.z]} rotation={[0, yaw, 0]}>
+      <Solid
+        args={opening.kind === 'window' ? [width, height, 0.06] : [width * 0.96, height, 0.05]}
+        position={[0, 0, opening.kind === 'window' ? 0 : outward * 0.02]}
+        color={realistic ? colour.color : '#f8fafc'}
+        pick={pick}
+        mark={markOf(selected, hovered, pick)}
+        edges={!realistic && opening.kind !== 'window'}
+        realistic={realistic}
+        roughness={0.55}
+      />
+      {opening.kind === 'window' && (
+        <mesh position={[0, 0, 0.02]} raycast={noopRaycast}>
+          <boxGeometry args={[glassW, glassH, 0.012]} />
+          <meshStandardMaterial color="#e2e8f0" roughness={0.2} />
+        </mesh>
+      )}
+    </group>
   )
 }
 
@@ -395,12 +643,35 @@ function FloorMesh({ room, translucent, selected, hovered }) {
 
 function roofGeometry(model) {
   const positions = []
+  const normals = []
+  const uvs = []
+  const up = new THREE.Vector3(0, 1, 0)
   roofFaces(model).forEach((face) => {
-    face.forEach((point) => positions.push(point[0], point[1], point[2]))
+    const a = new THREE.Vector3(...face[0])
+    const b = new THREE.Vector3(...face[1])
+    const c = new THREE.Vector3(...face[2])
+    const normal = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a)).normalize()
+    // Courses follow the eave: the horizontal axis in the face. The other axis
+    // runs up the slope, in metres, so hip ends match the main slopes.
+    const along = new THREE.Vector3().crossVectors(normal, up)
+    if (along.lengthSq() < 1e-8) along.set(1, 0, 0)
+    else along.normalize()
+    let rise = new THREE.Vector3().crossVectors(along, normal)
+    if (rise.y < 0) {
+      along.negate()
+      rise = new THREE.Vector3().crossVectors(along, normal)
+    }
+    rise.normalize()
+    ;[a, b, c].forEach((point) => {
+      positions.push(point.x, point.y, point.z)
+      normals.push(normal.x, normal.y, normal.z)
+      uvs.push(point.dot(along), point.dot(rise))
+    })
   })
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
-  geometry.computeVertexNormals()
+  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3))
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2))
   return geometry
 }
 
@@ -456,9 +727,10 @@ function framedCamera(plan, aspect) {
 
 function RoofMesh({ plan, mode, selected, hovered }) {
   const model = roofModel(plan)
-  const finish = materialOf('roof', plan.roofId)
+  const finish = roofLook(plan)
+  const realistic = finishesOf(plan).sceneStyle !== 'technical' && mode === 'solid'
   const ghost = mode === 'ghost'
-  const map = ghost ? null : finishTexture('roof', finish.id)
+  const map = realistic ? roofSurface(finish) : null
   const key = [model.type, model.minX, model.maxX, model.minZ, model.maxZ, model.rise, model.overhang, model.alongX, model.wallHeight].join(':')
   const geom = useMemo(() => roofGeometry(roofModel(plan)), [key])
   const edgeSpecs = useMemo(() => roofEdgeSpecs(roofModel(plan)), [key])
@@ -479,12 +751,14 @@ function RoofMesh({ plan, mode, selected, hovered }) {
   const mark = markOf(selected, hovered, pick)
   return (
     <group>
-      <mesh geometry={geom} userData={{ pick }} raycast={ghost ? noopRaycast : undefined}>
-        <meshLambertMaterial
-          color={mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#99f6e4' : ghost ? '#94a3b8' : finish.color}
+      <mesh geometry={geom} userData={{ pick }} castShadow={realistic} receiveShadow={realistic} raycast={ghost ? noopRaycast : undefined}>
+        <meshStandardMaterial
+          color={mark === 'selected' ? '#5eead4' : mark === 'hover' ? '#99f6e4' : ghost || !realistic || !map ? (ghost || !realistic ? '#e2e8f0' : finish.color) : '#ffffff'}
           emissive={mark === 'selected' ? '#115e59' : '#000000'}
-          emissiveIntensity={mark === 'selected' ? 0.45 : 0}
+          emissiveIntensity={mark === 'selected' ? 0.35 : 0}
           map={mark ? null : map}
+          roughness={finish.pattern === 'seam' || finish.pattern === 'corrugated' ? 0.38 : 0.72}
+          metalness={finish.pattern === 'seam' || finish.pattern === 'corrugated' || finish.pattern === 'tile-metal' ? 0.35 : 0.04}
           side={THREE.DoubleSide}
           transparent={ghost && !mark}
           opacity={ghost && !mark ? 0.15 : 1}
@@ -492,10 +766,10 @@ function RoofMesh({ plan, mode, selected, hovered }) {
         />
         {mark && <Edges threshold={15} color={mark === 'selected' ? '#0f766e' : '#14b8a6'} />}
       </mesh>
-      {edgeSpecs.map((edge, index) => (
+      {!realistic && edgeSpecs.map((edge, index) => (
         <mesh key={index} position={edge.position} quaternion={edge.quaternion}>
           <boxGeometry args={[0.045, edge.length, 0.045]} />
-          <meshBasicMaterial color="#1e293b" />
+          <meshBasicMaterial color={realistic ? finishesOf(plan).trimColor : '#1e293b'} />
         </mesh>
       ))}
       {!ghost && (
@@ -507,14 +781,34 @@ function RoofMesh({ plan, mode, selected, hovered }) {
   )
 }
 
-function FixtureBody({ type, w, d }) {
-  const box = (size, position, color) => (
+function FixtureBody({ body, w, d, h = 0.8 }) {
+  const box = (size, position, color, opacity = 1) => (
     <mesh position={position}>
       <boxGeometry args={size} />
-      <meshLambertMaterial color={color} />
-      <Edges threshold={18} color="#334155" />
+      <meshLambertMaterial color={color} transparent={opacity < 1} opacity={opacity} depthWrite={opacity >= 1} />
+      {opacity >= 1 && <Edges threshold={18} color="#334155" />}
     </mesh>
   )
+  const cyl = (r, height, position, color) => (
+    <mesh position={position}>
+      <cylinderGeometry args={[r, r, height, 20]} />
+      <meshLambertMaterial color={color} />
+    </mesh>
+  )
+  const alias = {
+    hob: 'stove',
+    'base-cab': 'cabinet',
+    appliance: 'dishwasher',
+    vanity: 'basin',
+    desk: 'table',
+    coffee: 'table',
+    night: 'cabinet',
+    dresser: 'cabinet',
+    low: 'cabinet',
+    freezer: 'fridge',
+    washer: 'dishwasher',
+  }
+  const type = alias[body] || body || 'box'
   if (type === 'bed') {
     return (
       <group>
@@ -588,8 +882,7 @@ function FixtureBody({ type, w, d }) {
       </group>
     )
   }
-  if (type === 'fridge') return box([w, 1.8, d], [0, 0.9, 0], '#f8fafc')
-  if (type === 'wardrobe') return box([w, 2.1, d], [0, 1.05, 0], '#e7e5e4')
+  if (type === 'fridge') return box([w, Math.max(h, 1.7), d], [0, Math.max(h, 1.7) / 2, 0], '#f8fafc')
   if (type === 'dishwasher') return box([w, 0.86, d], [0, 0.43, 0], '#e2e8f0')
   if (type === 'cabinet' || type === 'island') {
     return (
@@ -629,29 +922,269 @@ function FixtureBody({ type, w, d }) {
       </group>
     )
   }
-  if (type === 'shower') {
+  if (type === 'shower' || type === 'shower-cabin' || type === 'shower-corner' || type === 'shower-walk' || type === 'shower-screen') {
     return (
       <group>
         {box([w, 0.08, d], [0, 0.04, 0], '#e2e8f0')}
-        <mesh position={[0, 1.05, 0]}>
-          <boxGeometry args={[w, 1.9, d]} />
-          <meshLambertMaterial color="#bae6fd" transparent opacity={0.28} depthWrite={false} />
-        </mesh>
+        {box([w * 0.92, h || 1.9, 0.02], [0, (h || 1.9) / 2, -d * 0.46], '#e0f2fe', 0.35)}
+        {type !== 'shower-screen' && box([0.02, h || 1.9, d * 0.9], [-w * 0.46, (h || 1.9) / 2, 0], '#e0f2fe', 0.35)}
+        {cyl(0.03, 0.16, [w * 0.2, 1.85, -d * 0.15], '#94a3b8')}
       </group>
     )
   }
-  return box([w, 0.8, d], [0, 0.4, 0], '#f5f5f4')
+  if (type === 'sauna-bench' || type === 'sauna-bench-3') {
+    return (
+      <group>
+        {box([w, 0.04, d * 0.42], [0, 0.45, d * 0.2], '#d6c4a8')}
+        {box([w, 0.04, d * 0.42], [0, 0.9, -d * 0.18], '#c4a882')}
+        {type === 'sauna-bench-3' && box([w, 0.04, d * 0.28], [0, 1.15, -d * 0.32], '#b08968')}
+        {box([0.06, 0.9, 0.06], [-w * 0.42, 0.45, 0], '#a89070')}
+        {box([0.06, 0.9, 0.06], [w * 0.42, 0.45, 0], '#a89070')}
+      </group>
+    )
+  }
+  if (type === 'wardrobe' || type === 'tall' || type === 'slider') {
+    return (
+      <group>
+        {box([w, h || 2.1, d], [0, (h || 2.1) / 2, 0], '#e7e5e4')}
+        {box([0.02, (h || 2.1) * 0.92, 0.015], [0, (h || 2.1) / 2, d * 0.5], '#a8a29e')}
+      </group>
+    )
+  }
+  if (type === 'wall-cab') return box([w, h || 0.7, d], [0, 1.55, 0], '#f5f5f4')
+  if (type === 'tv') return box([w, h || 0.65, Math.max(d, 0.04)], [0, 1.15, 0], '#1c1917')
+  if (type === 'rug') return box([w, 0.02, d], [0, 0.01, 0], '#b08968')
+  if (type === 'car') {
+    return (
+      <group>
+        {box([w * 0.92, 0.45, d * 0.55], [0, 0.55, 0], '#334155')}
+        {box([w * 0.96, 0.35, d * 0.92], [0, 0.28, 0], '#1e293b')}
+        {[[-1, 1], [1, 1], [-1, -1], [1, -1]].map(([sx, sz]) => (
+          <mesh key={`${sx}${sz}`} position={[sx * w * 0.42, 0.18, sz * d * 0.28]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.18, 0.18, 0.14, 16]} />
+            <meshLambertMaterial color="#0f172a" />
+          </mesh>
+        ))}
+      </group>
+    )
+  }
+  if (type === 'fireplace') {
+    return (
+      <group>
+        {box([w, h || 1.2, d], [0, (h || 1.2) / 2, 0], '#57534e')}
+        {box([w * 0.46, 0.42, 0.08], [0, 0.38, d * 0.42], '#292524')}
+      </group>
+    )
+  }
+  if (type === 'armchair' || type === 'sofa-corner' || type === 'divan') {
+    return (
+      <group>
+        {box([w * 0.9, 0.28, d * 0.72], [0, 0.32, d * 0.06], '#d6d3d1')}
+        {box([w * 0.9, 0.36, d * 0.22], [0, 0.55, -d * 0.34], '#a8a29e')}
+      </group>
+    )
+  }
+  if (type === 'bunk') {
+    return (
+      <group>
+        {box([w, 0.12, d], [0, 0.4, 0], '#f8fafc')}
+        {box([w, 0.12, d], [0, 1.15, 0], '#f8fafc')}
+        {box([0.05, 1.4, 0.05], [-w * 0.46, 0.7, -d * 0.46], '#a8a29e')}
+        {box([0.05, 1.4, 0.05], [w * 0.46, 0.7, -d * 0.46], '#a8a29e')}
+        {box([0.05, 1.4, 0.05], [-w * 0.46, 0.7, d * 0.46], '#a8a29e')}
+        {box([0.05, 1.4, 0.05], [w * 0.46, 0.7, d * 0.46], '#a8a29e')}
+      </group>
+    )
+  }
+  if (type === 'lamp') {
+    return (
+      <group>
+        {cyl(0.025, 1.35, [0, 0.68, 0], '#a8a29e')}
+        {cyl(0.16, 0.18, [0, 1.42, 0], '#f8fafc')}
+      </group>
+    )
+  }
+  if (type === 'hood') return box([w, 0.12, Math.min(d, 0.45)], [0, 1.55, -d * 0.05], '#e7e5e4')
+  if (type === 'towel-rad') {
+    return (
+      <group>
+        {box([0.03, h || 1.1, 0.03], [-w * 0.4, 0.9, 0], '#cbd5e1')}
+        {box([0.03, h || 1.1, 0.03], [w * 0.4, 0.9, 0], '#cbd5e1')}
+        {[0, 1, 2, 3, 4].map((index) => (
+          <group key={index}>{box([w * 0.8, 0.02, 0.02], [0, 0.55 + index * 0.16, 0], '#e2e8f0')}</group>
+        ))}
+      </group>
+    )
+  }
+  if (type === 'heater-wood') {
+    return (
+      <group>
+        {box([w, 0.7, d], [0, 0.35, 0], '#44403c')}
+        {box([w * 0.7, 0.08, d * 0.15], [0, 0.78, d * 0.1], '#292524')}
+        {box([w * 0.55, 0.22, 0.04], [0, 0.32, d * 0.48], '#1c1917')}
+      </group>
+    )
+  }
+  if (type === 'insert') {
+    return (
+      <group>
+        {box([w, 0.55, d], [0, 0.28, 0], '#44403c')}
+        {box([w * 0.7, 0.28, 0.05], [0, 0.32, d * 0.46], '#111827')}
+      </group>
+    )
+  }
+  if (type === 'kamiina') {
+    return (
+      <group>
+        {cyl(Math.min(w, d) * 0.42, 0.72, [0, 0.4, 0], '#334155')}
+        {cyl(0.05, 0.16, [0, 0.84, -d * 0.1], '#1e293b')}
+      </group>
+    )
+  }
+  if (type === 'leivinuuni') {
+    return (
+      <group>
+        {box([w, h || 1.4, d], [0, (h || 1.4) / 2, 0], '#e7e5e4')}
+        {box([w * 0.4, 0.22, 0.06], [0, 0.55, d * 0.48], '#292524')}
+      </group>
+    )
+  }
+  if (type === 'puuhella') {
+    return (
+      <group>
+        {box([w, 0.8, d], [0, 0.4, 0], '#f5f5f4')}
+        {[-0.16, 0.16].map((x) => (
+          <mesh key={x} position={[x, 0.82, -d * 0.08]}>
+            <cylinderGeometry args={[0.08, 0.08, 0.02, 16]} />
+            <meshLambertMaterial color="#1c1917" />
+          </mesh>
+        ))}
+      </group>
+    )
+  }
+  if (type === 'kakluuni') {
+    return (
+      <group>
+        {box([w, h || 1.7, d], [0, (h || 1.7) / 2, 0], '#f8fafc')}
+        {[0.3, 0.55, 0.8].map((t) => <group key={t}>{box([w * 1.01, 0.015, d * 1.01], [0, (h || 1.7) * t, 0], '#cbd5e1')}</group>)}
+      </group>
+    )
+  }
+  if (type === 'mirror' || type === 'mirror-cab') return box([w, h || 0.7, Math.max(d, 0.04)], [0, 1.45, 0], '#e2e8f0')
+  if (type === 'office-chair') {
+    return (
+      <group>
+        {cyl(Math.min(w, d) * 0.32, 0.06, [0, 0.48, 0], '#1c1917')}
+        {box([w * 0.7, 0.4, 0.06], [0, 0.78, -d * 0.28], '#334155')}
+        {cyl(0.04, 0.4, [0, 0.24, 0], '#64748b')}
+      </group>
+    )
+  }
+  return box([w, h || 0.8, d], [0, (h || 0.8) / 2, 0], '#f5f5f4')
 }
 
-function FixtureMesh({ fixture, selected, hovered }) {
+function penetrationYs(plan, top) {
+  const step = plan?.floorHeight || 2.6
+  const floors = Math.max(1, plan?.floors || 1)
+  const ys = []
+  for (let level = 1; level <= floors; level += 1) {
+    const y = level * step
+    if (y > 0.2 && y < top - 0.15) ys.push(y)
+  }
+  return ys
+}
+
+function ChimneyShaft({ fixture, plan, w, d }) {
+  const pose = chimneyTop(plan, fixture)
+  const height = Math.max(0.8, pose.top)
+  const kind = chimneyKind(fixture)
+  const flues = Number(fixture.flues) >= 2 ? 2 : 1
+  const color = fixture.color || (kind === 'steel' ? '#64748b' : kind === 'element' ? '#e7e5e4' : '#9c341f')
+  const rings = penetrationYs(plan, height)
+  if (kind === 'steel') {
+    const radius = Math.min(w, d) / (flues === 2 ? 4 : 2)
+    const spots = flues === 2 ? [-w * 0.25, w * 0.25] : [0]
+    return (
+      <group>
+        {spots.map((x) => (
+          <group key={x}>
+            <mesh position={[x, height / 2, 0]}>
+              <cylinderGeometry args={[radius * 0.92, radius * 0.92, height, 20]} />
+              <meshLambertMaterial color={color} />
+            </mesh>
+            <mesh position={[x, height + 0.08, 0]}>
+              <cylinderGeometry args={[radius * 1.35, radius * 0.55, 0.12, 20]} />
+              <meshLambertMaterial color="#334155" />
+            </mesh>
+          </group>
+        ))}
+        {rings.map((y) => (
+          <mesh key={y} position={[0, y, 0]}>
+            <boxGeometry args={[w + 0.08, 0.04, d + 0.08]} />
+            <meshLambertMaterial color="#a8a29e" />
+          </mesh>
+        ))}
+      </group>
+    )
+  }
+  return (
+    <group>
+      <mesh position={[0, height / 2, 0]}>
+        <boxGeometry args={[w, height, d]} />
+        <meshLambertMaterial color={color} />
+      </mesh>
+      <mesh position={[0, height + 0.07, 0]}>
+        <boxGeometry args={[w + 0.12, 0.12, d + 0.12]} />
+        <meshLambertMaterial color="#44403c" />
+      </mesh>
+      {Array.from({ length: flues }, (_, index) => {
+        const x = flues === 2 ? (index === 0 ? -w * 0.2 : w * 0.2) : 0
+        const pot = Math.min(w, d) * 0.28
+        return (
+          <mesh key={index} position={[x, height + 0.22, 0]}>
+            <boxGeometry args={[pot, 0.2, pot]} />
+            <meshLambertMaterial color="#292524" />
+          </mesh>
+        )
+      })}
+      {rings.map((y) => (
+        <mesh key={y} position={[0, y, 0]}>
+          <boxGeometry args={[w + 0.1, 0.05, d + 0.1]} />
+          <meshLambertMaterial color="#57534e" />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function FixtureMesh({ fixture, plan, selected, hovered }) {
   const tpl = fixtureTemplate(fixture.type)
-  const w = fixture.w || tpl.w
-  const d = fixture.d || tpl.d
+  const variant = (tpl.variants || []).find((entry) => entry.id === fixture.variant) || tpl.variants?.[0]
+  const w = fixture.w || variant?.w || tpl.w
+  const d = fixture.d || variant?.d || tpl.d
+  const h = fixture.h || variant?.h || tpl.h || 0.8
+  const body = variant?.body || tpl.body || variant?.symbol || tpl.symbol || fixture.type
+  const draw = drawingOf(fixture)
   const pick = { kind: 'fixture', id: fixture.id }
   const mark = markOf(selected, hovered, pick)
+  const hearth = draw.hearth
+  const plateW = hearth ? w + (hearth.side || 0) * 2 : 0
+  const plateD = hearth ? d + (hearth.front || 0) : 0
   return (
     <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]} userData={{ pick }}>
-      <FixtureBody type={fixture.type} w={w} d={d} />
+      {hearth && (
+        <mesh position={[0, 0.012, -d / 2 + plateD / 2]}>
+          <boxGeometry args={[plateW, 0.02, plateD]} />
+          <meshLambertMaterial color="#3f3f46" />
+        </mesh>
+      )}
+      {draw.shield && (
+        <mesh position={[0, 0.75, -d / 2 - 0.025]}>
+          <boxGeometry args={[w + 0.06, 1.2, 0.025]} />
+          <meshLambertMaterial color="#e7e5e4" />
+        </mesh>
+      )}
+      {draw.chimney ? <ChimneyShaft fixture={fixture} plan={plan} w={w} d={d} /> : <FixtureBody body={body} w={w} d={d} h={h} />}
       {mark && (
         <mesh position={[0, 0.45, 0]}>
           <boxGeometry args={[w + (mark === 'selected' ? 0.14 : 0.07), 0.95, d + (mark === 'selected' ? 0.14 : 0.07)]} />
@@ -663,11 +1196,18 @@ function FixtureMesh({ fixture, selected, hovered }) {
 }
 
 function RoomLabels({ plan }) {
-  return visibleRooms(plan).filter((room) => room.showLabel !== false).map((room) => (
-    <Html key={room.id} position={[room.cx, 0.12, room.cz]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
-      <div style={{ textAlign: 'center', color: '#1c1917', fontFamily: 'sans-serif', textShadow: '0 1px 2px #fff', whiteSpace: 'nowrap' }}>
-        <div style={{ fontWeight: 700, fontSize: 13 }}>{room.name}</div>
-        <div style={{ fontSize: 11 }}>{formatArea(room.area)}</div>
+  const display = normalizeDisplay(plan.display)
+  const labels = layoutRoomLabels(visibleRooms(plan), {
+    ratio: 100,
+    showNames: display.roomNames,
+    showAreas: display.areas,
+    obstacles: heatingLabelObstacles(plan),
+  })
+  return labels.map((label) => (
+    <Html key={label.id} position={[label.x, 0.12, label.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+      <div style={{ textAlign: 'center', color: '#1c1917', fontFamily: 'sans-serif', whiteSpace: 'nowrap' }}>
+        {label.text && <div style={{ fontWeight: 700, fontSize: 12 }}>{label.text}</div>}
+        {label.area && <div style={{ fontSize: 10, color: '#44403c' }}>{label.area}</div>}
       </div>
     </Html>
   ))
@@ -736,10 +1276,10 @@ function FloorCursor({ point, ppm, kind }) {
   )
 }
 
-function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onDropFixture }) {
+function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onYardDrag, onServiceDrag, onDropFixture }) {
   const { camera, gl, scene } = useThree()
   const handlers = useRef({})
-  handlers.current = { drawMode, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onDropFixture }
+  handlers.current = { drawMode, onSelect, onContext, onHover, onPreview, onPlace, onFixtureDrag, onOpeningDrag, onYardDrag, onServiceDrag, onDropFixture }
   useLayoutEffect(() => {
     const raycaster = new THREE.Raycaster()
     const pointer = new THREE.Vector2()
@@ -775,9 +1315,14 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
       down = { x: event.clientX, y: event.clientY }
       if (handlers.current.drawMode) return
       const pick = read()
-      if (pick?.kind === 'fixture' || pick?.kind === 'opening') {
-        drag = { kind: pick.kind, id: pick.id, moved: false }
+      const serviceDrag = pick?.kind === 'service' && ['vertex', 'segment', 'run', 'node'].includes(pick.service?.target)
+      if (pick?.kind === 'fixture' || pick?.kind === 'opening' || (pick?.kind === 'yard' && pick.movable) || serviceDrag) {
+        drag = { kind: serviceDrag ? 'service' : pick.kind, id: pick.id, collection: pick.collection, service: pick.service, moved: false }
         if (controlsRef.current) controlsRef.current.enabled = false
+        if (serviceDrag) {
+          const spot = floor()
+          if (spot) handlers.current.onServiceDrag?.(pick.service, spot, 'start')
+        }
       }
     }
     const onPointerUp = (event) => {
@@ -792,8 +1337,18 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
         if (controlsRef.current) controlsRef.current.enabled = true
         if (ended.moved && spot) {
           if (ended.kind === 'fixture') handlers.current.onFixtureDrag?.(ended.id, spot, 'end')
+          else if (ended.kind === 'yard') handlers.current.onYardDrag?.({ kind: 'yard', id: ended.id, collection: ended.collection }, spot, 'end')
+          else if (ended.kind === 'service') handlers.current.onServiceDrag?.(ended.service, spot, 'end')
           else handlers.current.onOpeningDrag?.(ended.id, spot, 'end')
         } else if (ended.kind === 'fixture') handlers.current.onSelect?.({ kind: 'fixture', id: ended.id })
+        else if (ended.kind === 'yard') handlers.current.onSelect?.({ kind: 'yard', id: ended.id, collection: ended.collection })
+        else if (ended.kind === 'service') {
+          const target = ended.service?.target
+          const service = target === 'vertex' || target === 'segment'
+            ? { ...ended.service, target: 'run', segmentIndex: ended.service.index || 0 }
+            : ended.service
+          handlers.current.onSelect?.({ kind: 'service', service })
+        }
         else handlers.current.onSelect?.({ kind: 'opening', id: ended.id })
         return
       }
@@ -814,6 +1369,8 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
         if (travel > 3) drag.moved = true
         if (drag.moved) {
           if (drag.kind === 'fixture') handlers.current.onFixtureDrag?.(drag.id, spot, 'move')
+          else if (drag.kind === 'yard') handlers.current.onYardDrag?.({ kind: 'yard', id: drag.id, collection: drag.collection }, spot, 'move')
+          else if (drag.kind === 'service') handlers.current.onServiceDrag?.(drag.service, spot, 'move')
           else handlers.current.onOpeningDrag?.(drag.id, spot, 'move')
           return
         }
@@ -860,6 +1417,109 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
   return null
 }
 
+function Dressing({ plan }) {
+  const finish = finishesOf(plan)
+  const realistic = finish.sceneStyle !== 'technical'
+  const trim = realistic ? finish.trimColor : '#e7e5e4'
+  const gutter = realistic ? finish.gutterColor : '#cbd5e1'
+  const plinth = plinthLook(plan)
+  const model = roofModel(plan)
+  const box = planBounds(plan)
+  const cx = (box.minX + box.maxX) / 2
+  const cz = (box.minZ + box.maxZ) / 2
+  const trims = []
+  ;(plan.walls || []).forEach((wall) => {
+    if (wall.kind === 'interior') return
+    const len = segmentLength(wall.a, wall.b) || 1
+    const dx = (wall.b.x - wall.a.x) / len
+    const dz = (wall.b.z - wall.a.z) / len
+    let nx = -dz
+    let nz = dx
+    const midX = (wall.a.x + wall.b.x) / 2
+    const midZ = (wall.a.z + wall.b.z) / 2
+    if (nx * (midX - cx) + nz * (midZ - cz) < 0) {
+      nx = -nx
+      nz = -nz
+    }
+    const thick = thicknessOf(wall, plan)
+    const top = wall.height || plan.floorHeight || 2.6
+    const boardH = Math.max(0.2, top - plinth.height)
+    const yaw = Math.atan2(-dz, dx)
+    ;[0.07, Math.max(0.08, len - 0.07)].forEach((dist, index) => {
+      const point = pointAt(wall, Math.min(len, dist))
+      trims.push({
+        key: `${wall.id}-corner-${index}`,
+        position: [point.x + nx * (thick / 2 + 0.015), plinth.height + boardH / 2, point.z + nz * (thick / 2 + 0.015)],
+        rotation: [0, yaw, 0],
+        args: [0.12, boardH, 0.028],
+      })
+    })
+    ;(plan.openings || []).filter((opening) => opening.wallId === wall.id).forEach((opening) => {
+      const sill = opening.kind === 'window' ? (Number.isFinite(opening.sill) ? opening.sill : 0.9) : 0
+      const height = opening.height || (opening.kind === 'window' ? 1.2 : 2.1)
+      const width = opening.width || 0.9
+      const centre = pointAt(wall, opening.offset)
+      const y = sill + height / 2
+      const shift = thick / 2 + 0.028
+      const bars = [
+        [width + 0.12, 0.05, 0, height / 2 + 0.03],
+        [width + 0.12, 0.05, 0, -height / 2 - 0.03],
+        [0.05, height + 0.08, -(width / 2 + 0.03), 0],
+        [0.05, height + 0.08, width / 2 + 0.03, 0],
+      ]
+      bars.forEach((bar, index) => {
+        trims.push({
+          key: `${opening.id}-case-${index}`,
+          position: [centre.x + nx * shift + dx * bar[2], y + bar[3], centre.z + nz * shift + dz * bar[2]],
+          rotation: [0, yaw, 0],
+          args: [bar[0], bar[1], 0.02],
+        })
+      })
+    })
+  })
+  const gutters = roofOutline(model)
+    .filter((edge) => Math.abs(edge.a[1] - model.wallHeight) < 0.3 && Math.abs(edge.b[1] - model.wallHeight) < 0.3)
+    .map((edge, index) => {
+      const length = Math.max(0.2, Math.hypot(edge.b[0] - edge.a[0], edge.b[2] - edge.a[2]))
+      const yaw = Math.atan2(-(edge.b[2] - edge.a[2]), edge.b[0] - edge.a[0])
+      const mx = (edge.a[0] + edge.b[0]) / 2
+      const mz = (edge.a[2] + edge.b[2]) / 2
+      return [
+        {
+          key: `fascia-${index}`,
+          position: [mx, model.wallHeight + 0.02, mz],
+          rotation: [0, yaw, 0],
+          args: [length, 0.18, 0.03],
+          color: trim,
+        },
+        {
+          key: `gutter-${index}`,
+          position: [mx, model.wallHeight - 0.08, mz],
+          rotation: [0, yaw, 0],
+          args: [length, 0.07, 0.1],
+          color: gutter,
+        },
+      ]
+    })
+  const downs = [[box.minX, box.minZ], [box.maxX, box.minZ], [box.minX, box.maxZ], [box.maxX, box.maxZ]].map(([x, z], index) => ({
+    key: `down-${index}`,
+    position: [x + Math.sign(x - cx || 1) * 0.22, model.wallHeight / 2, z + Math.sign(z - cz || 1) * 0.22],
+    rotation: [0, 0, 0],
+    args: [0.07, model.wallHeight, 0.07],
+    color: gutter,
+  }))
+  return (
+    <group>
+      {[...trims.map((item) => ({ ...item, color: trim })), ...gutters.flat(), ...downs].map((item) => (
+        <mesh key={item.key} position={item.position} rotation={item.rotation} castShadow receiveShadow raycast={noopRaycast}>
+          <boxGeometry args={item.args} />
+          <meshStandardMaterial color={item.color} roughness={0.55} metalness={item.key.startsWith('gutter') || item.key.startsWith('down') ? 0.35 : 0.04} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
 export default function HouseScene({
   plan,
   wallMode,
@@ -883,49 +1543,72 @@ export default function HouseScene({
   onPlace,
   onFixtureDrag,
   onOpeningDrag,
+  onYardDrag,
+  onServiceDrag,
   onDropFixture,
 }) {
   const controlsRef = useRef(null)
-  const box = planBounds(plan)
-  const cx = (box.minX + box.maxX) / 2
-  const cz = (box.minZ + box.maxZ) / 2
+  const house = planBounds(plan)
+  const box = sceneBounds(plan)
+  const site = hasYard(plan)
+  const cx = (house.minX + house.maxX) / 2
+  const cz = (house.minZ + house.maxZ) / 2
+  const focusX = site ? (box.minX + box.maxX) / 2 : cx
+  const focusZ = site ? (box.minZ + box.maxZ) / 2 : cz
   const span = Math.max(box.maxX - box.minX, box.maxZ - box.minZ, 8)
+  const cameraPosition = site
+    ? [focusX + span * 0.46, span * 0.58, focusZ + span * 0.62]
+    : [cx, span, cz + span]
   return (
     <Canvas
-      camera={{ position: [cx, span, cz + span], fov: 34, near: 0.08, far: 240 }}
+      camera={{ position: cameraPosition, fov: site ? 32 : 34, near: 0.08, far: Math.max(240, span * 8) }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
       onCreated={({ gl }) => {
-        gl.toneMapping = THREE.NoToneMapping
-        gl.shadowMap.enabled = false
-        gl.setClearColor('#e7e5e4')
+        gl.toneMapping = THREE.ACESFilmicToneMapping
+        gl.toneMappingExposure = 1.05
+        gl.shadowMap.enabled = true
+        gl.shadowMap.type = THREE.PCFSoftShadowMap
+        gl.setClearColor('#d9e3ee')
       }}
     >
-      <color attach="background" args={['#e7e5e4']} />
-      <ambientLight intensity={0.94} />
-      <directionalLight position={[8, 22, 10]} intensity={0.5} />
+      <color attach="background" args={['#d9e3ee']} />
+      <hemisphereLight args={['#f3eee4', '#b7aa96', 0.32]} />
+      <ambientLight intensity={0.1} />
+      <directionalLight position={[16, 14, 7]} intensity={1.85} />
+      <directionalLight position={[-8, 6, -6]} intensity={0.12} />
+      <ContactShadows position={[cx, 0.012, cz]} opacity={0.58} scale={Math.max(22, span * 1.35)} blur={2.4} far={7} />
+      <GroundShade cx={cx} cz={cz} w={Math.max(house.maxX - house.minX + 1.4, 8)} h={Math.max(house.maxZ - house.minZ + 1.4, 8)} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.02, cz]} raycast={noopRaycast}>
-        <planeGeometry args={[Math.max(24, span * 2.4), Math.max(24, span * 2.4)]} />
-        <meshBasicMaterial color="#f3f1ec" />
+        <planeGeometry args={[Math.max(24, span * 1.4), Math.max(24, span * 1.4)]} />
+        <meshBasicMaterial color="#efe8d8" transparent={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground')} opacity={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground') ? 0.35 : 1} depthWrite={!(yardHasUnderground(plan.yard) && layerVisible(plan, 'ground'))} />
       </mesh>
+      <YardScene plan={plan} selected={selected} />
       <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2) / (drawMode ? 0.5 : 1)), '#b7b1a4', '#e4e0d8']} position={[cx, 0, cz]} />
-      {visibleRooms(plan).map((room) => (
-        <FloorMesh
-          key={room.id}
-          room={room}
-          selected={selected}
-          hovered={hovered}
-          translucent={layerVisible(plan, 'drain') && (plan.services?.runs || []).some((run) => run.system === 'drain')}
-        />
-      ))}
+      {visibleRooms(plan).map((room) => {
+        const runs = plan.services?.runs || []
+        const drainOn = layerVisible(plan, 'drain') && runs.some((run) => run.system === 'drain')
+        const heatOn = layerVisible(plan, 'heat') && runs.some((run) => run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor' || run.kind === 'ceiling' || run.role === 'feeder' || run.role === 'loop'))
+        const buried = layerVisible(plan, 'ground') && runs.some((run) => run.kind === 'collector' || String(run.linkedFrom || '').startsWith('yard:waste:') || String(run.linkedFrom || '').startsWith('yard:ground:'))
+        return (
+          <FloorMesh
+            key={room.id}
+            room={room}
+            selected={selected}
+            hovered={hovered}
+            translucent={drainOn || heatOn || buried}
+          />
+        )
+      })}
       {roofMode !== 'solid' && <RoomLabels plan={plan} />}
       <WallMesh plan={plan} mode={wallMode} selected={selected} hovered={hovered} />
       {(plan.openings || []).map((opening) => (
         <OpeningMesh key={opening.id} plan={plan} opening={opening} selected={selected} hovered={hovered} />
       ))}
       <RoofMesh plan={plan} mode={roofMode} selected={selected} hovered={hovered} />
-      {(plan.fixtures || []).map((fixture) => (
-        <FixtureMesh key={fixture.id} fixture={fixture} selected={selected} hovered={hovered} />
+      {wallMode !== 'hidden' && <Dressing plan={plan} />}
+      {normalizeDisplay(plan.display).fixtures && (plan.fixtures || []).map((fixture) => (
+        <FixtureMesh key={fixture.id} plan={plan} fixture={fixture} selected={selected} hovered={hovered} />
       ))}
       <Services3D plan={plan} selected={selected} hovered={hovered} />
       {drawMode && cursor && <FloorCursor point={cursor} ppm={cursorPpm} kind={snapKind} />}
@@ -960,7 +1643,7 @@ export default function HouseScene({
       <OrbitControls
         ref={controlsRef}
         makeDefault
-        target={[cx, 1.25, cz]}
+        target={[focusX, site ? 0.4 : 1.25, focusZ]}
         maxPolarAngle={Math.PI / 2.08}
         enableDamping={false}
         mouseButtons={{ LEFT: drawMode ? -1 : THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: -1 }}
@@ -975,6 +1658,8 @@ export default function HouseScene({
         onPlace={onPlace}
         onFixtureDrag={onFixtureDrag}
         onOpeningDrag={onOpeningDrag}
+        onYardDrag={onYardDrag}
+        onServiceDrag={onServiceDrag}
         onDropFixture={onDropFixture}
       />
       <FrameCamera plan={plan} fitToken={fitToken} controlsRef={controlsRef} />

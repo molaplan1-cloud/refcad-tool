@@ -1,9 +1,11 @@
 'use client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { LanguageSwitch, useLocale } from '@/components/i18n/Locale'
 
 export default function LandingClient({ user }) {
   const router = useRouter()
+  const { t, locale, setLocale } = useLocale()
   const start = () => router.push('/projects')
 
   return (
@@ -28,16 +30,17 @@ export default function LandingClient({ user }) {
             </div>
           </Link>
           <nav style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Link href="/pohjakuva" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Pohjakuva</Link>
-            <a href="#features" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Ominaisuudet</a>
-            <a href="#docs" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Dokumentaatio</a>
-            <a href="#pricing" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>Hinnoittelu</a>
+            <LanguageSwitch value={locale} onChange={setLocale} />
+            <Link href="/pohjakuva" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>{t('land.floorplan')}</Link>
+            <a href="#features" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>{t('land.features')}</a>
+            <a href="#docs" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>{t('land.docs')}</a>
+            <a href="#pricing" style={{ padding: '8px 14px', color: '#475569', textDecoration: 'none', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}>{t('land.pricing')}</a>
             <button onClick={start} style={{
               padding: '10px 20px', background: '#0ea5e9', border: 'none', borderRadius: '8px',
               color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
               marginLeft: '12px',
             }}>
-              {user ? 'Avaa projektit' : 'Aloita ilmaiseksi'} →
+              {user ? t('land.open') : t('land.start')} →
             </button>
           </nav>
         </div>
@@ -56,21 +59,21 @@ export default function LandingClient({ user }) {
             marginBottom: '32px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
           }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }}></span>
-            RefCAD Tool v3.0.8 · Selaimessa toimiva CAD
+            {t('land.badge')}
           </div>
           <h1 style={{
             fontSize: '64px', fontWeight: 800, lineHeight: 1.05,
             letterSpacing: '-0.03em', marginBottom: '24px', color: '#0f172a',
             maxWidth: '900px', margin: '0 auto 24px',
           }}>
-            Kylmähuoneen suunnittelu{' '}
-            <span style={{ color: '#0ea5e9' }}>yhdellä työkalulla</span>
+            {t('land.hero')}{' '}
+            <span style={{ color: '#0ea5e9' }}>{t('land.heroAccent')}</span>
           </h1>
           <p style={{
             fontSize: '19px', color: '#475569', lineHeight: 1.65,
             maxWidth: '680px', margin: '0 auto 40px',
           }}>
-            RefCAD Tool yhdistää luonnostelun ja lämpökuormalaskennan yhdeksi saumattomaksi kokonaisuudeksi. Suunniteltu kylmäalan ammattilaisille, jotka haluavat piirtää kylmähuoneensa, konfiguroida höyrystimet ja ovet, ja saada automaattisesti 3D-mallin — kaikki yhdessä paikassa.
+            {t('land.lead')}
           </p>
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginBottom: '60px' }}>
             <button onClick={start} style={{
@@ -78,14 +81,14 @@ export default function LandingClient({ user }) {
               color: '#fff', fontSize: '16px', fontWeight: 600, cursor: 'pointer',
               boxShadow: '0 4px 16px rgba(14,165,233,0.3)',
             }}>
-              ➕ Luo ensimmäinen projekti
+              ➕ {t('land.create')}
             </button>
             <a href="#demo" style={{
               padding: '16px 28px', background: '#fff', border: '1px solid #e5e7eb',
               borderRadius: '10px', color: '#0f172a',
               fontSize: '15px', fontWeight: 500, textDecoration: 'none',
             }}>
-              ▶ Katso demo
+              ▶ {t('land.demo')}
             </a>
           </div>
 
@@ -109,7 +112,7 @@ export default function LandingClient({ user }) {
             <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 280px', height: '520px' }}>
               {/* Sidebar */}
               <div style={{ background: '#1e293b', borderRight: '1px solid #334155', padding: '16px 12px', color: '#cbd5e1', fontSize: '12px' }}>
-                <div style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '10px' }}>Projektit</div>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '10px' }}>{t('land.projects')}</div>
                 <div style={{ padding: '8px 10px', background: 'rgba(14,165,233,0.15)', border: '1px solid rgba(14,165,233,0.4)', borderRadius: '6px', marginBottom: '6px', color: '#fff' }}>
                   <div style={{ fontWeight: 600, marginBottom: '2px' }}>Iso kylmähuone</div>
                   <div style={{ fontSize: '10px', color: '#94a3b8' }}>6.0m × 4.0m × 3.0m</div>

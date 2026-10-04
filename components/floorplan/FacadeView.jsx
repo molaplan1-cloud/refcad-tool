@@ -1,6 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { usePlanLocale } from '@/components/i18n/Locale'
+import { finishesOf } from '@/lib/finishes'
+import { text } from '@/lib/i18n'
+import { northAngle, sideCompass } from '@/lib/orientation'
 import {
   CLADDING,
   FACADE_SIDES,
@@ -15,7 +19,11 @@ import {
   facadePaints,
   formatArea,
   formatMm,
+  openingColour,
+  plinthLook,
+  roofLook,
   roofModel,
+  surfaceLook,
   updateFacadeZone,
 } from '@/lib/floorplan'
 
@@ -28,73 +36,83 @@ const inputStyle = {
   color: '#1c1917',
 }
 
-function PatternDefs() {
+function patternNode(look) {
+  const line = look.painted ? 'rgba(70,50,40,0.32)' : 'rgba(40,24,16,0.45)'
+  const pid = `clad-${look.key}`
+  if (look.pattern === 'brick') {
+    return (
+      <pattern key={look.key} id={pid} width="16" height="8" patternUnits="userSpaceOnUse">
+        <rect width="16" height="8" fill={look.color} />
+        <path d="M0 4 H16 M0 0 V4 M8 4 V8 M0 8 H16" fill="none" stroke={look.mortar || line} strokeWidth={look.painted ? '0.45' : '0.7'} />
+      </pattern>
+    )
+  }
+  if (look.pattern === 'boards-h') {
+    const band = Math.max(4, Math.min(14, (look.boardWidthMm || 145) / 18))
+    return (
+      <pattern key={look.key} id={pid} width="8" height={band} patternUnits="userSpaceOnUse">
+        <rect width="8" height={band} fill={look.color} />
+        <path d={`M0 ${band} H8`} stroke={line} strokeWidth="0.8" />
+      </pattern>
+    )
+  }
+  if (look.pattern === 'boards-v' || look.pattern === 'batten') {
+    const band = Math.max(6, Math.min(16, (look.boardWidthMm || 145) / 16))
+    return (
+      <pattern key={look.key} id={pid} width={band} height="12" patternUnits="userSpaceOnUse">
+        <rect width={band} height="12" fill={look.color} />
+        <path d={`M${band} 0 V12`} stroke={line} strokeWidth={look.pattern === 'batten' ? '1.4' : '0.7'} />
+      </pattern>
+    )
+  }
+  if (look.pattern === 'stone') {
+    return (
+      <pattern key={look.key} id={pid} width="18" height="12" patternUnits="userSpaceOnUse">
+        <rect width="18" height="12" fill={look.color} />
+        <path d="M0 6 H18 M0 0 V6 M9 6 V12 M4 0 V6 M14 6 V12" fill="none" stroke={line} strokeWidth="0.6" />
+      </pattern>
+    )
+  }
+  if (look.pattern === 'board') {
+    return (
+      <pattern key={look.key} id={pid} width="22" height="16" patternUnits="userSpaceOnUse">
+        <rect width="22" height="16" fill={look.color} />
+        <path d="M0 16 H22 M22 0 V16" fill="none" stroke={line} strokeWidth="0.7" />
+      </pattern>
+    )
+  }
+  if (look.pattern === 'concrete') {
+    return (
+      <pattern key={look.key} id={pid} width="10" height="10" patternUnits="userSpaceOnUse">
+        <rect width="10" height="10" fill={look.color} />
+        <circle cx="2" cy="3" r="0.6" fill="rgba(0,0,0,0.18)" />
+        <circle cx="7" cy="7" r="0.5" fill="rgba(255,255,255,0.25)" />
+      </pattern>
+    )
+  }
   return (
-    <defs>
-      {CLADDING.map((item) => {
-        const line = 'rgba(40,24,16,0.45)'
-        if (item.pattern === 'brick') {
-          return (
-            <pattern key={item.id} id={`clad-${item.id}`} width="16" height="8" patternUnits="userSpaceOnUse">
-              <rect width="16" height="8" fill={item.color} />
-              <path d="M0 4 H16 M0 0 V4 M8 4 V8 M0 8 H16" fill="none" stroke={line} strokeWidth="0.7" />
-            </pattern>
-          )
-        }
-        if (item.pattern === 'boards-h') {
-          return (
-            <pattern key={item.id} id={`clad-${item.id}`} width="8" height="6" patternUnits="userSpaceOnUse">
-              <rect width="8" height="6" fill={item.color} />
-              <path d="M0 6 H8" stroke={line} strokeWidth="0.8" />
-            </pattern>
-          )
-        }
-        if (item.pattern === 'boards-v' || item.pattern === 'batten') {
-          return (
-            <pattern key={item.id} id={`clad-${item.id}`} width={item.pattern === 'batten' ? '14' : '7'} height="12" patternUnits="userSpaceOnUse">
-              <rect width={item.pattern === 'batten' ? '14' : '7'} height="12" fill={item.color} />
-              <path d={item.pattern === 'batten' ? 'M2 0 V12 M12 0 V12' : 'M7 0 V12'} stroke={line} strokeWidth={item.pattern === 'batten' ? '1.4' : '0.7'} />
-            </pattern>
-          )
-        }
-        if (item.pattern === 'stone') {
-          return (
-            <pattern key={item.id} id={`clad-${item.id}`} width="18" height="12" patternUnits="userSpaceOnUse">
-              <rect width="18" height="12" fill={item.color} />
-              <path d="M0 6 H18 M0 0 V6 M9 6 V12 M4 0 V6 M14 6 V12" fill="none" stroke={line} strokeWidth="0.6" />
-            </pattern>
-          )
-        }
-        if (item.pattern === 'board') {
-          return (
-            <pattern key={item.id} id={`clad-${item.id}`} width="22" height="16" patternUnits="userSpaceOnUse">
-              <rect width="22" height="16" fill={item.color} />
-              <path d="M0 16 H22 M22 0 V16" fill="none" stroke={line} strokeWidth="0.7" />
-            </pattern>
-          )
-        }
-        return (
-          <pattern key={item.id} id={`clad-${item.id}`} width="8" height="8" patternUnits="userSpaceOnUse">
-            <rect width="8" height="8" fill={item.color} />
-            <circle cx="2" cy="3" r="0.5" fill="rgba(80,60,40,0.25)" />
-            <circle cx="6" cy="6" r="0.5" fill="rgba(80,60,40,0.25)" />
-          </pattern>
-        )
-      })}
-    </defs>
+    <pattern key={look.key} id={pid} width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill={look.color} />
+      <circle cx="2" cy="3" r="0.5" fill="rgba(80,60,40,0.25)" />
+      <circle cx="6" cy="6" r="0.5" fill="rgba(80,60,40,0.25)" />
+    </pattern>
   )
 }
 
-function ElevationOpening({ opening, X, Y, metres }) {
+function ElevationOpening({ opening, X, Y, metres, colour, trim, technical }) {
   const x = X(opening.u0)
   const y = Y(opening.y1)
   const w = Math.max(2, metres(opening.u1 - opening.u0))
   const h = Math.max(2, metres(opening.y1 - opening.y0))
   const frame = Math.max(2.4, Math.min(w, h) * 0.09)
+  const casing = Math.max(1.6, frame * 0.55)
+  const face = technical ? '#f8fafc' : colour
+  const board = technical ? '#f8fafc' : trim
   if (opening.kind === 'window') {
     return (
-      <g>
-        <rect x={x} y={y} width={w} height={h} fill="#f8fafc" stroke="#1c1917" strokeWidth="1.35" />
+      <g data-testid="facade-window">
+        <rect x={x - casing} y={y - casing} width={w + casing * 2} height={h + casing * 2} fill={board} stroke="#1c1917" strokeWidth="0.7" />
+        <rect x={x} y={y} width={w} height={h} fill={face} stroke="#1c1917" strokeWidth="1.35" />
         <rect x={x + frame} y={y + frame} width={Math.max(1, w - frame * 2)} height={Math.max(1, h - frame * 2)} fill="#dbeafe" stroke="#1c1917" strokeWidth="0.95" />
         <line x1={x + frame} y1={y + h / 2} x2={x + w - frame} y2={y + h / 2} stroke="#1c1917" strokeWidth="1.05" />
         <line x1={x + w / 2} y1={y + frame} x2={x + w / 2} y2={y + h - frame} stroke="#1c1917" strokeWidth="1.05" />
@@ -102,9 +120,10 @@ function ElevationOpening({ opening, X, Y, metres }) {
     )
   }
   return (
-    <g>
-      <rect x={x} y={y} width={w} height={h} fill="#d6d3d1" stroke="#1c1917" strokeWidth="1.4" />
-      <rect x={x + frame} y={y + frame * 0.55} width={Math.max(1, w - frame * 2)} height={Math.max(1, h - frame * 1.2)} fill="#f5f5f4" stroke="#1c1917" strokeWidth="0.9" />
+    <g data-testid="facade-door">
+      <rect x={x - casing} y={y - casing * 0.4} width={w + casing * 2} height={h + casing} fill={board} stroke="#1c1917" strokeWidth="0.7" />
+      <rect x={x} y={y} width={w} height={h} fill={face} stroke="#1c1917" strokeWidth="1.4" />
+      <rect x={x + frame} y={y + frame * 0.55} width={Math.max(1, w - frame * 2)} height={Math.max(1, h - frame * 1.2)} fill={technical ? '#f5f5f4' : '#f5f0e8'} stroke="#1c1917" strokeWidth="0.9" />
       <line x1={x + frame} y1={y + h * 0.38} x2={x + w - frame} y2={y + h * 0.38} stroke="#1c1917" strokeWidth="0.7" />
       <line x1={x + frame} y1={y + h * 0.68} x2={x + w - frame} y2={y + h * 0.68} stroke="#1c1917" strokeWidth="0.7" />
       <circle cx={x + w - frame * 2.1} cy={y + h * 0.52} r={Math.max(1.5, frame * 0.32)} fill="#1c1917" />
@@ -146,30 +165,29 @@ function FacadeHeights({ X, Y, length, wallH, ridge, openings }) {
   )
 }
 
-function roofStyle(roofId) {
-  if (roofId === 'tile') return { fill: '#8f342c', edge: '#3f1210', fascia: '#6b5344' }
-  if (roofId === 'felt') return { fill: '#57534e', edge: '#1c1917', fascia: '#44403c' }
-  return { fill: '#9aa6b2', edge: '#1e293b', fascia: '#64748b' }
-}
-
-function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd, roofType, roofId }) {
-  const style = roofStyle(roofId)
+function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd, roofType, roofId, fill, edge, fascia, gutter, pattern }) {
+  const style = { fill: fill || '#9aa6b2', edge: edge || '#1e293b', fascia: fascia || '#f4f1ea' }
+  const tiled = pattern === 'tile' || pattern === 'tile-metal' || roofId === 'tile' || roofId === 'clay-tile' || roofId === 'concrete-tile'
   const left = -overhang
   const right = length + overhang
   const mid = length / 2
-  const fascia = 0.16
+  const fasciaH = 0.16
   const flat = roofType === 'flat' || ridge - wallH < 0.2
   const courses = []
-  for (let y = wallH + (roofId === 'tile' ? 0.18 : 0.28); y < ridge - 0.05; y += roofId === 'tile' ? 0.16 : 0.32) courses.push(y)
+  for (let y = wallH + (tiled ? 0.18 : 0.28); y < ridge - 0.05; y += tiled ? 0.16 : 0.32) courses.push(y)
   const seams = []
-  const step = roofId === 'tile' ? 0.42 : 0.55
+  const step = tiled ? 0.42 : pattern === 'corrugated' ? 0.28 : 0.55
   for (let u = left + step * 0.5; u < right - 0.15; u += step) seams.push(u)
+  const gutterBar = (key) => (
+    <rect key={key} x={X(left)} y={Y(wallH - fasciaH)} width={metres(right - left)} height={metres(0.07)} fill={gutter || '#383E42'} stroke="#1c1917" strokeWidth={0.6} />
+  )
 
   if (flat) {
     return (
       <g data-testid="facade-roof">
         <rect x={X(left)} y={Y(wallH + 0.18)} width={metres(right - left)} height={metres(0.18)} fill={style.fill} stroke={style.edge} strokeWidth={1.1} />
-        <rect x={X(left)} y={Y(wallH)} width={metres(right - left)} height={metres(fascia)} fill={style.fascia} stroke={style.edge} strokeWidth={0.9} />
+        <rect x={X(left)} y={Y(wallH)} width={metres(right - left)} height={metres(fasciaH)} fill={style.fascia} stroke={style.edge} strokeWidth={0.9} />
+        {gutterBar('flat')}
         <line x1={X(left)} y1={Y(wallH)} x2={X(right)} y2={Y(wallH)} stroke="#f8fafc" strokeWidth={0.7} />
       </g>
     )
@@ -184,14 +202,15 @@ function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd,
           stroke={style.edge}
           strokeWidth={1.15}
         />
-        {roofId === 'tile'
+        {tiled
           ? courses.map((y) => <line key={y} x1={X(left)} y1={Y(y)} x2={X(right)} y2={Y(y)} stroke={style.edge} strokeWidth={0.9} />)
-          : seams.map((u) => <line key={u} x1={X(u)} y1={Y(wallH + 0.02)} x2={X(u)} y2={Y(ridge - 0.05)} stroke={style.edge} strokeWidth={1.35} />)}
+          : seams.map((u) => <line key={u} x1={X(u)} y1={Y(wallH + 0.02)} x2={X(u)} y2={Y(ridge - 0.05)} stroke={style.edge} strokeWidth={pattern === 'seam' || pattern === 'corrugated' ? 1.15 : 0.7} />)}
         <rect x={X(left)} y={Y(ridge)} width={metres(right - left)} height={metres(0.07)} fill={style.edge} />
         <line x1={X(left)} y1={Y(ridge)} x2={X(right)} y2={Y(ridge)} stroke="#f8fafc" strokeWidth={0.8} />
-        <rect x={X(left)} y={Y(wallH)} width={metres(right - left)} height={metres(fascia)} fill={style.fascia} stroke={style.edge} strokeWidth={0.9} />
+        <rect x={X(left)} y={Y(wallH)} width={metres(right - left)} height={metres(fasciaH)} fill={style.fascia} stroke={style.edge} strokeWidth={0.9} />
+        {gutterBar('eave')}
         <line x1={X(left)} y1={Y(wallH)} x2={X(right)} y2={Y(wallH)} stroke="#e2e8f0" strokeWidth={0.8} />
-        <line x1={X(left)} y1={Y(wallH - fascia)} x2={X(right)} y2={Y(wallH - fascia)} stroke={style.edge} strokeWidth={1.15} />
+        <line x1={X(left)} y1={Y(wallH - fasciaH)} x2={X(right)} y2={Y(wallH - fasciaH)} stroke={gutter || style.edge} strokeWidth={1.4} />
       </g>
     )
   }
@@ -229,15 +248,22 @@ function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd,
 }
 
 export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
+  const { t, locale } = usePlanLocale(plan)
+  const north = northAngle(plan)
   const hostRef = useRef(null)
   const [size, setSize] = useState({ w: 900, h: 640 })
   const [draft, setDraft] = useState(null)
   const [cursor, setCursor] = useState(null)
   const [tool, setTool] = useState('select')
   const [menu, setMenu] = useState(null)
+  const [ribbon, setRibbon] = useState(null)
   const [band, setBand] = useState({ y0: 0, y1: 900, materialId: 'brick-red' })
   const layout = facadeLayout(plan, side)
   const paints = facadePaints(plan, side)
+  const finish = finishesOf(plan)
+  const plinth = plinthLook(plan)
+  const roofFace = roofLook(plan)
+  const realistic = finish.sceneStyle !== 'technical'
 
   useEffect(() => {
     const node = hostRef.current
@@ -325,37 +351,60 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
   }
 
   const areas = []
-  paints.forEach((piece) => {
-    if (!piece.materialId) return
-    const area = (piece.u1 - piece.u0) * (piece.y1 - piece.y0)
-    const found = areas.find((row) => row.id === piece.materialId)
-    if (found) found.area += area
-    else areas.push({ id: piece.materialId, area, item: claddingOf(piece.materialId) })
+  const svgKey = (look) => `${look.id}-${look.color}-${look.pattern}${look.painted ? '-p' : ''}`.replace(/[^a-z0-9-]+/gi, '')
+  const visiblePaints = paints.filter((piece) => piece.materialId && piece.y1 > plinth.height).map((piece) => {
+    const look = surfaceLook(plan, piece.materialId, { color: piece.color, colorCode: piece.colorCode })
+    return { ...piece, y0: Math.max(piece.y0, plinth.height), look, key: svgKey(look) }
   })
+  visiblePaints.forEach((piece) => {
+    const area = (piece.u1 - piece.u0) * (piece.y1 - piece.y0)
+    const found = areas.find((row) => row.key === piece.key)
+    if (found) found.area += area
+    else areas.push({ key: piece.key, id: piece.materialId, area, item: claddingOf(piece.materialId), look: piece.look })
+  })
+  const patternLooks = []
+  visiblePaints.forEach((piece) => {
+    if (!patternLooks.some((item) => item.key === piece.key)) patternLooks.push({ ...piece.look, key: piece.key })
+  })
+  patternLooks.push({ ...plinth, id: 'plinth', key: 'plinth', painted: false, mortar: plinth.color, boardWidthMm: 145 })
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: '#d6d3d1' }}>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
-        {FACADE_SIDES.map((item) => (
-          <button key={item.id} type="button" data-testid={`facade-side-${item.id}`} onClick={() => onSide(item.id)} style={chip(side === item.id)}>{item.name}</button>
-        ))}
-        <button type="button" data-testid="facade-preset-above" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'above'))}>Yläpuolinen vyöhyke</button>
-        <button type="button" data-testid="facade-preset-plinth" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'plinth'))}>Sokkelivyöhyke</button>
-        <button type="button" data-testid="facade-preset-band" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'band'))}>Ikkunanauha</button>
-        <button type="button" data-testid="facade-brick-wood" style={chip(false)} onClick={() => onCommit(applyBrickBelowWoodAbove(plan, side))}>Tiili alle, puu päälle</button>
-        <button type="button" data-testid="facade-rect" style={chip(tool === 'rect')} onClick={() => setTool(tool === 'rect' ? 'select' : 'rect')}>Suorakulmio</button>
-        <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
+      <div data-testid="facade-toolbar" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'nowrap', overflow: 'visible', minHeight: 40, padding: '4px 10px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
+        {FACADE_SIDES.map((item) => {
+          const code = sideCompass(item.id, north)
+          const name = t(`compass.${code}`)
+          return (
+            <button key={item.id} type="button" data-testid={`facade-side-${item.id}`} data-compass={code} title={`${code} ${name}`} onClick={() => onSide(item.id)} style={chip(side === item.id)}>{code}</button>
+          )
+        })}
+        <span style={{ position: 'relative', flexShrink: 0 }}>
+          <button type="button" data-testid="facade-presets" title={t('facade.above')} style={chip(ribbon === 'preset')} onClick={() => setRibbon(ribbon === 'preset' ? null : 'preset')}>Vyöhykkeet</button>
+          {ribbon === 'preset' && (
+            <div style={{ position: 'absolute', top: 32, left: 0, zIndex: 20, minWidth: 220, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 8, padding: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}>
+              <button type="button" data-testid="facade-preset-above" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'above')); setRibbon(null) }}>{t('facade.above')}</button>
+              <button type="button" data-testid="facade-preset-plinth" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'plinth')); setRibbon(null) }}>{t('facade.plinth')}</button>
+              <button type="button" data-testid="facade-preset-band" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'band')); setRibbon(null) }}>{t('facade.band')}</button>
+              <button type="button" data-testid="facade-brick-wood" style={menuBtn} onClick={() => { onCommit(applyBrickBelowWoodAbove(plan, side)); setRibbon(null) }}>{t('facade.brickWood')}</button>
+              <button type="button" data-testid="facade-rect" style={menuBtn} onClick={() => { setTool(tool === 'rect' ? 'select' : 'rect'); setRibbon(null) }}>{t('facade.rect')}</button>
+            </div>
+          )}
+        </span>
+        <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
           <span>mm</span>
-          <input aria-label="Vyöhykkeen alareuna" style={{ ...inputStyle, width: 64 }} type="number" value={band.y0} onChange={(event) => setBand({ ...band, y0: Number(event.target.value) })} />
+          <input aria-label="Vyöhykkeen alareuna" style={{ ...inputStyle, width: 58 }} type="number" value={band.y0} onChange={(event) => setBand({ ...band, y0: Number(event.target.value) })} />
           <span>–</span>
-          <input aria-label="Vyöhykkeen yläreuna" style={{ ...inputStyle, width: 64 }} type="number" value={band.y1} onChange={(event) => setBand({ ...band, y1: Number(event.target.value) })} />
-          <select style={inputStyle} value={band.materialId} onChange={(event) => setBand({ ...band, materialId: event.target.value })}>
+          <input aria-label="Vyöhykkeen yläreuna" style={{ ...inputStyle, width: 58 }} type="number" value={band.y1} onChange={(event) => setBand({ ...band, y1: Number(event.target.value) })} />
+          <select aria-label="Vyöhykkeen materiaali" title={CLADDING.find((item) => item.id === band.materialId)?.name || ''} style={{ ...inputStyle, width: 128 }} value={band.materialId} onChange={(event) => setBand({ ...band, materialId: event.target.value })}>
             {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <button type="button" data-testid="facade-band" style={chip(false)} onClick={() => onCommit(addFacadeBand(plan, side, band.y0 / 1000, band.y1 / 1000, band.materialId))}>Vaakavyöhyke</button>
+          <button type="button" data-testid="facade-band" title={t('facade.horizontal')} style={chip(false)} onClick={() => onCommit(addFacadeBand(plan, side, band.y0 / 1000, band.y1 / 1000, band.materialId))}>Lisää</button>
         </label>
+        <span style={{ width: 1, height: 18, background: '#d6d3d1', flexShrink: 0 }} />
+        <button type="button" data-testid="facade-realistic" style={chip(realistic)} onClick={() => onApply({ ...plan, sceneStyle: 'realistic' })}>{t('finish.realistic')}</button>
+        <button type="button" data-testid="facade-technical" style={chip(!realistic)} onClick={() => onApply({ ...plan, sceneStyle: 'technical' })}>{t('finish.technical')}</button>
         <button type="button" data-testid="facade-pdf" style={chip(false)} onClick={() => buildElevationPdf(plan, side).save(`julkisivu-${side}.pdf`)}>PDF</button>
-        <button type="button" data-testid="facade-pdf-all" style={chip(false)} onClick={() => buildElevationPdf(plan, 'all').save('julkisivut.pdf')}>Kaikki sivut</button>
+        <button type="button" data-testid="facade-pdf-all" title={t('facade.allSides')} style={chip(false)} onClick={() => buildElevationPdf(plan, 'all').save('julkisivut.pdf')}>PDF 4</button>
       </div>
       <div ref={hostRef} data-testid="facade-view" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <svg
@@ -372,27 +421,26 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
           }}
           style={{ display: 'block', background: '#d6d3d1', touchAction: 'none', cursor: tool === 'rect' ? 'crosshair' : 'default' }}
         >
-          <PatternDefs />
+          <defs>{patternLooks.map((look) => patternNode(realistic ? look : { ...look, color: '#f8fafc', painted: false }))}</defs>
           <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.3} />
           <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
           <line x1={X(-overhang - 0.8)} y1={Y(-0.06)} x2={X(layout.length + overhang + 1.1)} y2={Y(-0.06)} stroke="#44403c" strokeWidth={2.4} />
           <line x1={X(-overhang - 0.35)} y1={Y(0)} x2={X(layout.length + overhang + 0.45)} y2={Y(0)} stroke="#1c1917" strokeWidth={1.3} />
-          {paints.filter((piece) => piece.materialId && piece.y1 > 0.3).map((piece, index) => {
-            const y0 = Math.max(piece.y0, 0.3)
-            return (
-              <rect
-                key={`${piece.wallId}-${index}-${piece.y0}`}
-                x={X(piece.u0)}
-                y={Y(piece.y1)}
-                width={Math.max(0, metres(piece.u1 - piece.u0))}
-                height={Math.max(0, metres(piece.y1 - y0))}
-                fill={`url(#clad-${claddingOf(piece.materialId).id})`}
-                stroke="#44403c"
-                strokeWidth="0.35"
-              />
-            )
-          })}
-          <rect x={X(0)} y={Y(0.3)} width={metres(layout.length)} height={metres(0.3)} fill="#9ca3af" stroke="#1c1917" strokeWidth={0.9} />
+          {visiblePaints.map((piece, index) => (
+            <rect
+              key={`${piece.wallId}-${index}-${piece.y0}`}
+              x={X(piece.u0)}
+              y={Y(piece.y1)}
+              width={Math.max(0, metres(piece.u1 - piece.u0))}
+              height={Math.max(0, metres(piece.y1 - piece.y0))}
+              fill={realistic ? `url(#clad-${piece.key})` : '#f8fafc'}
+              stroke="#44403c"
+              strokeWidth="0.35"
+            />
+          ))}
+          <rect data-testid="facade-plinth" x={X(0)} y={Y(plinth.height)} width={metres(layout.length)} height={metres(plinth.height)} fill={realistic ? 'url(#clad-plinth)' : '#f8fafc'} stroke="#1c1917" strokeWidth={0.9} />
+          <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(wallH)} stroke={realistic ? finish.trimColor : '#1c1917'} strokeWidth={3} />
+          <line x1={X(layout.length)} y1={Y(0)} x2={X(layout.length)} y2={Y(wallH)} stroke={realistic ? finish.trimColor : '#1c1917'} strokeWidth={3} />
           <RoofElevation
             X={X}
             Y={Y}
@@ -404,9 +452,16 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
             gableEnd={gableEnd}
             roofType={roof.type}
             roofId={plan.roofId}
+            fill={realistic ? roofFace.color : '#f8fafc'}
+            edge="#1c1917"
+            fascia={realistic ? finish.trimColor : '#f8fafc'}
+            gutter={realistic ? roofFace.gutterColor : '#cbd5e1'}
+            pattern={roofFace.pattern}
           />
+          <line data-testid="facade-downpipe" x1={X(0.15)} y1={Y(wallH)} x2={X(0.15)} y2={Y(0)} stroke={realistic ? roofFace.gutterColor : '#1c1917'} strokeWidth={2.4} />
+          <line x1={X(layout.length - 0.15)} y1={Y(wallH)} x2={X(layout.length - 0.15)} y2={Y(0)} stroke={realistic ? roofFace.gutterColor : '#1c1917'} strokeWidth={2.4} />
           {layout.openings.map((opening) => (
-            <ElevationOpening key={opening.id} opening={opening} X={X} Y={Y} metres={metres} />
+            <ElevationOpening key={opening.id} opening={opening} X={X} Y={Y} metres={metres} colour={openingColour(plan, opening).color} trim={finish.trimColor} technical={!realistic} />
           ))}
           {draft && cursor && (
             <rect
@@ -420,21 +475,26 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
             />
           )}
           <FacadeHeights X={X} Y={Y} metres={metres} length={layout.length} wallH={wallH} ridge={ridge} openings={layout.openings} />
-          {areas.length > 0 && (
+          {(areas.length > 0 || plinth.height > 0) && (
             <g data-testid="facade-legend">
               {(() => {
-                const legendW = Math.max(148, ...areas.map((row) => 40 + (`${row.item.name} ${formatArea(row.area)}`).length * 6.1))
-                const legendH = 22 + areas.length * 16
+                const schedule = [
+                  ...areas.map((row) => ({ key: row.key, name: row.item.name, code: row.look.code, area: row.area, swatch: row.key })),
+                  { key: 'plinth', name: plinth.name, code: plinth.code, area: null, swatch: 'plinth', height: plinth.height },
+                  { key: 'roof', name: roofFace.name, code: roofFace.code, area: null, swatch: null, color: roofFace.color },
+                ]
+                const legendW = Math.max(168, ...schedule.map((row) => 36 + (`${row.name} ${row.code || ''} ${row.area ? formatArea(row.area) : ''}`).length * 5.6))
+                const legendH = 22 + schedule.length * 16
                 const lx = sheet.x + 14
                 const ly = sheet.y + 14
                 return (
                   <>
                     <rect x={lx} y={ly} width={legendW} height={legendH} fill="#fff" stroke="#1c1917" strokeWidth={0.9} />
-                    <text x={lx + 8} y={ly + 13} fontSize="10" fontWeight="700" fill="#1c1917">Selite</text>
-                    {areas.map((row, index) => (
-                      <g key={row.id} transform={`translate(${lx + 8} ${ly + 20 + index * 16})`}>
-                        <rect width="14" height="10" fill={`url(#clad-${row.item.id})`} stroke="#44403c" strokeWidth="0.5" />
-                        <text x="18" y="9" fontSize="11" fill="#1c1917">{row.item.name} {formatArea(row.area)}</text>
+                    <text x={lx + 8} y={ly + 13} fontSize="10" fontWeight="700" fill="#1c1917">{t('facade.legend')}</text>
+                    {schedule.map((row, index) => (
+                      <g key={row.key} data-testid="facade-schedule" data-code={row.code || ''} transform={`translate(${lx + 8} ${ly + 20 + index * 16})`}>
+                        <rect width="14" height="10" fill={row.swatch ? `url(#clad-${row.swatch})` : row.color} stroke="#44403c" strokeWidth="0.5" />
+                        <text x="18" y="9" fontSize="11" fill="#1c1917">{row.name}{row.code ? ` ${row.code}` : ''}{row.area ? ` ${formatArea(row.area)}` : ''}</text>
                       </g>
                     ))}
                   </>
@@ -444,9 +504,9 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit }) {
           )}
           <g data-testid="facade-title">
             <rect x={sheet.x + (frame.x + frame.w - titleW - 2) * k} y={sheet.y + (frame.y + frame.h - titleH - 2) * k} width={titleW * k} height={titleH * k} fill="#fff" stroke="#1c1917" strokeWidth={1} />
-            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 14) * k} fontSize="13" fontWeight="750" fill="#1c1917">Julkisivu {layout.name}</text>
-            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 30) * k} fontSize="11" fill="#292524">Mittakaava 1:{ratio}</text>
-            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 44) * k} fontSize="11" fill="#292524">{roof.type === 'gable' ? 'Harjakatto' : roof.type === 'hip' ? 'Aumakatto' : roof.type === 'shed' ? 'Pulpettikatto' : 'Tasakatto'}</text>
+            <text data-testid="facade-orientation" data-compass={layout.compass || sideCompass(side, north)} x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 14) * k} fontSize="13" fontWeight="750" fill="#1c1917">{t('facade.title', { side: `${layout.compass || ''} ${layout.name}`.trim() })}</text>
+            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 30) * k} fontSize="11" fill="#292524">{t('sheet.scale', { ratio })}</text>
+            <text x={sheet.x + (frame.x + frame.w - titleW + 6) * k} y={sheet.y + (frame.y + frame.h - titleH + 44) * k} fontSize="11" fill="#292524">{text(locale, `facade.${roof.type}`, roof.type)}</text>
           </g>
         </svg>
         {menu && (
@@ -499,6 +559,8 @@ function chip(active) {
     fontWeight: 650,
     cursor: 'pointer',
     transform: 'none',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
   }
 }
 

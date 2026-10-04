@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useLocale } from '@/components/i18n/Locale'
 import { PRODUCTS, ROOM_TYPES, getProduct, isRefrigerated } from '@/lib/catalog'
 import { applyType, internalDims } from '@/lib/geometry'
 import { isCustomOutline, polygonMetrics } from '@/lib/cadDraw'
@@ -8,6 +9,7 @@ import { formatKw, formatPower, fromLength, fromTemp, lengthUnit, tempUnit, toLe
 import { capacityCheck, suggestPackage } from '@/lib/selection'
 import { routeLength, REFRIGERANT_IDS as PIPE_REFS } from '@/lib/pipeSizing'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
+import { HEIGHT_PRESETS, insulationOptions, materialOptions, routeLength as polyLength } from '@/lib/routeEdit'
 import { defaultElevation, mountLabel } from '@/lib/placement'
 
 const labelStyle = {
@@ -52,6 +54,7 @@ const GROUP_LABELS = [
 ]
 
 function LineRow({ item, unitSystem, maxAbs, subtotal }) {
+  const { locale } = useLocale()
   const credit = item.watts < -1
   const pct = subtotal ? (item.watts / subtotal) * 100 : 0
   const width = maxAbs > 0 ? Math.min(100, (Math.abs(item.watts) / maxAbs) * 100) : 0
@@ -61,7 +64,7 @@ function LineRow({ item, unitSystem, maxAbs, subtotal }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, alignItems: 'baseline' }}>
         <span style={{ color: '#292524' }}>{item.label}</span>
         <span style={{ color: credit ? '#047857' : '#1c1917', fontWeight: 700, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-          {Math.round(item.watts).toLocaleString('fi-FI')} W
+          {Math.round(item.watts).toLocaleString(locale === 'en' ? 'en-GB' : locale === 'sv' ? 'sv-SE' : locale === 'es' ? 'es-ES' : locale === 'et' ? 'et-EE' : 'fi-FI')} W
           <span style={{ marginLeft: 6, color: '#a8a29e', fontWeight: 600, fontSize: 11 }}>{pctLabel}</span>
         </span>
       </div>
@@ -110,11 +113,15 @@ export default function HeatLoadPanel({
   onBlurEdit,
   selectedEquipment,
   selectedPipe,
+  selectedCable,
   pipes,
   onPatchEquipment,
   onPatchPipe,
   onDeleteEquipment,
+  onReroutePipe,
+  onSplitPipe,
 }) {
+  const { t, locale } = useLocale()
   const field = { onFocus: onFocusEdit, onBlur: onBlurEdit }
   const length = (metres) => toLength(metres, unitSystem)
   const temp = (c) => toTemp(c, unitSystem)
@@ -130,7 +137,7 @@ export default function HeatLoadPanel({
 
   const maxAbs = roomResult ? Math.max(1, ...roomResult.lines.map((item) => Math.abs(item.watts))) : 1
   const grouped = roomResult
-    ? GROUP_LABELS.map(([id, label]) => ({ id, label, lines: roomResult.lines.filter((item) => item.group === id) })).filter((group) => group.lines.length)
+    ? GROUP_LABELS.map(([id]) => ({ id, label: t(`cold.${id}`), lines: roomResult.lines.filter((item) => item.group === id) })).filter((group) => group.lines.length)
     : []
 
   return (
@@ -140,7 +147,7 @@ export default function HeatLoadPanel({
         padding: '12px 14px 10px', borderBottom: '1px solid #e7e5e4',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-          <div style={{ fontSize: 10, letterSpacing: 0.8, color: '#78716c', fontWeight: 700 }}>KOKO KOHDE</div>
+          <div style={{ fontSize: 10, letterSpacing: 0.8, color: '#78716c', fontWeight: 700 }}>{t('designer.whole')}</div>
           <div style={{ fontSize: 11, color: '#0f766e' }}>{result.suggestedEvap.count} × {result.suggestedEvap.template.name}</div>
         </div>
         <div style={{ fontSize: 26, fontWeight: 750, color: '#1c1917', lineHeight: 1.05, letterSpacing: -0.4, marginTop: 2 }}>
@@ -333,7 +340,10 @@ export default function HeatLoadPanel({
         </>
       )}
       {selectedPipe && (
-        <PipeCard pipe={selectedPipe} rooms={rooms} result={result} pipes={pipes} onPatch={onPatchPipe} onDelete={onDeleteEquipment} />
+        <PipeCard pipe={selectedPipe} rooms={rooms} result={result} pipes={pipes} onPatch={onPatchPipe} onDelete={onDeleteEquipment} onReroute={onReroutePipe} onSplit={onSplitPipe} />
+      )}
+      {selectedCable && !selectedPipe && (
+        <CableCard cable={selectedCable} onPatch={onPatchPipe} onDelete={onDeleteEquipment} />
       )}
       {selectedEquipment && (
         <div style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
@@ -422,7 +432,7 @@ function CapacityBlock({ room, roomResult }) {
   )
 }
 
-function PipeCard({ pipe, rooms, result, pipes, onPatch, onDelete }) {
+function PipeCard({ pipe, rooms, result, pipes, onPatch, onDelete, onReroute, onSplit }) {
   const { duty, sized } = sizePlacedPipe(pipe, rooms, result.rooms, pipes)
   const source = duty.source === 'evaporator' ? 'höyrystimestä' : duty.source === 'circuit' ? 'piiristä' : duty.source === 'room' ? 'huoneen tarpeesta' : duty.source === 'manual' ? 'käsin' : duty.source === 'drain' ? 'kondenssivesi' : 'ei kytkettyä tehoa'
   return (
@@ -472,12 +482,70 @@ function PipeCard({ pipe, rooms, result, pipes, onPatch, onDelete }) {
           <div style={{ fontSize: 10, color: '#a8a29e', fontFamily: 'ui-monospace, monospace' }}>{step.formula}</div>
         </div>
       ))}
+      <RouteEditFields item={pipe} onPatch={onPatch} onReroute={() => onReroute?.(pipe.id)} onSplit={() => onSplit?.(pipe.id)} />
       <button type="button" onClick={onDelete} style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(220,38,38,0.45)', background: '#fef2f2', color: '#991b1b', fontSize: 12, cursor: 'pointer', transform: 'none' }}>
         Poista putki
       </button>
     </div>
   )
 }
+
+function RouteEditFields({ item, onPatch, onReroute, onSplit }) {
+  const materials = materialOptions(item.kind === 'cable' ? 'electric' : 'iv')
+  const insulations = insulationOptions(item.kind === 'drain' ? 'drain' : 'iv')
+  return (
+    <div data-testid="cold-route-fields" style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+      <label style={{ display: 'block' }}>
+        <span style={labelStyle}>Nimi</span>
+        <input data-testid="cold-route-label" value={item.label || ''} onChange={(event) => onPatch?.({ label: event.target.value })} style={inputStyle} />
+      </label>
+      <label style={{ display: 'block' }}>
+        <span style={labelStyle}>Korkeus</span>
+        <select data-testid="cold-route-height" value={item.heightMode || ''} onChange={(event) => onPatch?.({ heightMode: event.target.value })} style={inputStyle}>
+          <option value="">Oma</option>
+          {HEIGHT_PRESETS.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block' }}>
+        <span style={labelStyle}>Materiaali</span>
+        <select data-testid="cold-route-material" value={item.material || ''} onChange={(event) => onPatch?.({ material: event.target.value })} style={inputStyle}>
+          <option value="">—</option>
+          {materials.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block' }}>
+        <span style={labelStyle}>Eristys</span>
+        <select data-testid="cold-route-insulation" value={item.insulation || ''} onChange={(event) => onPatch?.({ insulation: event.target.value })} style={inputStyle}>
+          <option value="">—</option>
+          {insulations.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+        <input data-testid="cold-route-lock" type="checkbox" checked={Boolean(item.locked)} onChange={(event) => onPatch?.({ locked: event.target.checked })} />
+        Manuaalinen
+      </label>
+      <div style={{ fontSize: 11, color: '#57534e' }}>Pituus {polyLength(item.points).toFixed(1)} m</div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {onSplit && <button type="button" data-testid="cold-route-split" onClick={onSplit} style={miniBtn}>Jaa</button>}
+        {onReroute && <button type="button" data-testid="cold-route-reroute" onClick={onReroute} style={miniBtn}>Reititä uudelleen</button>}
+      </div>
+    </div>
+  )
+}
+
+function CableCard({ cable, onPatch, onDelete }) {
+  return (
+    <div data-testid="cable-audit" style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
+      <div style={{ fontSize: 13, fontWeight: 750, marginBottom: 4 }}>Kaapeli</div>
+      <RouteEditFields item={{ ...cable, kind: 'cable' }} onPatch={onPatch} />
+      <button type="button" onClick={onDelete} style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(220,38,38,0.45)', background: '#fef2f2', color: '#991b1b', fontSize: 12, cursor: 'pointer', transform: 'none' }}>
+        Poista kaapeli
+      </button>
+    </div>
+  )
+}
+
+const miniBtn = { border: '1px solid #d6d3d1', background: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 11, padding: '4px 8px', transform: 'none' }
 
 function InternalNote({ room, unitSystem }) {
   const dims = isCustomOutline(room) ? polygonMetrics(room).dims : internalDims(room)

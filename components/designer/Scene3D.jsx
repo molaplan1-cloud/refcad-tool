@@ -1725,7 +1725,54 @@ function compassMark(label, heading, extra, color) {
   )
 }
 
-export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onContext, unitSystem }) {
+function VertexGrip({ point, index, onDrag }) {
+  const controls = useThree((state) => state.controls)
+  const dragging = useRef(false)
+  const y = Number.isFinite(point.y) ? point.y : 1.6
+  return (
+    <mesh
+      position={[point.x, y, point.z]}
+      onPointerDown={(event) => {
+        event.stopPropagation()
+        dragging.current = true
+        if (controls) controls.enabled = false
+        onDrag(index, null, 'start')
+      }}
+      onPointerMove={(event) => {
+        if (!dragging.current) return
+        event.stopPropagation()
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -y)
+        const hit = new THREE.Vector3()
+        if (!event.ray.intersectPlane(plane, hit)) return
+        const grid = 0.1
+        onDrag(index, { x: Math.round(hit.x / grid) * grid, y, z: Math.round(hit.z / grid) * grid }, 'move')
+      }}
+      onPointerUp={(event) => {
+        event.stopPropagation()
+        dragging.current = false
+        if (controls) controls.enabled = true
+        onDrag(index, null, 'end')
+      }}
+    >
+      <sphereGeometry args={[0.08, 12, 10]} />
+      <meshBasicMaterial color="#0f766e" depthTest={false} />
+    </mesh>
+  )
+}
+
+function RouteGrips({ items, kind, selectedId, onDrag }) {
+  const selected = (items || []).find((item) => item.id === selectedId)
+  if (!selected || onDrag == null) return null
+  return (
+    <group>
+      {(selected.points || []).map((point, index) => (
+        <VertexGrip key={`${kind}-${selected.id}-${index}`} point={point} index={index} onDrag={(gripIndex, at, phase) => onDrag(kind, selected.id, gripIndex, at, phase)} />
+      ))}
+    </group>
+  )
+}
+
+export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, onSelect, onContext, onRouteDrag, unitSystem }) {
   const [theme, setTheme] = useState('technical')
   const [dims, setDims] = useState(true)
   const [heading, setHeading] = useState(0)
@@ -1805,6 +1852,8 @@ export default function Scene3D({ rooms, pipes = [], selectedId, onSelect, onCon
             )
           ))}
           <PipeRuns rooms={rooms} pipes={pipes} />
+          <RouteGrips items={pipes} kind="pipe" selectedId={selectedId} onDrag={onRouteDrag} />
+          <RouteGrips items={cables} kind="cable" selectedId={selectedId} onDrag={onRouteDrag} />
           {dims ? <RoomDimensions rooms={rooms} theme={palette.id} /> : null}
           <OrbitControls
             makeDefault

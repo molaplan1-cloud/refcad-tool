@@ -11,15 +11,24 @@ import {
   deleteServiceNode,
   deleteServiceRun,
   ensureServices,
+  joinServiceRuns,
   layerVisible,
+  manifoldCallouts,
+  serviceItemVisible,
   nodeColor,
+  rerouteRun,
+  rerouteSystem,
   runColor,
   serviceLegend,
   serviceObjectTitle,
+  splitServiceRun,
   updateServiceNode,
   updateServiceRun,
 } from '@/lib/services'
-import { CadItem, CadMenu, CadSep, Segmented } from './CadMenu'
+import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
+import { houseBox } from '@/lib/yard'
+import { CAD_COMMANDS } from '@/lib/cadEdit'
+import { CadItem, CadMenu, CadSep, Flyout, Segmented } from './CadMenu'
 
 const barBtn = (active) => ({
   height: 26,
@@ -167,9 +176,9 @@ function shiftPoints(points, system, multi, kind) {
   })
 }
 
-function SlopeMark({ run, X, Y }) {
+function SlopeMark({ run, X, Y, show = true }) {
   const pts = run.points || []
-  if (!run.slope || pts.length < 2) return null
+  if (!show || !run.slope || pts.length < 2) return null
   let best = null
   for (let i = 1; i < pts.length; i += 1) {
     const len = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z)
@@ -337,6 +346,12 @@ function NodeSymbol({ node }) {
     boiler: ['V', 18],
     washer: ['PK', 24],
     dishwasher: ['AP', 24],
+    fridge: ['JK', 22],
+    dryer: ['KR', 22],
+    microwave: ['M', 18],
+    tv: ['TV', 22],
+    towel: ['PK', 22],
+    spa: ['PA', 22],
   }[node.kind]
   if (badge) {
     const [label, width] = badge
@@ -389,11 +404,19 @@ function NodeSymbol({ node }) {
       </g>
     )
   }
-  if (node.kind === 'thermostat' || node.kind === 'actuator') {
+  if (node.kind === 'actuator') {
+    return (
+      <g data-testid="actuator-tag">
+        <rect x={-3} y={-3} width={6} height={6} rx={0.8} fill="#fff" stroke="#0f766e" strokeWidth={0.7} />
+        <text x="0" y="1.7" textAnchor="middle" fontSize="4.5" fontWeight="700" fill="#0f766e">A</text>
+      </g>
+    )
+  }
+  if (node.kind === 'thermostat') {
     return (
       <g>
         <rect x={-6} y={-6} width={12} height={12} fill="#fff" stroke="#0f766e" strokeWidth="1.1" />
-        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0f766e">{node.kind === 'thermostat' ? 'T' : 'A'}</text>
+        <text x="0" y="3" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0f766e">T</text>
       </g>
     )
   }
@@ -406,8 +429,8 @@ function cableMark(run) {
   return ''
 }
 
-function CableMark({ points, text, X, Y }) {
-  if (!text || !points || points.length < 2) return null
+function CableMark({ points, text, X, Y, show = true, side = 1, along = 0.5, gap = 0.55 }) {
+  if (!show || !text || !points || points.length < 2) return null
   let best = null
   for (let i = 1; i < points.length; i += 1) {
     const len = Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z)
@@ -417,13 +440,13 @@ function CableMark({ points, text, X, Y }) {
   const dx = best.b.x - best.a.x
   const dz = best.b.z - best.a.z
   const len = Math.hypot(dx, dz) || 1
-  const ox = (-dz / len) * 0.28
-  const oz = (dx / len) * 0.28
+  const ox = (-dz / len) * gap * side
+  const oz = (dx / len) * gap * side
   return (
     <text
       data-testid="cable-mark"
-      x={X((best.a.x + best.b.x) / 2 + ox)}
-      y={Y((best.a.z + best.b.z) / 2 + oz)}
+      x={X(best.a.x + dx * along + ox)}
+      y={Y(best.a.z + dz * along + oz)}
       textAnchor="middle"
       fontSize="10"
       fontWeight="650"
@@ -438,15 +461,93 @@ function CableMark({ points, text, X, Y }) {
   )
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext }) {
+function Jakotukki({ node, count, X, Y }) {
+  const n = Math.max(1, count)
+  const pitch = 0.2
+  const span = pitch * Math.max(0, n - 1)
+  const bar = 0.1
+  const stub = 0.16
+  const px = (metres) => X(node.x + metres) - X(node.x)
+  const pz = (metres) => Y(node.z + metres) - Y(node.z)
+  const z0 = -span / 2
+  return (
+    <g data-testid="jakotukki">
+      <rect
+        x={px(-bar / 2)}
+        y={pz(z0 - 0.07)}
+        width={Math.abs(px(bar))}
+        height={Math.abs(pz(span + 0.14))}
+        fill="#fff"
+        stroke="#1d4ed8"
+        strokeWidth={1.15}
+      />
+      {Array.from({ length: n }, (_, index) => {
+        const z = z0 + index * pitch
+        return (
+          <g key={index}>
+            <line x1={px(bar / 2)} y1={pz(z)} x2={px(bar / 2 + stub)} y2={pz(z)} stroke="#c2410c" strokeWidth={1.15} />
+            <rect
+              data-testid="actuator-tag"
+              x={px(bar / 2 + stub) - 2.6}
+              y={pz(z) - 2.6}
+              width={5.2}
+              height={5.2}
+              rx={0.8}
+              fill="#fff"
+              stroke="#0f766e"
+              strokeWidth={0.7}
+            />
+          </g>
+        )
+      })}
+    </g>
+  )
+}
+
+function LoopTag({ points, label, X, Y }) {
+  if (!points?.length || label == null) return null
+  const cx = points.reduce((sum, point) => sum + point.x, 0) / points.length
+  const cz = points.reduce((sum, point) => sum + point.z, 0) / points.length
+  const text = String(label)
+  const width = Math.max(14, text.length * 6.5 + 8)
+  return (
+    <g data-testid="loop-tag" transform={`translate(${X(cx)} ${Y(cz)})`} style={{ pointerEvents: 'none' }}>
+      <rect x={-width / 2} y={-7} width={width} height={12} rx={2} fill="#fff" stroke="#c2410c" strokeWidth={0.8} />
+      <text x={0} y={2.4} textAnchor="middle" fontSize="8" fontWeight="700" fill="#9a3412">{text}</text>
+    </g>
+  )
+}
+
+function insideHouse(plan, x, z) {
+  const box = houseBox(plan)
+  if (!box) return false
+  return x >= box.minX - 0.15 && x <= box.maxX + 0.15 && z >= box.minZ - 0.15 && z <= box.maxZ + 0.15
+}
+
+function siteRun(plan, run) {
+  if (run.kind === 'collector' || String(run.linkedFrom || '').startsWith('yard:')) return true
+  return (run.points || []).some((point) => !insideHouse(plan, point.x, point.z))
+}
+
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false }) {
   const services = ensureServices(plan)
-  const visibleRuns = services.runs.filter((run) => layerVisible(plan, run.system))
-  const visibleNodes = services.nodes.filter((node) => layerVisible(plan, node.system))
+  const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run) && (!siteMode || siteRun(plan, run)))
+  const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
+  const manifold = visibleNodes.find((node) => node.system === 'heat' && node.kind === 'floor-manifold')
+  const loopCount = services.runs.filter((run) => run.system === 'heat' && (run.kind === 'floorheat' || run.role === 'loop')).length
+  const drawnNodes = visibleNodes.filter((node) => {
+    if (!manifold || node.system !== 'heat') return true
+    if (node.kind === 'actuator') return false
+    if (node.kind !== 'heat-source' && node.kind !== 'thermostat') return true
+    return Math.hypot(node.x - manifold.x, node.z - manifold.z) > 1.25
+  })
   const order = { drain: 0, water: 1, heat: 2, electric: 3, iv: 4 }
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
   const drawn = runs.map((run) => ({ run, points: shiftPoints(run.points, run.system, multi, run.kind) }))
-  const fittings = collectFittings(drawn.map((item) => ({ ...item.run, points: item.points })))
+  const fittings = collectFittings(drawn
+    .filter(({ run }) => run.kind !== 'floorheat' && run.kind !== 'efloor' && run.role !== 'loop')
+    .map((item) => ({ ...item.run, points: item.points })))
   const legend = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
   const open = (event, hit) => {
     event.preventDefault()
@@ -477,18 +578,25 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     }
   })
   bestTrunk.forEach((item) => leaders.push(item))
+  const callouts = quietLabels ? [] : manifoldCallouts(plan)
   const legendX = legendBox?.x ?? (sheet.x + sheet.w - 176)
-  const legendY = legendBox?.y ?? (sheet.y + 74)
   const legendW = Math.max(108, legendBox?.w ?? 160)
   const legendH = legend.length ? 22 + legend.length * 15 : 0
+  let legendY = legendBox?.y ?? (sheet.y + 74)
+  if (legendBox?.maxBottom && legendY + legendH > legendBox.maxBottom) {
+    legendY = Math.max(legendBox.y ?? sheet.y + 8, legendBox.maxBottom - legendH)
+  }
   return (
     <g data-testid="service-layer">
       {drawn.map(({ run, points }) => {
         const color = runColor(run)
-        const dashed = run.system === 'electric'
+        const heatFloor = run.system === 'heat' && (run.dashed || run.kind === 'floorheat' || run.kind === 'efloor' || run.kind === 'ceiling' || run.kind === 'sensor' || run.kind === 'heat-zone' || run.role === 'feeder' || run.role === 'loop')
+        const dashed = run.system === 'electric' || heatFloor || Boolean(run.dashed)
         const width = multi
           ? (run.system === 'iv' ? 1.15 : run.system === 'drain' ? 1.05 : 0.8)
           : (run.system === 'iv' ? 2.05 : run.system === 'drain' ? 1.85 : dashed ? 1.15 : 1.45)
+        const runSelected = selected?.service?.target === 'run' && selected?.service?.id === run.id
+        const showText = !quietLabels || runSelected
         return (
           <g key={run.id}>
             <polyline
@@ -496,10 +604,12 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               fill="none"
               stroke={color}
               strokeWidth={width}
-              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : dashed ? '5 3' : undefined}
+              strokeDasharray={run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : (run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? '3.2 1.8' : dashed ? '6 4' : undefined)}
               data-wire-role={run.role || ''}
+              data-heat-kind={run.system === 'heat' ? run.kind : undefined}
+              data-testid={run.kind === 'collector' ? 'collector-pipe' : (String(run.linkedFrom || '').includes(':sewer') ? 'sewer-line' : (run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined))}
               strokeLinejoin="round"
-              strokeLinecap="round"
+              strokeLinecap={run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? 'butt' : 'round'}
               style={{ pointerEvents: 'none' }}
             />
             <polyline
@@ -510,16 +620,116 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               style={{ pointerEvents: interactive ? 'auto' : 'none' }}
               onContextMenu={(event) => open(event, { target: 'run', id: run.id, system: run.system })}
             />
-            <SlopeMark run={{ ...run, points }} X={X} Y={Y} />
-            <CableMark points={points} text={cableMark(run)} X={X} Y={Y} />
+            {points.map((point, index) => {
+              if (!index) return null
+              const prev = points[index - 1]
+              const vertical = Math.hypot(point.x - prev.x, point.z - prev.z) < 0.05 && Math.abs((point.y || 0) - (prev.y || 0)) > 0.08
+              if (!vertical) return null
+              const up = (point.y || 0) > (prev.y || 0)
+              return (
+                <g key={`riser-${run.id}-${index}`} data-testid="route-riser" style={{ pointerEvents: 'none' }}>
+                  <circle cx={X(point.x)} cy={Y(point.z)} r={5.5} fill="#fff" stroke={color} strokeWidth={1.6} />
+                  {showText && <text x={X(point.x) + 8} y={Y(point.z) - 4} fontSize="9" fontWeight="700" fill={color}>{up ? 'nousu' : 'lasku'}</text>}
+                </g>
+              )
+            })}
+            {run.locked && runSelected && points.length > 1 && (
+              <g
+                data-testid="route-lock-badge"
+                transform={`translate(${X((points[0].x + points[1].x) / 2)} ${Y((points[0].z + points[1].z) / 2) - 10})`}
+                style={{ pointerEvents: 'none' }}
+              >
+                <rect x={-6} y={-3} width={12} height={9} rx={1.5} fill="#fff" stroke="#0f766e" strokeWidth={1} />
+                <path d="M-3.5,-3 v-2.4 a3.5,3.5 0 0 1 7,0 v2.4" fill="none" stroke="#0f766e" strokeWidth={1} />
+              </g>
+            )}
+            {interactive && selected?.service?.target === 'run' && selected?.service?.id === run.id && points.map((point, index) => (
+              <g key={`edit-${run.id}-${index}`}>
+                <circle
+                  data-testid={`route-vertex-${index}`}
+                  cx={X(point.x)}
+                  cy={Y(point.z)}
+                  r={5}
+                  fill="#fff"
+                  stroke="#0f766e"
+                  strokeWidth={1.6}
+                  style={{ cursor: 'grab' }}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    event.preventDefault()
+                    onRouteDown?.(event, { id: run.id, mode: 'vertex', index })
+                  }}
+                />
+                {index < points.length - 1 && (
+                  <rect
+                    data-testid={`route-segment-${index}`}
+                    x={X((point.x + points[index + 1].x) / 2) - 4}
+                    y={Y((point.z + points[index + 1].z) / 2) - 4}
+                    width={8}
+                    height={8}
+                    fill="#0f766e"
+                    style={{ cursor: 'move' }}
+                    onPointerDown={(event) => {
+                      event.stopPropagation()
+                      event.preventDefault()
+                      onRouteDown?.(event, { id: run.id, mode: 'segment', index })
+                    }}
+                  />
+                )}
+              </g>
+            ))}
+            <SlopeMark run={{ ...run, points }} X={X} Y={Y} show={showText} />
+            <CableMark
+              points={points}
+              text={cableMark(run)}
+              X={X}
+              Y={Y}
+              show={showText && run.kind !== 'floorheat' && !(callouts.length && run.system === 'heat' && (run.role === 'supply' || run.role === 'return'))}
+              side={run.role === 'return' ? -1 : 1}
+              along={run.role === 'return' ? 0.18 : run.role === 'supply' ? 0.82 : 0.5}
+              gap={run.system === 'heat' ? 0.9 : 0.55}
+            />
+            {(run.kind === 'floorheat' || run.role === 'loop') && (
+              <LoopTag points={points} label={run.loopIndex || run.outlet} X={X} Y={Y} />
+            )}
           </g>
         )
       })}
-      {leaders.map((item) => {
+      {callouts.map((item) => {
+        const ax = X(item.anchor.x)
+        const ay = Y(item.anchor.z)
+        const tx = X(item.x)
+        const ty = Y(item.z)
+        const fontSize = Math.max(6, 2.2 * (sheet?.k || 1))
+        const half = Math.max(fontSize * 2, String(item.text).length * fontSize * 0.3)
+        const shoulder = tx >= ax ? tx - half : tx + half
+        return (
+          <g key={`callout-${item.role}`} data-testid="manifold-callout" data-role={item.role} style={{ pointerEvents: 'none' }}>
+            <polyline points={`${ax},${ay} ${ax},${ty} ${shoulder},${ty}`} fill="none" stroke="#9a3412" strokeWidth={0.75} />
+            <circle cx={ax} cy={ay} r={1.35} fill="#9a3412" />
+            <text
+              x={tx}
+              y={ty}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={fontSize}
+              fontWeight="650"
+              fill="#1c1917"
+              stroke="#fbfaf7"
+              strokeWidth="1.5"
+              paintOrder="stroke"
+            >
+              {item.text}
+            </text>
+          </g>
+        )
+      })}
+      {!quietLabels && leaders.map((item, index) => {
         const ax = X(item.mid.x)
         const ay = Y(item.mid.z)
-        const bx = ax + item.normal.x * 22
-        const by = ay + item.normal.z * 22
+        const dir = index % 2 === 0 ? 1 : -1
+        const bx = ax + item.normal.x * 28 * dir
+        const by = ay + item.normal.z * 28 * dir
         return (
           <g key={item.text} style={{ pointerEvents: 'none' }}>
             <line x1={ax} y1={ay} x2={bx} y2={by} stroke={item.color} strokeWidth={0.7} />
@@ -533,7 +743,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
       {fittings.tees.map((point, index) => (
         <circle key={`tee-${index}`} cx={X(point.x)} cy={Y(point.z)} r="3.3" fill="#1c1917" style={{ pointerEvents: 'none' }} />
       ))}
-      {visibleNodes.map((node) => (
+      {drawnNodes.map((node) => (
         <g
           key={node.id}
           data-testid={`svc-node-${node.kind}`}
@@ -542,14 +752,16 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           style={{ pointerEvents: interactive ? 'auto' : 'none' }}
           onContextMenu={(event) => open(event, { target: 'node', id: node.id, system: node.system })}
         >
-          <NodeSymbol node={node} />
-          {node.flow ? (
+          {node.kind === 'floor-manifold'
+            ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
+            : <NodeSymbol node={node} />}
+          {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
             <g style={{ pointerEvents: 'none' }}>
               <line x1="5" y1="-3" x2="14" y2="-14" stroke={nodeColor(node)} strokeWidth="0.7" />
               <text x="16" y="-14" fontSize="8" fontWeight="700" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth="2.2" paintOrder="stroke">{node.flow} l/s</text>
             </g>
           ) : null}
-          {node.system === 'electric' && node.circuit && node.kind !== 'panel' ? (
+          {node.system === 'electric' && node.circuit && node.kind !== 'panel' && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
             <text data-testid="circuit-badge" x="11" y="-2" fontSize="9" fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{`R${node.circuit}`}</text>
           ) : null}
         </g>
@@ -722,15 +934,112 @@ function MenuBtn({ children, onClick, testid }) {
   )
 }
 
-export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked = false }) {
+function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
+  const metres = routeLength(run.points)
+  const materials = materialOptions(run.system)
+  const insulations = insulationOptions(run.system)
+  const cableChoices = run.system === 'electric'
+    ? [...new Set([run.cable, run.marking, ...materials].filter(Boolean))]
+    : materials
+  const segment = Math.min(segmentIndex || 0, Math.max(0, (run.points || []).length - 2))
+  const a = run.points?.[segment]
+  const b = run.points?.[segment + 1]
+  const segmentMetres = a && b ? Math.hypot(b.x - a.x, b.z - a.z) : metres
+  return (
+    <div data-testid="route-fields">
+      <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>
+        {`Pituus ${metres.toFixed(1).replace('.', ',')} m`}
+        {run.locked ? ' · manuaalinen' : ''}
+      </div>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Nimi
+        <input data-testid="route-label" style={fieldStyle} defaultValue={run.label || ''} onBlur={(event) => onPatch({ label: event.target.value })} />
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Korkeus
+        <select
+          data-testid="route-height"
+          style={fieldStyle}
+          value={run.heightMode || ''}
+          onChange={(event) => onCommit(updateServiceRun(plan, run.id, { heightMode: event.target.value }))}
+        >
+          <option value="">Oma</option>
+          {HEIGHT_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Osuuden korkeus
+        <select
+          data-testid="route-segment-height"
+          style={fieldStyle}
+          value=""
+          onChange={(event) => {
+            if (!event.target.value) return
+            onCommit(updateServiceRun(plan, run.id, { segmentHeight: { index: segment, mode: event.target.value } }))
+          }}
+        >
+          <option value="">Valitse osuudelle</option>
+          {HEIGHT_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Osuuden pituus (m)
+        <input
+          data-testid="route-length"
+          type="number"
+          step="0.1"
+          min="0.05"
+          style={fieldStyle}
+          defaultValue={Number(segmentMetres.toFixed(2))}
+          onBlur={(event) => onCommit(updateServiceRun(plan, run.id, { segmentLength: { index: segment, metres: Number(event.target.value) } }))}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') onCommit(updateServiceRun(plan, run.id, { segmentLength: { index: segment, metres: Number(event.target.value) } }))
+          }}
+        />
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        {run.system === 'electric' ? 'Kaapeli' : 'Materiaali'}
+        <select
+          data-testid="route-material"
+          style={fieldStyle}
+          value={run.system === 'electric' ? (run.cable || '') : (run.material || '')}
+          onChange={(event) => onCommit(updateServiceRun(plan, run.id, run.system === 'electric' ? { cable: event.target.value } : { material: event.target.value }))}
+        >
+          <option value="">—</option>
+          {cableChoices.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        Eristys
+        <select data-testid="route-insulation" style={fieldStyle} value={run.insulation || ''} onChange={(event) => onCommit(updateServiceRun(plan, run.id, { insulation: event.target.value }))}>
+          <option value="">—</option>
+          {insulations.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>
+      <div style={{ fontSize: 11, color: '#78716c', marginBottom: 8 }}>
+        {`Asennuskorkeus ${heightMetres(plan, run.heightMode || 'ceiling', run.system) ?? '—'} m`}
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        <input data-testid="service-lock" type="checkbox" checked={Boolean(run.locked)} onChange={(event) => onCommit(updateServiceRun(plan, run.id, { locked: event.target.checked }))} />
+        Manuaalinen
+      </label>
+      <MenuBtn testid="route-reroute" onClick={() => onCommit(rerouteRun(plan, run.id))}>Reititä uudelleen</MenuBtn>
+      <MenuBtn testid="route-reroute-system" onClick={() => onCommit(rerouteSystem(plan, run.system))}>Reititä järjestelmä uudelleen</MenuBtn>
+    </div>
+  )
+}
+
+export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperties, onRedraw, onCad, docked = false }) {
   if (!menu || menu.kind !== 'service') return null
   const services = ensureServices(plan)
   const node = menu.service?.target === 'node' ? services.nodes.find((item) => item.id === menu.service.id) : null
   const run = menu.service?.target === 'run' ? services.runs.find((item) => item.id === menu.service.id) : null
   const target = node || run
   if (!target) return null
+  const write = onCommit || onApply
   const patchNode = (patch) => onApply(updateServiceNode(plan, node.id, patch))
-  const patchRun = (patch) => onApply(updateServiceRun(plan, run.id, patch))
+  const patchRun = (patch) => write(updateServiceRun(plan, run.id, patch))
+  const segmentIndex = menu.service?.segmentIndex || 0
   const remove = () => {
     onApply(node ? deleteServiceNode(plan, node.id) : deleteServiceRun(plan, run.id))
     onClose()
@@ -754,6 +1063,45 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
           />
         )}
         <CadItem testid="ctx-properties" onClick={() => (onProperties ? onProperties() : onClose())}>Ominaisuudet…</CadItem>
+        {onCad && (
+          <Flyout label="Muokkaa" testid="ctx-cad">
+            {CAD_COMMANDS.map((cmd) => (
+              <CadItem key={cmd.id} testid={`ctx-${cmd.testid}`} shortcut={cmd.short} onClick={() => { onCad(cmd.id); onClose() }}>{cmd.label}</CadItem>
+            ))}
+          </Flyout>
+        )}
+        {run && (
+          <>
+            <CadSep />
+            <CadItem testid="route-add-vertex" onClick={() => {
+              const index = segmentIndex
+              const pts = run.points || []
+              const a = pts[index]
+              const b = pts[Math.min(pts.length - 1, index + 1)]
+              if (!a || !b) return
+              write(updateServiceRun(plan, run.id, { points: pts.flatMap((point, i) => (i === index ? [point, { x: (a.x + b.x) / 2, y: ((a.y || 0) + (b.y || 0)) / 2, z: (a.z + b.z) / 2 }] : [point])) }))
+            }}>Lisää taitepiste</CadItem>
+            <CadItem testid="route-remove-vertex" onClick={() => {
+              if ((run.points || []).length <= 2) return
+              const index = Math.min((run.points || []).length - 2, segmentIndex + 1)
+              write(updateServiceRun(plan, run.id, { points: run.points.filter((_, i) => i !== index) }))
+            }}>Poista piste</CadItem>
+            <CadItem testid="route-split" onClick={() => write(splitServiceRun(plan, run.id, segmentIndex, 0.5))}>Jaa reitti</CadItem>
+            <CadItem testid="route-join" onClick={() => write(joinServiceRuns(plan, run.id))}>Yhdistä</CadItem>
+            <CadItem testid="route-redraw" onClick={() => onRedraw?.(run)}>Piirrä uudelleen</CadItem>
+            <CadItem testid="route-reroute" onClick={() => { write(rerouteRun(plan, run.id)); onClose() }}>Reititä uudelleen</CadItem>
+            <Segmented
+              label="Korkeus"
+              value={run.heightMode || 'ceiling'}
+              options={HEIGHT_PRESETS.map((item) => ({ value: item.id, label: item.label, testid: `ctx-height-${item.id}` }))}
+              onChange={(heightMode) => write(updateServiceRun(plan, run.id, { heightMode }))}
+            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, padding: '4px 8px' }}>
+              <input data-testid="service-lock" type="checkbox" checked={Boolean(run.locked)} onChange={(event) => write(updateServiceRun(plan, run.id, { locked: event.target.checked }))} />
+              Manuaalinen
+            </label>
+          </>
+        )}
         <CadSep />
         <CadItem testid="service-delete" danger shortcut="Del" onClick={remove}>Poista</CadItem>
       </CadMenu>
@@ -856,6 +1204,7 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
       )}
       {run && (
         <>
+          <RouteFields plan={plan} run={run} segmentIndex={segmentIndex} onPatch={patchRun} onCommit={write} />
           {run.system === 'iv' && (
             <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
               Kanava
@@ -896,10 +1245,6 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
           )}
           {run.system === 'electric' && (
             <>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-                <input data-testid="service-lock" type="checkbox" checked={Boolean(run.locked)} onChange={(event) => patchRun({ locked: event.target.checked })} />
-                Lukitse johto
-              </label>
               {run.marking ? <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>{run.marking}</div> : null}
               <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
                 Virtapiiri
@@ -909,6 +1254,17 @@ export function ServiceMenu({ menu, plan, onApply, onClose, onProperties, docked
               </label>
             </>
           )}
+          <MenuBtn testid="route-add-vertex" onClick={() => {
+            const index = segmentIndex
+            const pts = run.points || []
+            const a = pts[index]
+            const b = pts[Math.min(pts.length - 1, index + 1)]
+            if (!a || !b) return
+            write(updateServiceRun(plan, run.id, { points: pts.flatMap((point, i) => (i === index ? [point, { x: (a.x + b.x) / 2, y: ((a.y || 0) + (b.y || 0)) / 2, z: (a.z + b.z) / 2 }] : [point])) }))
+          }}>Lisää taitepiste</MenuBtn>
+          <MenuBtn testid="route-split" onClick={() => write(splitServiceRun(plan, run.id, segmentIndex, 0.5))}>Jaa reitti</MenuBtn>
+          <MenuBtn testid="route-join" onClick={() => write(joinServiceRuns(plan, run.id))}>Yhdistä</MenuBtn>
+          <MenuBtn testid="route-redraw" onClick={() => onRedraw?.(run)}>Piirrä uudelleen</MenuBtn>
         </>
       )}
       <MenuBtn testid="service-form-delete" onClick={remove}>Poista</MenuBtn>
