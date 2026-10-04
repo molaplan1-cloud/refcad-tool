@@ -10,6 +10,7 @@ import { BUILDINGS, OBJECTS, PLANTS, ensureYard } from '@/lib/yard'
 import { LanguageSwitch } from '@/components/i18n/Locale'
 import { zoomPercent } from '@/lib/zoom'
 import { CadToolbar } from './CadTools'
+import { DoorHandControls } from './FloorMenus'
 import { YARD_DRAW_TOOLS } from './YardLayer'
 
 const rib = (active) => ({
@@ -115,6 +116,7 @@ export function PlanChrome({
   onFinish, onRoute, onRewire, onSchedule, onDiagram, onRewireWater, onRewireHeat, onHeatTable,
   onHeatSchematic,   onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup,
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
+  doorHand = { swing: 1, inward: false }, onDoorHand,
 }) {
   const [open, setOpen] = useState(null)
   const close = () => setOpen(null)
@@ -313,7 +315,20 @@ export function PlanChrome({
       {mode !== 'facade' && (
         <div data-testid="tool-ribbon" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '4px 8px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto' }}>
-            {workspace === 'rakenne' && (onPlan || mode === '3d') && <Group>{drawTools(toolStyle)}</Group>}
+            {workspace === 'rakenne' && (onPlan || mode === '3d') && (
+              <Group>
+                {drawTools(toolStyle)}
+                {tool === 'door' && (
+                  <DoorHandControls
+                    compact
+                    swing={doorHand.swing}
+                    inward={doorHand.inward}
+                    onSwing={(swing) => onDoorHand?.({ ...doorHand, swing })}
+                    onInward={(inward) => onDoorHand?.({ ...doorHand, inward })}
+                  />
+                )}
+              </Group>
+            )}
             {workspace === 'kalusteet' && (
               <Group>
                 <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={toolStyle(selectOn)} onClick={() => onTool('select')}>{t('tool.select')}</button>

@@ -599,6 +599,7 @@ export default function FloorPlanApp() {
   const [library, setLibrary] = useState(() => ({ projects: [] }))
   const [hover, setHover] = useState(null)
   const [tool, setTool] = useState('select')
+  const [doorHand, setDoorHand] = useState({ swing: 1, inward: false })
   const [placing, setPlacing] = useState(null)
   const [repeatPlace, setRepeatPlace] = useState(false)
   const [toast, setToast] = useState('')
@@ -1361,7 +1362,7 @@ export default function FloorPlanApp() {
       if (!along?.wall) return
       if (blocked([], { name: tool === 'door' ? 'Ovi' : 'Ikkuna', x: 0, z: 0 }, () => 'opening')) return
       const before = (plan.openings || []).length
-      const next = refreshHeat(addOpening(plan, along.wall.id, along.point || point, tool))
+      const next = refreshHeat(addOpening(plan, along.wall.id, along.point || point, tool, tool === 'door' ? doorHand : {}))
       if ((next.openings || []).length === before) {
         showToast(`${tool === 'door' ? 'Ovi' : 'Ikkuna'} on jo tässä`)
         return
@@ -1631,6 +1632,9 @@ export default function FloorPlanApp() {
         const preset = event.key === '1' ? 'plain' : event.key === '2' ? 'measure' : 'all'
         const sheet = sheetMode === 'site' ? 'site' : 'plan'
         setPlan((current) => applyDisplay(current, { preset }, sheet))
+      } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'f' && !command && picks.length > 0 && picks.every((item) => item.kind === 'opening') && picks.every((item) => (plan.openings || []).find((opening) => opening.id === item.id)?.kind === 'door')) {
+        event.preventDefault()
+        commit(mirrorOpenings(plan, picks, { direction: Boolean(event.shiftKey) }))
       } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'v') {
         event.preventDefault()
         if (engaged) exitToSelect()
@@ -1997,6 +2001,8 @@ export default function FloorPlanApp() {
         setLocale={(next) => { setLocale(next); setPlan((current) => ({ ...current, locale: next })) }}
         mode={view === '3d' ? '3d' : view === 'facade' ? 'facade' : sheetMode === 'site' ? 'site' : 'plan'}
         tool={tool}
+        doorHand={doorHand}
+        onDoorHand={setDoorHand}
         placing={placing}
         roomShape={roomShape}
         yardTool={yardTool}

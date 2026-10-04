@@ -32,7 +32,6 @@ import {
   deleteWall,
   duplicateFixture,
   fixtureTemplate,
-  flipOpening,
   mirrorFixture,
   removeFixture,
   rotateFixture,
@@ -775,6 +774,45 @@ function WallFields({ plan, id, onApply, onCommit }) {
   )
 }
 
+const handBtn = (on) => ({
+  flex: 1,
+  height: 28,
+  padding: '0 10px',
+  borderRadius: 6,
+  border: `1px solid ${on ? '#0f766e' : '#d6d3d1'}`,
+  background: on ? '#0f766e' : '#fff',
+  color: on ? '#f0fdfa' : '#1c1917',
+  fontSize: 12,
+  fontWeight: 750,
+  cursor: 'pointer',
+})
+
+export function DoorHandControls({ swing = 1, inward = false, onSwing, onInward, compact = false }) {
+  const left = (swing || 1) >= 0
+  const choice = (testid, label, on, click) => (
+    <button type="button" data-testid={testid} aria-pressed={on} onClick={click} style={{ ...handBtn(on), flex: compact ? '0 0 auto' : 1, minWidth: compact ? 58 : 0 }}>{label}</button>
+  )
+  const row = (testid, label, shortcut, buttons) => (
+    <div data-testid={testid} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: compact ? 0 : 8 }}>
+      <span style={{ fontSize: 12, fontWeight: 750, color: '#1c1917', whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ display: 'flex', gap: 4, flex: compact ? '0 0 auto' : 1 }}>{buttons}</span>
+      {shortcut && <span style={{ marginLeft: compact ? 0 : 'auto', fontSize: 11, fontWeight: 650, color: '#a8a29e', whiteSpace: 'nowrap' }}>{shortcut}</span>}
+    </div>
+  )
+  return (
+    <div data-testid="door-hand" style={{ display: compact ? 'flex' : 'block', alignItems: 'center', gap: compact ? 14 : 0, marginBottom: compact ? 0 : 4 }}>
+      {row('door-handedness', 'Kätisyys:', compact ? null : 'F', <>
+        {choice('door-hand-left', 'Vasen', left, () => onSwing?.(1))}
+        {choice('door-hand-right', 'Oikea', !left, () => onSwing?.(-1))}
+      </>)}
+      {row('door-leaf', 'Aukeaa:', compact ? null : 'Shift+F', <>
+        {choice('door-leaf-in', 'Sisään', Boolean(inward), () => onInward?.(true))}
+        {choice('door-leaf-out', 'Ulos', !inward, () => onInward?.(false))}
+      </>)}
+    </div>
+  )
+}
+
 function OpeningFields({ plan, id, onApply, onCommit }) {
   const { t } = usePlanLocale(plan)
   const opening = (plan.openings || []).find((item) => item.id === id)
@@ -782,8 +820,20 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
   const patch = (next) => onApply(refreshHeat(updateOpening(plan, id, next)))
   const wall = (plan.walls || []).find((item) => item.id === opening.wallId)
   const compass = wall && wall.kind !== 'interior' ? wallBearing(plan, wall) : null
+  const left = (opening.swing || 1) >= 0
+  const setHand = (swing) => {
+    if ((swing >= 0) === left) return
+    onCommit(updateOpening(plan, id, { swing }))
+  }
+  const setLeaf = (inward) => {
+    if (Boolean(opening.inward) === inward) return
+    onCommit(updateOpening(plan, id, { inward }))
+  }
   return (
     <div>
+      {opening.kind === 'door' && (
+        <DoorHandControls swing={opening.swing} inward={opening.inward} onSwing={setHand} onInward={setLeaf} />
+      )}
       {compass && (
         <div data-testid="window-compass" data-compass={compass.code} style={{ fontSize: 13, fontWeight: 750, marginBottom: 8 }}>
           {t('opening.compass')}: {compass.code} · {t(`compass.${compass.code}`)}
@@ -837,14 +887,6 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
           )}
         </>
       )}
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        <MenuBtn testid="opening-swing-left" onClick={() => onCommit(updateOpening(plan, id, { swing: 1 }))}>{t('opening.swingLeft')}</MenuBtn>
-        <MenuBtn testid="opening-swing-right" onClick={() => onCommit(updateOpening(plan, id, { swing: -1 }))}>{t('opening.swingRight')}</MenuBtn>
-        <MenuBtn testid="opening-leaf-out" onClick={() => onCommit(updateOpening(plan, id, { inward: false }))}>{t('opening.out')}</MenuBtn>
-        <MenuBtn testid="opening-leaf-in" onClick={() => onCommit(updateOpening(plan, id, { inward: true }))}>{t('opening.in')}</MenuBtn>
-        <MenuBtn testid="opening-mirror" onClick={() => onCommit(mirrorOpenings(plan, [{ kind: 'opening', id }]))}>Peilaa</MenuBtn>
-        <MenuBtn testid="opening-mirror-leaf" onClick={() => onCommit(mirrorOpenings(plan, [{ kind: 'opening', id }], { direction: true }))}>Peilaa suunta</MenuBtn>
-      </div>
     </div>
   )
 }
@@ -1454,11 +1496,13 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
     body = (
       <>
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        {opening.kind === 'door' && (
+          <>
+            <CadItem testid="ctx-handedness" shortcut="F" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }]))}>Vaihda kätisyys</CadItem>
+            <CadItem testid="ctx-leaf" shortcut="Shift+F" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }], { direction: true }))}>Vaihda aukeamissuunta</CadItem>
+          </>
+        )}
         <CadEditItems onNavigate={onNavigate} />
-        <CadSep />
-        <CadItem testid="ctx-flip" onClick={() => act(flipOpening(plan, opening.id))}>Käännä</CadItem>
-        <CadItem testid="ctx-mirror-opening" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }]))}>Peilaa</CadItem>
-        <CadItem testid="ctx-mirror-leaf" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }], { direction: true }))}>Peilaa suunta</CadItem>
         <CadSep />
         <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteOpening(plan, opening.id), true)}>Poista</CadItem>
       </>

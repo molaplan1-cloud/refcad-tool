@@ -9,6 +9,7 @@ import {
   fixtureTemplate,
   materialOf,
   openingColour,
+  doorLeafPose,
   planBounds,
   plinthLook,
   pointInPolygon,
@@ -583,6 +584,43 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
           <boxGeometry args={[width + 0.1, 0.06, 0.16]} />
           <meshStandardMaterial color={trim} roughness={0.5} metalness={0.04} />
         </mesh>
+      </group>
+    )
+  }
+  if (opening.kind === 'door') {
+    const mark = markOf(selected, hovered, pick)
+    const pose = doorLeafPose(opening, outward)
+    const { hingeX, extend, rotY } = pose
+    const leafW = Math.max(0.25, width - 0.1)
+    const leafH = Math.max(0.5, height - 0.08)
+    const frameD = Math.min(0.16, depth)
+    const face = realistic ? colour.color : '#f8fafc'
+    const jamb = realistic ? '#e7e5e4' : '#e2e8f0'
+    return (
+      <group position={[mid.x, 0, mid.z]} rotation={[0, yaw, 0]}>
+        <mesh userData={{ pick }} position={[0, height / 2, 0]}>
+          <boxGeometry args={[width, height, Math.max(0.12, depth)]} />
+          <meshStandardMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+        <Solid args={[0.05, height, frameD]} position={[-width / 2, height / 2, 0]} color={jamb} pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
+        <Solid args={[0.05, height, frameD]} position={[width / 2, height / 2, 0]} color={jamb} pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
+        <Solid args={[width, 0.05, frameD]} position={[0, height - 0.025, 0]} color={jamb} pick={pick} realistic={realistic} edges={!realistic} roughness={0.6} />
+        <group position={[hingeX, 0, 0]} rotation={[0, rotY, 0]}>
+          <Solid
+            args={[leafW, leafH, 0.045]}
+            position={[extend * leafW / 2, leafH / 2 + 0.02, 0]}
+            color={face}
+            pick={pick}
+            mark={mark}
+            realistic={realistic}
+            edges={!realistic}
+            roughness={0.5}
+          />
+          <mesh position={[extend * (leafW - 0.14), height * 0.48, 0.05]} raycast={noopRaycast} castShadow={realistic}>
+            <boxGeometry args={[0.035, 0.22, 0.04]} />
+            <meshStandardMaterial color="#1c1917" metalness={0.45} roughness={0.35} />
+          </mesh>
+        </group>
       </group>
     )
   }
