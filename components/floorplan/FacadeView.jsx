@@ -27,6 +27,11 @@ import {
   formatMm,
   openingColour,
   plinthLook,
+  eaveMetres,
+  facadeRoofEdge,
+  roofEdges,
+  roofElevationProfile,
+  setEave,
   roofLook,
   roofModel,
   surfaceLook,
@@ -204,37 +209,54 @@ function FacadeTerrace({ view, X, Y, metres }) {
   )
 }
 
-function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd, roofType, roofId, fill, edge, fascia, gutter, pattern }) {
+function RoofElevation({ X, Y, metres, length, wallH, ridge, profile, roofId, fill, edge, fascia, gutter, pattern, selectedEdge }) {
   const style = { fill: fill || '#9aa6b2', edge: edge || '#1e293b', fascia: fascia || '#f4f1ea' }
   const tiled = pattern === 'tile' || pattern === 'tile-metal' || roofId === 'tile' || roofId === 'clay-tile' || roofId === 'concrete-tile'
-  const left = -overhang
-  const right = length + overhang
-  const mid = length / 2
+  const left = -profile.left
+  const right = length + profile.right
+  const mid = profile.mid
   const fasciaH = 0.16
-  const flat = roofType === 'flat' || ridge - wallH < 0.2
+  const shape = profile.shape === 'flat' || ridge - wallH < 0.2 ? 'flat' : profile.shape
   const courses = []
   for (let y = wallH + (tiled ? 0.18 : 0.28); y < ridge - 0.05; y += tiled ? 0.16 : 0.32) courses.push(y)
   const seams = []
   const step = tiled ? 0.42 : pattern === 'corrugated' ? 0.28 : 0.55
   for (let u = left + step * 0.5; u < right - 0.15; u += step) seams.push(u)
-  const gutterBar = (key) => (
-    <rect key={key} x={X(left)} y={Y(wallH - fasciaH)} width={metres(right - left)} height={metres(0.07)} fill={gutter || '#383E42'} stroke="#1c1917" strokeWidth={0.6} />
+  const mark = selectedEdge === profile.near ? '#0f766e' : null
+  const gutterBar = (key, yTop) => (
+    <rect key={key} data-testid="facade-gutter" x={X(left)} y={Y(yTop)} width={metres(right - left)} height={metres(0.07)} fill={gutter || '#383E42'} stroke="#1c1917" strokeWidth={0.6} />
   )
+  const fasciaBoard = (yTop) => (
+    <rect data-testid="facade-fascia" data-side={profile.near} x={X(left)} y={Y(yTop)} width={metres(right - left)} height={metres(fasciaH)} fill={mark || style.fascia} stroke={mark || style.edge} strokeWidth={mark ? 1.6 : 0.9} />
+  )
+  const caps = (
+    <>
+      {selectedEdge === profile.leftSide && <line data-testid="facade-eave-selected" data-side={profile.leftSide} x1={X(left)} y1={Y(ridge + 0.08)} x2={X(left)} y2={Y(wallH - fasciaH)} stroke="#0f766e" strokeWidth={3} />}
+      {selectedEdge === profile.rightSide && <line data-testid="facade-eave-selected" data-side={profile.rightSide} x1={X(right)} y1={Y(ridge + 0.08)} x2={X(right)} y2={Y(wallH - fasciaH)} stroke="#0f766e" strokeWidth={3} />}
+    </>
+  )
+  const root = {
+    'data-testid': 'facade-roof',
+    'data-shape': shape,
+    'data-left': profile.left,
+    'data-right': profile.right,
+    'data-near': profile.near,
+  }
 
-  if (flat) {
+  if (shape === 'flat') {
     return (
-      <g data-testid="facade-roof">
+      <g {...root}>
         <rect x={X(left)} y={Y(wallH + 0.18)} width={metres(right - left)} height={metres(0.18)} fill={style.fill} stroke={style.edge} strokeWidth={1.1} />
-        <rect x={X(left)} y={Y(wallH)} width={metres(right - left)} height={metres(fasciaH)} fill={style.fascia} stroke={style.edge} strokeWidth={0.9} />
-        {gutterBar('flat')}
-        <line x1={X(left)} y1={Y(wallH)} x2={X(right)} y2={Y(wallH)} stroke="#f8fafc" strokeWidth={0.7} />
+        {fasciaBoard(wallH)}
+        {gutterBar('flat', wallH - fasciaH)}
+        {caps}
       </g>
     )
   }
 
-  if (!gableEnd) {
+  if (shape === 'eave') {
     return (
-      <g data-testid="facade-roof">
+      <g {...root}>
         <polygon
           points={`${X(left)},${Y(wallH)} ${X(right)},${Y(wallH)} ${X(right)},${Y(ridge)} ${X(left)},${Y(ridge)}`}
           fill={style.fill}
@@ -245,29 +267,41 @@ function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd,
           ? courses.map((y) => <line key={y} x1={X(left)} y1={Y(y)} x2={X(right)} y2={Y(y)} stroke={style.edge} strokeWidth={0.9} />)
           : seams.map((u) => <line key={u} x1={X(u)} y1={Y(wallH + 0.02)} x2={X(u)} y2={Y(ridge - 0.05)} stroke={style.edge} strokeWidth={pattern === 'seam' || pattern === 'corrugated' ? 1.15 : 0.7} />)}
         <rect x={X(left)} y={Y(ridge)} width={metres(right - left)} height={metres(0.07)} fill={style.edge} />
-        <line x1={X(left)} y1={Y(ridge)} x2={X(right)} y2={Y(ridge)} stroke="#f8fafc" strokeWidth={0.8} />
-        <rect x={X(left)} y={Y(wallH)} width={metres(right - left)} height={metres(fasciaH)} fill={style.fascia} stroke={style.edge} strokeWidth={0.9} />
-        {gutterBar('eave')}
-        <line x1={X(left)} y1={Y(wallH)} x2={X(right)} y2={Y(wallH)} stroke="#e2e8f0" strokeWidth={0.8} />
-        <line x1={X(left)} y1={Y(wallH - fasciaH)} x2={X(right)} y2={Y(wallH - fasciaH)} stroke={gutter || style.edge} strokeWidth={1.4} />
+        {fasciaBoard(wallH)}
+        {gutterBar('eave', wallH - fasciaH)}
+        {caps}
       </g>
     )
   }
 
+  if (shape === 'shed') {
+    const highLeft = profile.side === 'east'
+    const yL = highLeft ? ridge : wallH
+    const yR = highLeft ? wallH : ridge
+    const pts = highLeft
+      ? `${X(left)},${Y(ridge)} ${X(right)},${Y(wallH)} ${X(left)},${Y(wallH)}`
+      : `${X(left)},${Y(wallH)} ${X(right)},${Y(ridge)} ${X(right)},${Y(wallH)}`
+    return (
+      <g {...root}>
+        <polygon points={pts} fill={style.fill} stroke={style.edge} strokeWidth={1.2} />
+        <line data-testid="facade-barge" data-side={profile.near} x1={X(left)} y1={Y(yL)} x2={X(right)} y2={Y(yR)} stroke={mark || style.fascia} strokeWidth={mark ? 4 : 2.6} />
+        {caps}
+      </g>
+    )
+  }
+
+  const clip = `${X(left)},${Y(wallH)} ${X(mid)},${Y(ridge)} ${X(right)},${Y(wallH)}`
   const inset = (ax, ay, bx, by, dist) => {
     const dx = bx - ax
     const dy = by - ay
     const len = Math.hypot(dx, dy) || 1
-    const ox = (dy / len) * dist
-    const oy = (-dx / len) * dist
-    return [ax + ox, ay + oy, bx + ox, by + oy]
+    return [ax + (dy / len) * dist, ay + (-dx / len) * dist, bx + (dy / len) * dist, by + (-dx / len) * dist]
   }
   const barge = 0.12
   const leftBarge = inset(left, wallH, mid, ridge, barge)
   const rightBarge = inset(mid, ridge, right, wallH, barge)
-  const clip = `${X(left)},${Y(wallH)} ${X(mid)},${Y(ridge)} ${X(right)},${Y(wallH)}`
   return (
-    <g data-testid="facade-roof">
+    <g {...root}>
       <defs>
         <clipPath id="facade-roof-clip">
           <polygon points={clip} />
@@ -277,11 +311,16 @@ function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd,
       <g clipPath="url(#facade-roof-clip)">
         {courses.map((y) => <line key={y} x1={X(left)} y1={Y(y)} x2={X(right)} y2={Y(y)} stroke={style.edge} strokeWidth={0.9} />)}
       </g>
-      <line x1={X(leftBarge[0])} y1={Y(leftBarge[1])} x2={X(leftBarge[2])} y2={Y(leftBarge[3])} stroke={style.fascia} strokeWidth={2.4} />
-      <line x1={X(rightBarge[0])} y1={Y(rightBarge[1])} x2={X(rightBarge[2])} y2={Y(rightBarge[3])} stroke={style.fascia} strokeWidth={2.4} />
+      {shape === 'gable' && (
+        <>
+          <line data-testid="facade-barge" data-side={profile.near} x1={X(leftBarge[0])} y1={Y(leftBarge[1])} x2={X(leftBarge[2])} y2={Y(leftBarge[3])} stroke={mark || style.fascia} strokeWidth={mark ? 4 : 2.6} />
+          <line data-testid="facade-barge" data-side={profile.near} x1={X(rightBarge[0])} y1={Y(rightBarge[1])} x2={X(rightBarge[2])} y2={Y(rightBarge[3])} stroke={mark || style.fascia} strokeWidth={mark ? 4 : 2.6} />
+        </>
+      )}
+      {shape === 'hip' && fasciaBoard(wallH)}
       <line x1={X(left)} y1={Y(wallH)} x2={X(mid)} y2={Y(ridge)} stroke={style.edge} strokeWidth={1.35} />
       <line x1={X(mid)} y1={Y(ridge)} x2={X(right)} y2={Y(wallH)} stroke={style.edge} strokeWidth={1.35} />
-      <line x1={X(left)} y1={Y(wallH)} x2={X(right)} y2={Y(wallH)} stroke={style.edge} strokeWidth={1.2} />
+      {caps}
     </g>
   )
 }
@@ -316,14 +355,13 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
   }, [])
 
   const roof = roofModel(plan)
-  const gableEnd = roof.alongX ? (side === 'east' || side === 'west') : (side === 'north' || side === 'south')
-  const overhang = roof.overhang
+  const profile = roofElevationProfile(roof, side)
   const wallH = layout.height
   const rise = roof.rise
   const ridge = Math.round((wallH + rise) * 100) / 100
   const terraceViews = ensureYard(plan).terraces.map((item) => terraceFacade(plan, item, side)).filter(Boolean)
-  const contentLeft = -overhang - 0.15
-  const contentRight = layout.length + overhang + 1.7
+  const contentLeft = -profile.left - 0.15
+  const contentRight = layout.length + profile.right + 1.7
   const contentTop = ridge + 0.4
   const contentBottom = terraceViews.reduce((min, view) => Math.min(min, view.deckY - view.thickness - 0.85), -0.85)
   const worldW = contentRight - contentLeft
@@ -373,6 +411,10 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
     }
     if (tool === 'split-h' || tool === 'split-v') {
       onCommit(addFacadeSplit(plan, side, tool === 'split-v' ? 'v' : 'h', tool === 'split-v' ? point.u : point.y))
+      return
+    }
+    if (point.y >= wallH - 0.2 && point.y <= ridge + 0.45 && point.u >= -profile.left - 0.35 && point.u <= layout.length + profile.right + 0.35) {
+      onSelect?.({ kind: 'roof', id: 'roof', edge: facadeRoofEdge(profile, point.u, layout.length) })
       return
     }
     const cell = [...facadeCells(plan, side)].reverse().find((item) => point.u >= item.u0 && point.u <= item.u1 && point.y >= item.y0 && point.y <= item.y1)
@@ -459,6 +501,12 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
           onContextMenu={(event) => {
             event.preventDefault()
             const point = toFacade(event)
+            if (point.y >= wallH - 0.2 && point.y <= ridge + 0.45 && point.u >= -profile.left - 0.35 && point.u <= layout.length + profile.right + 0.35) {
+              const edge = facadeRoofEdge(profile, point.u, layout.length)
+              onSelect?.({ kind: 'roof', id: 'roof', edge })
+              setMenu({ kind: 'roof', edge, x: event.clientX, y: event.clientY, at: point })
+              return
+            }
             const cell = [...facadeCells(plan, side)].reverse().find((item) => point.u >= item.u0 && point.u <= item.u1 && point.y >= item.y0 && point.y <= item.y1)
             if (cell) onSelect?.(cell)
             setMenu({ kind: cell ? 'zone' : 'facade', id: cell?.id, cell, x: event.clientX, y: event.clientY, at: point })
@@ -468,8 +516,8 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
           <defs>{patternLooks.map((look) => patternNode(realistic ? look : { ...look, color: '#f8fafc', painted: false }))}</defs>
           <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.3} />
           <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
-          <line x1={X(-overhang - 0.8)} y1={Y(-0.06)} x2={X(layout.length + overhang + 1.1)} y2={Y(-0.06)} stroke="#44403c" strokeWidth={2.4} />
-          <line x1={X(-overhang - 0.35)} y1={Y(0)} x2={X(layout.length + overhang + 0.45)} y2={Y(0)} stroke="#1c1917" strokeWidth={1.3} />
+          <line x1={X(-profile.left - 0.8)} y1={Y(-0.06)} x2={X(layout.length + profile.right + 1.1)} y2={Y(-0.06)} stroke="#44403c" strokeWidth={2.4} />
+          <line x1={X(-profile.left - 0.35)} y1={Y(0)} x2={X(layout.length + profile.right + 0.45)} y2={Y(0)} stroke="#1c1917" strokeWidth={1.3} />
           {mergeFacadeRects(visiblePaints.map((piece) => ({ ...piece, color: piece.look.color, colorCode: piece.look.code || '' }))).map((piece) => {
             const sample = visiblePaints.find((item) => item.materialId === piece.materialId && item.look.color === piece.color)
             return (
@@ -524,18 +572,17 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
             length={layout.length}
             wallH={wallH}
             ridge={ridge}
-            overhang={overhang}
-            gableEnd={gableEnd}
-            roofType={roof.type}
+            profile={profile}
             roofId={plan.roofId}
             fill={realistic ? roofFace.color : '#f8fafc'}
             edge="#1c1917"
             fascia={realistic ? finish.trimColor : '#f8fafc'}
             gutter={realistic ? roofFace.gutterColor : '#cbd5e1'}
             pattern={roofFace.pattern}
+            selectedEdge={selected?.kind === 'roof' ? selected.edge : null}
           />
-          <line data-testid="facade-downpipe" x1={X(0.15)} y1={Y(wallH)} x2={X(0.15)} y2={Y(0)} stroke={realistic ? roofFace.gutterColor : '#1c1917'} strokeWidth={2.4} />
-          <line x1={X(layout.length - 0.15)} y1={Y(wallH)} x2={X(layout.length - 0.15)} y2={Y(0)} stroke={realistic ? roofFace.gutterColor : '#1c1917'} strokeWidth={2.4} />
+          <line data-testid="facade-downpipe" x1={X(profile.shape === 'eave' || profile.shape === 'flat' ? -profile.left + 0.12 : 0.15)} y1={Y(wallH)} x2={X(profile.shape === 'eave' || profile.shape === 'flat' ? -profile.left + 0.12 : 0.15)} y2={Y(0)} stroke={realistic ? roofFace.gutterColor : '#1c1917'} strokeWidth={2.4} />
+          <line x1={X(profile.shape === 'eave' || profile.shape === 'flat' ? layout.length + profile.right - 0.12 : layout.length - 0.15)} y1={Y(wallH)} x2={X(profile.shape === 'eave' || profile.shape === 'flat' ? layout.length + profile.right - 0.12 : layout.length - 0.15)} y2={Y(0)} stroke={realistic ? roofFace.gutterColor : '#1c1917'} strokeWidth={2.4} />
           {layout.openings.map((opening) => (
             <ElevationOpening key={opening.id} opening={opening} X={X} Y={Y} metres={metres} colour={openingColour(plan, opening).color} trim={finish.trimColor} technical={!realistic} />
           ))}
@@ -592,7 +639,26 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
             style={{ position: 'fixed', left: Math.min(menu.x, window.innerWidth - 240), top: Math.min(menu.y, window.innerHeight - 280), zIndex: 60, width: 220, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }}
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{menu.kind === 'zone' ? 'Vyöhyke' : 'Julkisivu'}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{menu.kind === 'zone' ? 'Vyöhyke' : menu.kind === 'roof' ? 'Räystäs' : 'Julkisivu'}</div>
+            {menu.kind === 'roof' && (() => {
+              const edge = roofEdges(plan).find((item) => item.side === menu.edge)
+              if (!edge) return null
+              return (
+                <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>
+                  {edge.label} · {edge.roleLabel}
+                  <span style={{ display: 'block', color: '#57534e', margin: '2px 0 4px' }}>{edge.trim} (mm)</span>
+                  <input
+                    data-testid="facade-eave"
+                    style={{ ...inputStyle, width: '100%' }}
+                    type="number"
+                    min="0"
+                    max="1500"
+                    value={Math.round(eaveMetres(plan, edge.side) * 1000)}
+                    onChange={(event) => onApply(setEave(plan, edge.side, Math.max(0, (parseFloat(event.target.value) || 0) / 1000)))}
+                  />
+                </label>
+              )
+            })()}
             {menu.kind === 'zone' && menu.cell && (
               <>
                 <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>

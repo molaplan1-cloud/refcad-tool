@@ -23,8 +23,12 @@ import {
   faceSide,
   resolveFaceMaterial,
   drawRoom,
+  eaveMetres,
   emptyPlan,
   exampleHouse,
+  roofEdgeAt,
+  roofModel,
+  roofPlanEdges,
   familyHouse,
   formatArea,
   formatMm,
@@ -1173,6 +1177,7 @@ export default function FloorPlanApp() {
         kind: hit.kind,
         id: hit.id || hit.kind,
         collection: hit.collection,
+        edge: hit.edge,
         side: hit.side,
         u0: hit.u0,
         u1: hit.u1,
@@ -1293,7 +1298,10 @@ export default function FloorPlanApp() {
         return
       }
     }
-    const point = hit || { kind: 'house', id: 'house' }
+    let point = hit || { kind: 'house', id: 'house' }
+    if (point.kind === 'roof' && !point.edge && point.point) {
+      point = { ...point, edge: roofEdgeAt(roofModel(plan), point.point.x, point.point.z) }
+    }
     if (point.kind === 'service') {
       setMenu({ x: event.clientX, y: event.clientY, kind: 'service', service: point.service })
     } else {
@@ -1312,6 +1320,7 @@ export default function FloorPlanApp() {
         y1: point.y1,
         materialId: point.materialId,
         zoneId: point.zoneId,
+        edge: point.edge,
         u: face?.u,
         y: face?.y ?? point.point?.y,
       })
@@ -2810,6 +2819,10 @@ export default function FloorPlanApp() {
               onApply={setPlan}
               onCommit={commit}
               onSelect={(cell) => {
+                if (cell?.kind === 'roof') {
+                  choose({ kind: 'roof', id: 'roof', edge: cell.edge })
+                  return
+                }
                 setPicks([{ kind: 'zone', id: cell.id }])
                 setPick({ kind: 'zone', ...cell })
                 setPanel('object')
@@ -3297,6 +3310,45 @@ export default function FloorPlanApp() {
                     )}
                   </g>
                 )}
+                {sheetMode !== 'site' && (
+                  <g data-testid="roof-outline">
+                    {roofPlanEdges(roofModel(plan)).map((edge) => {
+                      const active = pick?.kind === 'roof' && pick.edge === edge.side
+                      const stroke = Math.max(camera.zoom, 0.2)
+                      return (
+                        <g key={edge.side}>
+                          <line
+                            data-testid={`roof-edge-${edge.side}`}
+                            data-side={edge.side}
+                            data-mm={Math.round(eaveMetres(plan, edge.side) * 1000)}
+                            x1={X(edge.a.x)}
+                            y1={Y(edge.a.z)}
+                            x2={X(edge.b.x)}
+                            y2={Y(edge.b.z)}
+                            stroke={active ? '#0f766e' : '#44403c'}
+                            strokeWidth={(active ? 2.4 : 1.15) / stroke}
+                            strokeDasharray={`${8 / stroke} ${4 / stroke}`}
+                            strokeLinecap="square"
+                          />
+                          <line
+                            x1={X(edge.a.x)}
+                            y1={Y(edge.a.z)}
+                            x2={X(edge.b.x)}
+                            y2={Y(edge.b.z)}
+                            stroke="transparent"
+                            strokeWidth={14 / stroke}
+                            onPointerDown={(event) => {
+                              if (event.button !== 0 || tool !== 'select') return
+                              event.stopPropagation()
+                              event.preventDefault()
+                              choose({ kind: 'roof', id: 'roof', edge: edge.side })
+                            }}
+                          />
+                        </g>
+                      )
+                    })}
+                  </g>
+                )}
                 {sheetMode !== 'site' && <AngleMarks marks={cornerAngles(plan.walls)} X={X} Y={Y} zoom={camera.zoom} />}
                 </g>
               </svg>
@@ -3330,7 +3382,14 @@ export default function FloorPlanApp() {
                 liveLabel={liveEnd ? `${formatMm(liveLength)} mm` : ''}
                 roomDraft={tool === 'room' && roomShape === 'rect' ? draft : null}
                 roomCursor={roomCursor}
-                onSelect={(hit) => { if (!workspaceAllows(workspace, hit)) return; setMenu(null); choose(hit) }}
+                onSelect={(hit) => {
+                  if (!workspaceAllows(workspace, hit)) return
+                  const picked = hit?.kind === 'roof' && !hit.edge && hit.point
+                    ? { ...hit, edge: roofEdgeAt(roofModel(plan), hit.point.x, hit.point.z) }
+                    : hit
+                  setMenu(null)
+                  choose(picked)
+                }}
                 onHover={onHover3d}
                 onContext={openHitMenu}
                 onPreview={onPreview3d}

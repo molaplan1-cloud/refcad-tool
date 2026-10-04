@@ -47,6 +47,12 @@ import {
   splitWall,
   updateFacadeZone,
   updateFixture,
+  eaveMetres,
+  roofEdges,
+  roofModel,
+  roofSurfaceArea,
+  setAllEaves,
+  setEave,
   updateHouse,
   updateOpening,
   updateRoom,
@@ -275,9 +281,7 @@ export function HouseSettings({ plan, onApply }) {
       <Field label={t('house.pitch')}>
         <input style={inputStyle} type="number" min="0" max="60" value={plan.roofPitch ?? 25} onChange={(event) => onApply(updateHouse(plan, { roofPitch: parseFloat(event.target.value) || 0 }))} />
       </Field>
-      <Field label={t('house.eave')}>
-        <input style={inputStyle} type="number" min="0" max="1500" value={mm(plan.eaveOverhang ?? 0.5)} onChange={(event) => onApply(updateHouse(plan, { eaveOverhang: fromMm(event.target.value) }))} />
-      </Field>
+      <EaveList plan={plan} onApply={onApply} />
       <div style={{ fontSize: 12, fontWeight: 700, margin: '4px 0 6px' }}>{t('house.facade')}</div>
       <SwatchRow group="exterior" value={plan.exteriorId} onPick={(id) => onApply({ ...plan, exteriorId: id })} />
       <FinishSettings plan={plan} onApply={onApply} />
@@ -422,7 +426,63 @@ function SwatchRow({ group, value, onPick }) {
   )
 }
 
-export function RoofFields({ plan, onApply }) {
+function EaveList({ plan, onApply, selectedEdge = null }) {
+  const edges = roofEdges(plan)
+  const area = roofSurfaceArea(roofModel(plan))
+  const seed = selectedEdge ? eaveMetres(plan, selectedEdge) : eaveMetres(plan, 'north')
+  return (
+    <div data-testid="eave-list">
+      <div style={{ fontSize: 12, fontWeight: 700, margin: '4px 0 6px' }}>Räystäät</div>
+      {edges.map((edge) => {
+        const active = selectedEdge === edge.side
+        return (
+          <label
+            key={edge.side}
+            data-testid={`eave-row-${edge.side}`}
+            data-role={edge.role}
+            data-selected={active ? 'true' : 'false'}
+            style={{
+              display: 'block',
+              fontSize: 12,
+              fontWeight: 650,
+              marginBottom: 8,
+              padding: 6,
+              borderRadius: 8,
+              background: active ? '#f0fdfa' : 'transparent',
+              border: active ? '1px solid #0f766e' : '1px solid transparent',
+              color: '#44403c',
+            }}
+          >
+            <span style={{ display: 'block', marginBottom: 2 }}>{edge.label} · {edge.roleLabel}</span>
+            <span style={{ display: 'block', fontWeight: 500, color: '#57534e', marginBottom: 3 }}>
+              {edge.trim}{edge.wallLength > 0.2 ? ` · ${edge.wallLength.toFixed(1)} m` : ''}
+            </span>
+            <input
+              data-testid={`eave-${edge.side}`}
+              style={inputStyle}
+              type="number"
+              min="0"
+              max="1500"
+              value={edge.mm}
+              onChange={(event) => onApply(setEave(plan, edge.side, fromMm(event.target.value)))}
+            />
+          </label>
+        )
+      })}
+      <button
+        type="button"
+        data-testid="eave-all"
+        onClick={() => onApply(setAllEaves(plan, seed))}
+        style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1', marginBottom: 8 }}
+      >
+        Kaikki samaksi
+      </button>
+      <div data-testid="roof-area" style={{ fontSize: 12, color: '#57534e', marginBottom: 8 }}>Kattopinta-ala {area.toFixed(1)} m²</div>
+    </div>
+  )
+}
+
+export function RoofFields({ plan, onApply, selection = null }) {
   return (
     <div data-testid="roof-fields">
       <Field label="Kattomuoto">
@@ -433,9 +493,7 @@ export function RoofFields({ plan, onApply }) {
       <Field label="Kattokaltevuus (°)" testid="roof-pitch-field">
         <input data-testid="roof-pitch" style={inputStyle} type="number" min="0" max="60" value={plan.roofPitch ?? 25} onChange={(event) => onApply(updateHouse(plan, { roofPitch: parseFloat(event.target.value) || 0 }))} />
       </Field>
-      <Field label="Räystään ylitys (mm)">
-        <input data-testid="roof-overhang" style={inputStyle} type="number" min="0" max="1500" value={mm(plan.eaveOverhang ?? 0.5)} onChange={(event) => onApply(updateHouse(plan, { eaveOverhang: fromMm(event.target.value) }))} />
-      </Field>
+      <EaveList plan={plan} onApply={onApply} selectedEdge={selection?.edge || null} />
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Katemateriaali</div>
       <SwatchRow group="roof" value={plan.roofId} onPick={(id) => onApply({ ...plan, roofId: id })} />
     </div>
@@ -496,7 +554,10 @@ export function selectionLabel(plan, selection) {
     const fixture = (plan.fixtures || []).find((item) => item.id === selection.id)
     return text(locale, 'select.fixture', `Kaluste: ${fixtureTemplate(fixture?.type).name}`).replace('{name}', fixtureTemplate(fixture?.type).name)
   }
-  if (selection.kind === 'roof') return tr('select.roof')
+  if (selection.kind === 'roof') {
+    const edge = selection.edge ? roofEdges(plan).find((item) => item.side === selection.edge) : null
+    return edge ? `${edge.label}: ${edge.roleLabel}` : tr('select.roof')
+  }
   if (selection.kind === 'zone') return tr('select.zone')
   if (selection.kind === 'house') return tr('file.house')
   if (selection.kind === 'yard') return yardTitle(plan, selection)
@@ -556,7 +617,7 @@ export function SelectionPanel({ plan, selection, picks, onApply, onCommit, onCl
   else if (selection.kind === 'opening') body = <OpeningFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
   else if (selection.kind === 'room') body = <RoomFields plan={plan} id={selection.id} wallId={selection.wallId} onApply={onApply} onCommit={onCommit} />
   else if (selection.kind === 'fixture') body = <FixtureFields plan={plan} id={selection.id} onApply={onApply} onCommit={onCommit} />
-  else if (selection.kind === 'roof') body = <RoofFields plan={plan} onApply={onApply} />
+  else if (selection.kind === 'roof') body = <RoofFields plan={plan} onApply={onApply} selection={selection} />
   else if (selection.kind === 'house') body = <HouseSettings plan={plan} onApply={onApply} />
   else if (selection.kind === 'yard') body = <YardFields plan={plan} selection={selection} onCommit={onCommit} />
   else if (selection.kind === 'zone') body = <ZoneFields plan={plan} id={selection.id} selection={selection} onApply={onApply} onCommit={onCommit} />
@@ -1595,8 +1656,28 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
     )
   } else if (menu.kind === 'roof') {
     const roof = ROOF_TYPES.find((item) => item.id === (plan.roofType || 'gable'))
-    title = roof ? `Katto: ${roof.name}` : 'Katto'
-    body = <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+    const edge = menu.edge ? roofEdges(plan).find((item) => item.side === menu.edge) : null
+    title = edge ? `${edge.label}: ${edge.roleLabel}` : (roof ? `Katto: ${roof.name}` : 'Katto')
+    body = (
+      <>
+        {edge && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 6px' }}>
+            {edge.trim} (mm)
+            <input
+              data-testid="ctx-eave"
+              type="number"
+              min="0"
+              max="1500"
+              value={edge.mm}
+              onChange={(event) => onApply(setEave(plan, edge.side, fromMm(event.target.value)))}
+              style={{ flex: 1, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
+            />
+          </label>
+        )}
+        <CadItem testid="ctx-eave-all" onClick={() => onApply(setAllEaves(plan, edge ? edge.metres : eaveMetres(plan, 'north')))}>Kaikki samaksi</CadItem>
+        <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+      </>
+    )
   } else if (menu.kind === 'house') {
     title = plan.name || 'Talo'
     body = <CadItem testid="ctx-house" onClick={() => onNavigate('house')}>Talon asetukset</CadItem>

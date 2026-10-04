@@ -382,6 +382,10 @@ function samePick(item, pick) {
   if (item.kind === 'service' || pick.kind === 'service') {
     return item.kind === pick.kind && item.service?.target === pick.service?.target && item.service?.id === pick.service?.id
   }
+  if (item.kind === 'roof' && pick.kind === 'roof') {
+    if (item.edge || pick.edge) return item.edge === pick.edge
+    return true
+  }
   return item.kind === pick.kind && item.id === pick.id
 }
 
@@ -915,7 +919,7 @@ function RoofMesh({ plan, mode, selected, hovered }) {
   const realistic = finishesOf(plan).sceneStyle !== 'technical' && mode === 'solid'
   const ghost = mode === 'ghost'
   const map = realistic ? roofSurface(finish) : null
-  const key = [model.type, model.minX, model.maxX, model.minZ, model.maxZ, model.rise, model.overhang, model.alongX, model.wallHeight].join(':')
+  const key = [model.type, model.minX, model.maxX, model.minZ, model.maxZ, model.rise, model.overhangs.north, model.overhangs.east, model.overhangs.south, model.overhangs.west, model.alongX, model.wallHeight].join(':')
   const geom = useMemo(() => roofGeometry(roofModel(plan)), [key])
   const edgeSpecs = useMemo(() => roofEdgeSpecs(roofModel(plan)), [key])
   const box = planBounds(plan)
@@ -1615,7 +1619,46 @@ function EditBridge({ drawMode, controlsRef, onSelect, onContext, onHover, onPre
   return null
 }
 
-function Dressing({ plan }) {
+function roofTrimBoards(model) {
+  const cx = (model.minX + model.maxX) / 2
+  const cz = (model.minZ + model.maxZ) / 2
+  const boards = []
+  roofOutline(model).forEach((edge, index) => {
+    if (edge.trim !== 'fascia' && edge.trim !== 'barge') return
+    const a = new THREE.Vector3(...edge.a)
+    const b = new THREE.Vector3(...edge.b)
+    const length = Math.max(0.08, a.distanceTo(b))
+    const mid = a.clone().add(b).multiplyScalar(0.5)
+    const dir = b.clone().sub(a).normalize()
+    const outward = new THREE.Vector3(mid.x - cx, 0, mid.z - cz)
+    if (outward.lengthSq() < 1e-8) outward.set(0, 0, 1)
+    outward.normalize()
+    let up = new THREE.Vector3(0, 1, 0)
+    if (Math.abs(dir.y) > 0.92) up.set(1, 0, 0)
+    up.addScaledVector(dir, -up.dot(dir))
+    if (up.lengthSq() < 1e-8) up.set(0, 1, 0)
+    up.normalize()
+    let side = new THREE.Vector3().crossVectors(dir, up)
+    if (side.lengthSq() < 1e-8) side.set(1, 0, 0)
+    side.normalize()
+    if (side.dot(outward) < 0) side.negate()
+    up.crossVectors(side, dir).normalize()
+    const basis = new THREE.Matrix4().makeBasis(side, dir, up)
+    const quat = new THREE.Quaternion().setFromRotationMatrix(basis)
+    const shift = edge.trim === 'barge' ? 0.035 : 0.02
+    boards.push({
+      key: `${edge.trim}-${edge.side}-${index}`,
+      side: edge.side,
+      trim: edge.trim,
+      position: [mid.x + side.x * shift, mid.y + side.y * shift, mid.z + side.z * shift],
+      quaternion: [quat.x, quat.y, quat.z, quat.w],
+      args: edge.trim === 'barge' ? [0.032, length, 0.12] : [0.028, length, 0.18],
+    })
+  })
+  return boards
+}
+
+function Dressing({ plan, selected = null, hovered = null }) {
   const finish = finishesOf(plan)
   const realistic = finish.sceneStyle !== 'technical'
   const trim = realistic ? finish.trimColor : '#e7e5e4'
@@ -1692,29 +1735,22 @@ function Dressing({ plan }) {
       })
     })
   })
+  const boards = roofTrimBoards(model)
   const gutters = roofOutline(model)
-    .filter((edge) => Math.abs(edge.a[1] - model.wallHeight) < 0.3 && Math.abs(edge.b[1] - model.wallHeight) < 0.3)
+    .filter((edge) => edge.trim === 'fascia')
     .map((edge, index) => {
-      const length = Math.max(0.2, Math.hypot(edge.b[0] - edge.a[0], edge.b[2] - edge.a[2]))
+      const length = Math.max(0.2, Math.hypot(edge.b[0] - edge.a[0], edge.b[2] - edge.a[2], edge.b[1] - edge.a[1]))
       const yaw = Math.atan2(-(edge.b[2] - edge.a[2]), edge.b[0] - edge.a[0])
       const mx = (edge.a[0] + edge.b[0]) / 2
+      const my = (edge.a[1] + edge.b[1]) / 2
       const mz = (edge.a[2] + edge.b[2]) / 2
-      return [
-        {
-          key: `fascia-${index}`,
-          position: [mx, model.wallHeight + 0.02, mz],
-          rotation: [0, yaw, 0],
-          args: [length, 0.18, 0.03],
-          color: trim,
-        },
-        {
-          key: `gutter-${index}`,
-          position: [mx, model.wallHeight - 0.08, mz],
-          rotation: [0, yaw, 0],
-          args: [length, 0.07, 0.1],
-          color: gutter,
-        },
-      ]
+      return {
+        key: `gutter-${edge.side}-${index}`,
+        position: [mx, my - 0.12, mz],
+        rotation: [0, yaw, 0],
+        args: [length, 0.07, 0.1],
+        color: gutter,
+      }
     })
   const downs = [[box.minX, box.minZ], [box.maxX, box.minZ], [box.minX, box.maxZ], [box.maxX, box.maxZ]].map(([x, z], index) => ({
     key: `down-${index}`,
@@ -1725,12 +1761,22 @@ function Dressing({ plan }) {
   }))
   return (
     <group>
-      {[...trims.map((item) => ({ ...item, color: trim })), ...gutters.flat(), ...downs].map((item) => (
+      {[...trims.map((item) => ({ ...item, color: trim })), ...gutters, ...downs].map((item) => (
         <mesh key={item.key} position={item.position} rotation={item.rotation} castShadow receiveShadow raycast={noopRaycast}>
           <boxGeometry args={item.args} />
           <meshStandardMaterial color={item.color} roughness={0.55} metalness={item.key.startsWith('gutter') || item.key.startsWith('down') ? 0.35 : 0.04} />
         </mesh>
       ))}
+      {boards.map((item) => {
+        const pick = { kind: 'roof', id: 'roof', edge: item.side }
+        const mark = markOf(selected, hovered, pick)
+        return (
+          <mesh key={item.key} name={`roof-trim-${item.trim}-${item.side}`} position={item.position} quaternion={item.quaternion} userData={{ pick }} castShadow receiveShadow>
+            <boxGeometry args={item.args} />
+            <meshStandardMaterial color={mark ? '#5eead4' : trim} emissive={mark === 'selected' ? '#115e59' : '#000000'} emissiveIntensity={mark === 'selected' ? 0.45 : 0} roughness={0.55} />
+          </mesh>
+        )
+      })}
     </group>
   )
 }
@@ -1833,7 +1879,7 @@ export default function HouseScene({
         <OpeningMesh key={opening.id} plan={plan} opening={opening} selected={selected} hovered={hovered} />
       ))}
       <RoofMesh plan={plan} mode={roofMode} selected={selected} hovered={hovered} />
-      {wallMode !== 'hidden' && <Dressing plan={plan} />}
+      {wallMode !== 'hidden' && <Dressing plan={plan} selected={selected} hovered={hovered} />}
       {normalizeDisplay(plan.display).fixtures && (plan.fixtures || []).map((fixture) => (
         <FixtureMesh key={fixture.id} plan={plan} fixture={fixture} selected={selected} hovered={hovered} dim={dimFixtures} />
       ))}
