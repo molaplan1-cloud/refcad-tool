@@ -124,6 +124,8 @@ import {
   plotMetrics,
   rotateYardItem,
   setPlot,
+  hasYard,
+  sceneBounds,
   siteViewLayout,
   snapYardPoint,
   syncYardServices,
@@ -167,7 +169,7 @@ import {
 } from '@/lib/projects'
 import { snapAlongWall, snapFixturePoint, snapPoint } from '@/lib/snap'
 import { WORKSPACES, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
-import { FIT_CAMERA, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
+import { FIT_CAMERA, fitRect, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 import { LanguageSwitch, usePlanLocale } from '@/components/i18n/Locale'
 import { wallBearing } from '@/lib/orientation'
 import { text } from '@/lib/i18n'
@@ -176,6 +178,9 @@ const HouseScene = dynamic(() => import('./HouseScene'), { ssr: false })
 
 const sideBtn = (active) => ({
   width: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
   textAlign: 'left',
   padding: '7px 8px',
   borderRadius: 8,
@@ -188,6 +193,40 @@ const sideBtn = (active) => ({
   cursor: 'pointer',
   transform: 'none',
 })
+
+function deviceColor(item) {
+  if (item.system === 'iv') {
+    if (item.role === 'poisto' || item.kind === 'hood' || item.kind === 'exhaust-terminal') return '#ca8a04'
+    if (item.role === 'ulko' || item.kind === 'outdoor-terminal') return '#2563eb'
+    if (item.role === 'jate') return '#166534'
+    return '#dc2626'
+  }
+  if (item.system === 'electric') return '#1c1917'
+  if (item.system === 'water') return '#1d4ed8'
+  if (item.system === 'drain') return '#57534e'
+  if (item.system === 'heat') return '#d97706'
+  return '#44403c'
+}
+
+function DeviceMark({ item }) {
+  const color = deviceColor(item)
+  const down = item.role === 'poisto' || item.kind === 'hood' || item.kind === 'exhaust-terminal'
+  const boxed = item.kind === 'ahu' || item.kind === 'panel' || item.kind === 'manifold' || item.kind === 'floor-manifold' || item.kind === 'dhw-tank' || item.kind === 'heat-source'
+  return (
+    <svg data-testid="device-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style={{ flex: '0 0 auto' }}>
+      {item.kind === 'valve' || item.kind === 'hood' ? (
+        <>
+          <circle cx="8" cy="8" r="5.2" fill="none" stroke={color} strokeWidth="1.4" />
+          <path d={down ? 'M8 11.2 L4.8 5.6 H11.2 Z' : 'M8 4.8 L11.2 10.4 H4.8 Z'} fill={color} />
+        </>
+      ) : boxed ? (
+        <rect x="2.4" y="3.4" width="11.2" height="9.2" rx="1.6" fill="none" stroke={color} strokeWidth="1.5" />
+      ) : (
+        <circle cx="8" cy="8" r="4.2" fill={color} />
+      )}
+    </svg>
+  )
+}
 
 function DrawFields({ draft, end, onLength, onAngle, onCommit }) {
   const lengthMm = Math.max(0, Math.round(segmentLength(draft, end) * 1000))
@@ -306,6 +345,32 @@ function sheetPixels(size, plan, site = false) {
     k: w / layout.pageW,
     layout,
   }
+}
+
+function cameraForBuilding(plan, mode, viewport) {
+  const w = Math.max(80, viewport?.w || 0)
+  const h = Math.max(80, viewport?.h || 0)
+  const bounds = mode === 'site' && hasYard(plan) ? sceneBounds(plan) : planBounds(plan)
+  const spanX = (bounds?.maxX || 0) - (bounds?.minX || 0)
+  const spanZ = (bounds?.maxZ || 0) - (bounds?.minZ || 0)
+  if (!Number.isFinite(spanX) || !Number.isFinite(spanZ) || (spanX < 0.2 && spanZ < 0.2)) return FIT_CAMERA
+  const padM = 0.55
+  const box = {
+    minX: bounds.minX - padM,
+    maxX: bounds.maxX + padM,
+    minZ: bounds.minZ - padM,
+    maxZ: bounds.maxZ + padM,
+  }
+  const sheet = sheetPixels({ w, h }, plan, mode === 'site')
+  const { layout, k } = sheet
+  const Xb = (x) => sheet.x + (layout.ox + (x - layout.box.minX) * layout.scale) * k
+  const Yb = (z) => sheet.y + (layout.oy + (z - layout.box.minZ) * layout.scale) * k
+  const left = Math.min(Xb(box.minX), Xb(box.maxX))
+  const right = Math.max(Xb(box.minX), Xb(box.maxX))
+  const top = Math.min(Yb(box.minZ), Yb(box.maxZ))
+  const bottom = Math.max(Yb(box.minZ), Yb(box.maxZ))
+  if (right - left < 8 || bottom - top < 8) return FIT_CAMERA
+  return fitRect({ left, top, right, bottom }, { w, h }, 28)
 }
 
 function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
@@ -673,6 +738,9 @@ export default function FloorPlanApp() {
   const lastPlace = useRef(null)
   const toastTimer = useRef(0)
   const flashTimer = useRef(0)
+  const fitRequest = useRef({ plan: null, mode: 'plan', token: 0 })
+  const fittedToken = useRef(null)
+  const [fitTick, setFitTick] = useState(0)
   const endDrawingRef = useRef(() => {})
   const suppressMenu = useRef(false)
   const altRef = useRef(false)
@@ -752,6 +820,28 @@ export default function FloorPlanApp() {
     window.clearTimeout(toastTimer.current)
     toastTimer.current = window.setTimeout(() => setToast(''), 2600)
   }, [])
+
+  const requestFit = useCallback((nextPlan, mode) => {
+    const token = fitRequest.current.token + 1
+    fitRequest.current = { plan: nextPlan, mode: mode === 'site' ? 'site' : 'plan', token }
+    setFitTick(token)
+  }, [])
+
+  useEffect(() => {
+    if (!ready || view !== '2d') return
+    const node = hostRef.current
+    if (!node || node.clientWidth < 80 || node.clientHeight < 80) return
+    const w = Math.max(320, Math.round(node.clientWidth))
+    const h = Math.max(240, Math.round(node.clientHeight))
+    if (Math.abs(size.w - w) > 2 || Math.abs(size.h - h) > 2) {
+      setSize({ w, h })
+      return
+    }
+    const req = fitRequest.current
+    if (fittedToken.current != null && fittedToken.current === req.token) return
+    fittedToken.current = req.token
+    setCamera(cameraForBuilding(req.plan || plan, req.plan ? req.mode : sheetMode, { w, h }))
+  }, [ready, view, fitTick, size, plan, sheetMode])
 
   const flashItem = useCallback((id) => {
     setFlashId(id || null)
@@ -1575,7 +1665,7 @@ export default function FloorPlanApp() {
         return
       }
       if (view === '2d' && event.key === '0') {
-        setCamera(FIT_CAMERA)
+        requestFit(plan, sheetMode)
         return
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
@@ -1686,7 +1776,7 @@ export default function FloorPlanApp() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [commit, plan, selectedFixture, undo, redoChange, tool, placing, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode, exitToSelect])
+  }, [commit, plan, selectedFixture, undo, redoChange, tool, placing, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode, exitToSelect, requestFit])
 
   const loadHouse = (house, roomName, panel) => {
     const next = { ...house, services: ensureServices(house) }
@@ -1707,7 +1797,7 @@ export default function FloorPlanApp() {
     setStartOpen(false)
     setNewOpen(false)
     setLibraryOpen(false)
-    setCamera(FIT_CAMERA)
+    requestFit(next, 'plan')
     setFitToken((token) => token + 1)
   }
 
@@ -2048,8 +2138,16 @@ export default function FloorPlanApp() {
         onMode={(next) => {
           if (next === '3d') setView('3d')
           else if (next === 'facade') setView('facade')
-          else if (next === 'site') { setWorkspace('piha'); setView('2d'); setSheetMode('site'); setCamera(FIT_CAMERA); setYardTool(null); setYardPoints([]) }
-          else { if (workspace === 'piha') setWorkspace('rakenne'); setView('2d'); setSheetMode('plan'); setYardTool(null); setYardPoints([]) }
+          else if (next === 'site') { setWorkspace('piha'); setView('2d'); setSheetMode('site'); requestFit(plan, 'site'); setYardTool(null); setYardPoints([]) }
+          else {
+            const entering = view !== '2d' || sheetMode !== 'plan' || workspace === 'piha'
+            if (workspace === 'piha') setWorkspace('rakenne')
+            setView('2d')
+            setSheetMode('plan')
+            if (entering) requestFit(plan, 'plan')
+            setYardTool(null)
+            setYardPoints([])
+          }
         }}
         onTool={(next) => {
           if (next === 'select' || (next === tool && !placing && !svcTool && !yardTool)) {
@@ -2098,7 +2196,7 @@ export default function FloorPlanApp() {
           const rect = hostRef.current?.getBoundingClientRect()
           setCamera((current) => zoomAt(current, (rect?.width || 0) / 2, (rect?.height || 0) / 2, 1.25))
         }}
-        onZoomFit={() => setCamera(FIT_CAMERA)}
+        onZoomFit={() => requestFit(plan, sheetMode)}
         onClearances={setShowClearances}
         onWallMode={setWallMode}
         onRoofMode={setRoofMode}
@@ -2155,8 +2253,11 @@ export default function FloorPlanApp() {
           if (id === 'piha') {
             setView('2d')
             setSheetMode('site')
-            setCamera(FIT_CAMERA)
-          } else if (sheetMode === 'site') setSheetMode('plan')
+            requestFit(plan, 'site')
+          } else {
+            if (sheetMode === 'site') setSheetMode('plan')
+            requestFit(plan, 'plan')
+          }
           const systems = workspaceSystems(id)
           if (systems[0]) {
             setSvcSystem(systems[0])
@@ -2272,7 +2373,7 @@ export default function FloorPlanApp() {
                   setTool('select')
                   setPlacing(null)
                   setYardTool(null)
-                }}>{item.name}</button>
+                }}><DeviceMark item={item} />{item.name}</button>
               ))}
             </div>
           )}
@@ -2801,7 +2902,8 @@ export default function FloorPlanApp() {
                   X={X}
                   Y={Y}
                   sheet={sheet}
-                  quietLabels={sheetMode === 'site' || activeSystems.length > 1}
+                  quietLabels={sheetMode === 'site' || (display.preset === 'all' ? activeSystems.length > 1 : workspaceSystems(workspace).length !== 1)}
+                  legendSystems={display.preset === 'all' ? null : workspaceSystems(workspace)}
                   siteMode={sheetMode === 'site'}
                   legendBox={sheetMode === 'site' ? {
                     x: sheet.x + layout.title.x * k,

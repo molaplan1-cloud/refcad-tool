@@ -529,7 +529,7 @@ function siteRun(plan, run) {
   return (run.points || []).some((point) => !insideHouse(plan, point.x, point.z))
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null }) {
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null, legendSystems = null }) {
   const services = ensureServices(plan)
   const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run) && (!siteMode || siteRun(plan, run)))
   const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
@@ -548,7 +548,11 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const fittings = collectFittings(drawn
     .filter(({ run }) => run.kind !== 'floorheat' && run.kind !== 'efloor' && run.role !== 'loop')
     .map((item) => ({ ...item.run, points: item.points })))
-  const legend = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
+  const legend = SERVICE_SYSTEMS.filter((item) => (
+    (!Array.isArray(legendSystems) || legendSystems.includes(item.id))
+    && layerVisible(plan, item.id)
+    && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))
+  )).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
   const live = (system) => !Array.isArray(activeSystems) || activeSystems.includes(system)
   const open = (event, hit) => {
     event.preventDefault()
@@ -572,10 +576,12 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
       normal = { x: -dz / (len || 1), z: dx / (len || 1) }
     }
     if (!mid || longest < 1.1) return
-    const prev = bestTrunk.get(run.system)
+    const key = run.system === 'iv' ? `iv:${run.kind}` : run.system
+    const prev = bestTrunk.get(key)
     if (!prev || longest > prev.longest) {
-      const text = run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`
-      bestTrunk.set(run.system, { longest, mid, normal, text, color: runColor(run) })
+      const sizeText = run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`
+      const text = run.system === 'iv' && run.flow ? `${sizeText}  ${run.flow} l/s` : sizeText
+      bestTrunk.set(key, { longest, mid, normal, text, color: runColor(run) })
     }
   })
   bestTrunk.forEach((item) => leaders.push(item))
@@ -734,7 +740,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         return (
           <g key={item.text} style={{ pointerEvents: 'none' }}>
             <line x1={ax} y1={ay} x2={bx} y2={by} stroke={item.color} strokeWidth={0.7} />
-            <text x={bx} y={by - 3} fontSize="9" fontWeight="700" fill={item.color} stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{item.text}</text>
+            <text data-testid="duct-label" x={bx} y={by - 3} fontSize="9" fontWeight="700" fill={item.color} stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{item.text}</text>
           </g>
         )
       })}
