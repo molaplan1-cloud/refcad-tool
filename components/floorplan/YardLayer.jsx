@@ -370,7 +370,7 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
                 })}
               </g>
             )}
-            <text data-testid="terrace-level" data-level={level} x={X(center.x)} y={Y(center.z)} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1c1917" stroke="#fbfaf7" strokeWidth={3} paintOrder="stroke">{level}</text>
+            <text data-testid="terrace-level-label" data-level={level} x={X(center.x)} y={Y(center.z)} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1c1917" stroke="#fbfaf7" strokeWidth={3} paintOrder="stroke">{level}</text>
           </g>
         )
       })}
