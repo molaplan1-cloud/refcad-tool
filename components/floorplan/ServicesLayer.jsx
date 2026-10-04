@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { cableSpan, deviceTagError, normalizeTag } from '@/lib/deviceTags'
 import { FUSE_SERIES } from '@/lib/electric'
 import { HEAT_SOURCES, pexSize } from '@/lib/hydronic'
 import {
@@ -787,6 +788,14 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
             {(run.kind === 'floorheat' || run.role === 'loop') && (
               <LoopTag points={points} label={run.loopIndex || run.outlet} X={X} Y={Y} size={tagFont} />
             )}
+            {showText && run.kind !== 'floorheat' && run.role !== 'loop' && points.length >= 2 && (() => {
+              const span = cableSpan(services.nodes, run)
+              if (!span) return null
+              const mid = points[Math.floor(points.length / 2)]
+              return (
+                <text data-testid="cable-span" x={X(mid.x)} y={Y(mid.z) - tagFont} textAnchor="middle" fontSize={tagFont} fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{span}</text>
+              )
+            })()}
           </g>
         )
       })}
@@ -847,6 +856,9 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           {node.kind === 'floor-manifold'
             ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
             : <NodeSymbol node={node} tagSize={tagFont} />}
+          {node.tag ? (
+            <text data-testid="device-tag" x="16" y="14" fontSize={tagFont} fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.tag}</text>
+          ) : null}
           {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
             <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 12} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
           ) : null}
@@ -1118,6 +1130,40 @@ function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
   )
 }
 
+function TagField({ node, nodes, onPatch }) {
+  const [text, setText] = useState(node.tag || '')
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    setText(node.tag || '')
+    setNote('')
+  }, [node.id, node.tag])
+  return (
+    <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+      Tunnus
+      <input
+        data-testid="device-tag-input"
+        style={fieldStyle}
+        value={text}
+        onChange={(event) => { setText(event.target.value); setNote('') }}
+        onBlur={() => {
+          const error = deviceTagError(nodes, node.id, text)
+          if (error) {
+            setNote(error)
+            setText(node.tag || '')
+            return
+          }
+          const next = normalizeTag(text)
+          if (next !== node.tag) onPatch({ tag: next })
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+        }}
+      />
+      {note ? <div data-testid="device-tag-error" style={{ color: '#b91c1c', fontWeight: 650, marginTop: 4 }}>{note}</div> : null}
+    </label>
+  )
+}
+
 export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperties, onRedraw, onCad, docked = false }) {
   if (!menu || menu.kind !== 'service') return null
   const services = ensureServices(plan)
@@ -1205,6 +1251,7 @@ export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperti
     >
       {node && (
         <>
+          <TagField node={node} nodes={services.nodes} onPatch={patchNode} />
           <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
             Nimi
             <input data-testid="service-name" style={fieldStyle} value={node.name || ''} onChange={(event) => patchNode({ name: event.target.value })} />

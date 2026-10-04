@@ -1,5 +1,6 @@
 'use client'
 
+import { cableSchedule } from '@/lib/deviceTags'
 import { electricSummary } from '@/lib/services'
 
 const btn = (active) => ({
@@ -137,7 +138,7 @@ export function ScheduleTable({ report }) {
                     }}
                     style={{ display: 'inline-block', margin: '0 4px 4px 0', padding: '2px 6px', border: '1px solid #d6d3d1', borderRadius: 6, cursor: 'grab', background: '#fff' }}
                   >
-                    {member.room ? `${member.room}: ` : ''}{member.name}
+                    {member.tag ? `${member.tag} ` : ''}{member.room ? `${member.room}: ` : ''}{member.name}
                   </span>
                 )) : (circuit.devices || []).join(', ')}
               </td>
@@ -162,6 +163,33 @@ export function ScheduleTable({ report }) {
   )
 }
 
+function CableTable({ plan, system }) {
+  const rows = cableSchedule(plan, system)
+  if (!rows.length) return null
+  return (
+    <div data-testid="cable-table" style={{ marginTop: 18 }}>
+      <div style={{ fontSize: 16, fontWeight: 750, marginBottom: 8 }}>Johdot</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, background: '#fff' }}>
+        <thead>
+          <tr>
+            {['Yhteys', 'Merkintä'].map((title) => (
+              <th key={title} style={{ textAlign: 'left', borderBottom: '1px solid #1c1917', padding: '6px 6px' }}>{title}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id} data-testid="cable-row">
+              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4', fontWeight: 700 }}>{row.span}</td>
+              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{row.marking}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export function ElectricPanel({ plan, mode, onMode, onClose, onPrint, onAssign }) {
   const report = electricSummary(plan)
   return (
@@ -182,7 +210,10 @@ export function ElectricPanel({ plan, mode, onMode, onClose, onPrint, onAssign }
           <SingleLine report={report} />
         </div>
       ) : (
-        <ScheduleTable report={report} />
+        <>
+          <ScheduleTable report={report} />
+          <CableTable plan={plan} system="electric" />
+        </>
       )}
     </div>
   )

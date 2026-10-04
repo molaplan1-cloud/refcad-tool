@@ -1,5 +1,6 @@
 'use client'
 
+import { cableSchedule } from '@/lib/deviceTags'
 import { normalizeHeating } from '@/lib/hydronic'
 import { ensureServices } from '@/lib/services'
 
@@ -84,8 +85,15 @@ export function HeatingSchematic({ plan }) {
   )
 }
 
+function taggedName(plan, id, name) {
+  const node = ensureServices(plan).nodes.find((item) => item.id === id)
+  if (!node?.tag) return name || ''
+  const text = name || ''
+  return text.startsWith(node.tag) ? text : `${node.tag} ${text}`.trim()
+}
+
 export function HeatingTable({ plan }) {
-  const report = ensureServices(plan).heat || { loops: [], radiators: [] }
+  const report = ensureServices(plan).heat || { loops: [], radiators: [], manifolds: [] }
   const heating = normalizeHeating(plan)
   return (
     <div data-testid="heat-table">
@@ -124,7 +132,7 @@ export function HeatingTable({ plan }) {
               <td style={cell}>{row.roomName}</td>
               <td style={cell} />
               <td style={cell}>Patteri</td>
-              <td style={cell}>{row.name}</td>
+              <td style={cell}>{taggedName(plan, row.id, row.name)}</td>
               <td style={cell}>{row.power} W</td>
               <td style={cell}>{fmt(row.flow, 3)} l/s</td>
               <td style={cell} />
@@ -149,7 +157,7 @@ export function HeatingTable({ plan }) {
         <tbody>
           {(report.manifolds || []).map((row) => (
             <tr key={row.id} data-testid="manifold-row">
-              <td style={cell}>{row.name}</td>
+              <td style={cell}>{taggedName(plan, row.id, row.name)}</td>
               <td style={cell}>{row.outlets}</td>
               <td style={cell}>{(row.rooms || []).join(', ')}</td>
             </tr>
@@ -170,7 +178,7 @@ export function HeatingTable({ plan }) {
           {(report.electric || []).map((row) => (
             <tr key={row.id} data-testid="electric-heat-row">
               <td style={cell}>{row.roomName}</td>
-              <td style={cell}>{row.name || ELECTRIC_KIND[row.kind] || row.kind}</td>
+              <td style={cell}>{taggedName(plan, row.id, row.name || ELECTRIC_KIND[row.kind] || row.kind)}</td>
               <td style={cell}>{row.power} W</td>
               <td style={cell}>{row.voltage ? `${row.voltage} V` : ''}</td>
               <td style={cell}>{row.circuit || ''}</td>
@@ -181,6 +189,27 @@ export function HeatingTable({ plan }) {
           {(report.electric || []).length === 0 && (
             <tr><td colSpan={7} style={{ padding: 12, color: '#78716c' }}>Ei sähkölämmityslaitteita.</td></tr>
           )}
+        </tbody>
+      </table>
+      <CableRows plan={plan} />
+    </div>
+  )
+}
+
+function CableRows({ plan }) {
+  const rows = [...cableSchedule(plan, 'heat'), ...cableSchedule(plan, 'water')]
+  if (!rows.length) return null
+  return (
+    <div data-testid="cable-table" style={{ marginTop: 18 }}>
+      <div style={{ fontSize: 16, fontWeight: 750, marginBottom: 8 }}>Putket</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, background: '#fff' }}>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id} data-testid="cable-row">
+              <td style={cell}>{row.span}</td>
+              <td style={cell}>{row.marking}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

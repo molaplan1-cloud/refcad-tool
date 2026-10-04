@@ -85,6 +85,7 @@ import {
   setCadFlag,
   showAll,
   similarTargets,
+  selectionInWorkspace,
   targetsByType,
   targetsInBox,
   ungroupSelection,
@@ -158,6 +159,7 @@ import {
   layerVisible,
   roomKind,
   setServiceLayer,
+  clearWorkspaceDevices,
   removeAutoAdded,
   snapServicePoint,
   updateServiceNode,
@@ -175,6 +177,7 @@ import {
   shellPlan,
 } from '@/lib/projects'
 import { pointAtLength, shouldCloseChain, snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
+import { withDeviceTags } from '@/lib/deviceTags'
 import { WORKSPACES, applyWorkspaceSwitch, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
 import { FIT_CAMERA, fitRect, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 import { LanguageSwitch, usePlanLocale } from '@/components/i18n/Locale'
@@ -924,7 +927,7 @@ export default function FloorPlanApp() {
             yard: ensureYard(parsed),
             rooms: detectRooms(parsed.walls, parsed.rooms || []),
           }
-          setPlan(straightenWalls(loaded, 0.5))
+          setPlan(straightenWalls(withDeviceTags(loaded), 0.5))
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
           setReady(true)
           setHydrated(true)
@@ -1391,7 +1394,7 @@ export default function FloorPlanApp() {
       pending.current = null
       setMarquee(null)
     } else if (pending.current?.moved && pending.current.box) {
-      selectHits(targetsInBox(plan, pending.current.box), { shift: pending.current.shift, ctrl: pending.current.ctrl })
+      selectHits(selectionInWorkspace(plan, workspace, pending.current.box), { shift: pending.current.shift, ctrl: pending.current.ctrl })
       pending.current = null
       setMarquee(null)
     } else if (pending.current) {
@@ -1826,16 +1829,27 @@ export default function FloorPlanApp() {
     }
     let serviceHit = hitService(plan, world)
     if (serviceHit && !workspaceAllows(workspace, serviceHit)) serviceHit = null
-    if (serviceHit?.target === 'node') {
+    if (serviceHit?.target === 'node' && event.altKey) {
       choose({ kind: 'service', service: serviceHit })
       dragNode.current = { id: serviceHit.id, origin: { x: world.x, z: world.z }, moved: false }
       dragBefore.current = plan
       return
     }
-    if (serviceHit?.target === 'run') {
+    if (serviceHit?.target === 'run' && (event.altKey || event.shiftKey)) {
       const mode = event.shiftKey ? 'run' : serviceHit.vertexIndex != null ? 'vertex' : 'segment'
       const index = serviceHit.vertexIndex != null ? serviceHit.vertexIndex : (serviceHit.segmentIndex || 0)
       beginRouteDrag(serviceHit.id, mode, index, world)
+      return
+    }
+    if (serviceHit) {
+      pending.current = {
+        x: world.x,
+        z: world.z,
+        hit: { kind: 'service', service: serviceHit },
+        shift: event.shiftKey,
+        ctrl: event.ctrlKey || event.metaKey,
+        moved: false,
+      }
       return
     }
     const yardHit = workspace === 'piha' && sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
@@ -1941,7 +1955,7 @@ export default function FloorPlanApp() {
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
         event.preventDefault()
-        remember(targetsByType(plan, 'all'))
+        remember(selectionInWorkspace(plan, workspace))
         return
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
@@ -2052,7 +2066,7 @@ export default function FloorPlanApp() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [commit, plan, selectedFixture, undo, redoChange, tool, placing, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode, exitToSelect, requestFit])
+  }, [commit, plan, selectedFixture, undo, redoChange, tool, placing, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode, exitToSelect, requestFit, workspace])
 
   const loadHouse = (house, roomName, panel) => {
     const next = { ...house, services: ensureServices(house) }
@@ -2637,6 +2651,16 @@ export default function FloorPlanApp() {
           if (before === after) { showToast('Automaattisesti lisättyjä ei löytynyt'); return }
           commit(next)
           showToast('Automaattisesti lisätyt poistettiin')
+        }}
+        onClearWorkspace={() => {
+          if (!window.confirm('Poistetaanko kaikki tämän työtilan laitteet ja reitit?')) return
+          const next = clearWorkspaceDevices(plan, workspace)
+          const before = JSON.stringify(plan.services || {}) + JSON.stringify(plan.fixtures || []) + JSON.stringify(plan.yard?.objects || [])
+          const after = JSON.stringify(next.services || {}) + JSON.stringify(next.fixtures || []) + JSON.stringify(next.yard?.objects || [])
+          if (before === after) { showToast('Tässä työtilassa ei ole laitteita tai reittejä'); return }
+          commit(next)
+          remember([])
+          showToast('Työtilan laitteet ja reitit poistettiin')
         }}
         onStraighten={() => {
           const next = straightenWalls(plan, 2)
