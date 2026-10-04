@@ -178,6 +178,7 @@ import {
   saveProject,
   shellPlan,
 } from '@/lib/projects'
+import { registerDrawingFlush } from '@/lib/staleDeploy'
 import { pointAtLength, shouldCloseChain, snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
 import {
   applyTemporaryDimension,
@@ -1039,6 +1040,18 @@ export default function FloorPlanApp() {
     if (!ready) return
     window.localStorage.setItem(LIBRARY_KEY, JSON.stringify(library))
   }, [library, ready])
+
+  const planRef = useRef(plan)
+  const libraryRef = useRef(library)
+  const readyRef = useRef(ready)
+  planRef.current = plan
+  libraryRef.current = library
+  readyRef.current = ready
+  useEffect(() => registerDrawingFlush(() => {
+    if (!readyRef.current) return
+    window.localStorage.setItem(CURRENT_KEY, JSON.stringify(planRef.current))
+    window.localStorage.setItem(LIBRARY_KEY, JSON.stringify(libraryRef.current))
+  }), [])
 
   useEffect(() => {
     const node = hostRef.current

@@ -1,4 +1,5 @@
 import './globals.css'
+import ChunkRecovery from '@/components/ChunkRecovery'
 import { LocaleProvider } from '@/components/i18n/Locale'
 
 export const metadata = {
@@ -21,6 +22,7 @@ export default function RootLayout({ children }) {
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body style={{ margin: 0, fontFamily: '-apple-system, BlinkMacSystemFont, Inter, sans-serif', background: '#0a0f1e', color: '#f1f5f9', minHeight: '100vh' }}>
+        <ChunkRecovery />
         <LocaleProvider>{children}</LocaleProvider>
       </body>
     </html>
