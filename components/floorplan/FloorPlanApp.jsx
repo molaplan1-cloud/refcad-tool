@@ -106,6 +106,7 @@ import { HeatingPanel } from './HeatingPanel'
 import { COVER_TYPES } from '@/lib/covers'
 import { GROUND_TOOLS } from '@/lib/groundworks'
 import YardLayer, { yardLegendHeight, yardToolLabel } from './YardLayer'
+import { PihaTerraceLevels } from './YardPanel'
 import {
   BUILDINGS,
   OBJECTS,
@@ -1535,7 +1536,7 @@ export default function FloorPlanApp() {
     if (!yardTool) return
     let next = plan
     if (yardTool === 'plot') next = setPlot(plan, points)
-    else if (yardTool === 'terrace') next = addTerrace(plan, points, { railing: true, steps: true })
+    else if (yardTool === 'terrace') next = addTerrace(plan, points)
     else if (yardTool === 'lawn' || yardTool === 'flowerbed') next = addBed(plan, points, yardTool)
     else if (yardTool === 'path' || yardTool === 'drive' || yardTool === 'parking') next = addPath(plan, points, { kind: yardTool })
     else if (yardTool === 'fence') next = addFence(plan, points, {})
@@ -2641,7 +2642,10 @@ export default function FloorPlanApp() {
             <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Seinät, huoneet, ovet, ikkunat, katto ja rakenteet. Muut tasot ovat himmennettyjä ja lukittuja.</p>
           )}
           {workspace === 'piha' && (
-            <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Asemapiirros ja piha. Työkalut ovat nauhassa. Talo ja talotekniikka ovat lukittuja.</p>
+            <>
+              <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Asemapiirros ja piha. Työkalut ovat nauhassa. Talo ja talotekniikka ovat lukittuja.</p>
+              <PihaTerraceLevels plan={plan} selection={pick} onCommit={commit} />
+            </>
           )}
           {(workspace === 'sahko' || workspace === 'iv' || workspace === 'lvi') && (
             <div data-testid="device-library">
