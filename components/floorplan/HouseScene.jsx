@@ -37,6 +37,7 @@ import { yardHasUnderground } from '@/lib/groundworks'
 import { layerVisible } from '@/lib/services'
 import { labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { chimneyKind, chimneyTop, drawingOf } from '@/lib/chimney'
+import { faceOffsets } from '@/lib/wall-outline'
 
 const textureCache = new Map()
 
@@ -589,6 +590,10 @@ function WallMesh({ plan, mode, selected, hovered }) {
         const dz = (wall.b.z - wall.a.z) / len
         const yaw = Math.atan2(-dz, dx)
         const thick = thicknessOf(wall, plan)
+        const offsets = faceOffsets(wall, thick)
+        const nx = -dz
+        const nz = dx
+        const bodyShift = (offsets.left + offsets.right) / 2
         const shell = wall.kind !== 'interior' && wall.kind !== 'partition'
         const pieces = shell
           ? wallPieces(wall, plan.openings, plan.floorHeight, plan.walls, plan)
@@ -608,6 +613,8 @@ function WallMesh({ plan, mode, selected, hovered }) {
         return slices.map((piece) => {
           const span = piece.to - piece.from
           const mid = pointAt(wall, (piece.from + piece.to) / 2)
+          const placeX = mid.x + nx * bodyShift
+          const placeZ = mid.z + nz * bodyShift
           const y = (piece.y0 + piece.y1) / 2
           const height = piece.y1 - piece.y0
           const cladding = wall.kind === 'exterior' && !piece.plinthBand
@@ -632,7 +639,7 @@ function WallMesh({ plan, mode, selected, hovered }) {
             <group key={faceKey}>
               <Solid
                 args={[span, height, piece.plinthBand ? thick + 0.02 : thick]}
-                position={[mid.x, y, mid.z]}
+                position={[placeX, y, placeZ]}
                 rotation={[0, yaw, 0]}
                 color={faceColor}
                 map={realistic && wall.kind === 'exterior' ? map : null}
@@ -648,13 +655,12 @@ function WallMesh({ plan, mode, selected, hovered }) {
                 if (!roomForWallSide(plan, wall, side)) return null
                 const matId = resolveFaceMaterial(plan, wall, side)
                 const item = materialOf('interior', matId)
-                const sign = side === 'left' ? 1 : -1
-                const shift = thick / 2 + 0.018
+                const dist = side === 'left' ? offsets.left + 0.018 : offsets.right - 0.018
                 const skin = mode === 'solid' ? finishTexture('interior', item.id) : null
                 return (
                   <mesh
                     key={`${faceKey}-${side}`}
-                    position={[mid.x + (-dz * sign) * shift, y, mid.z + (dx * sign) * shift]}
+                    position={[mid.x + nx * dist, y, mid.z + nz * dist]}
                     rotation={[0, yaw, 0]}
                     raycast={noopRaycast}
                     castShadow={realistic}
@@ -695,6 +701,10 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
   const realistic = finishesOf(plan).sceneStyle !== 'technical'
   const width = Math.max(0.2, opening.width || 0.9)
   const depth = thicknessOf(wall, plan) + 0.04
+  const offsets = faceOffsets(wall, thicknessOf(wall, plan))
+  const frameShift = (offsets.left + offsets.right) / 2
+  const frameX = mid.x + (-dz) * frameShift
+  const frameZ = mid.z + dx * frameShift
   const frame = Math.min(0.07, width * 0.08, height * 0.08)
   const finish = finishesOf(plan)
   const box = planBounds(plan)
@@ -712,7 +722,7 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
       </mesh>
     )
     return (
-      <group position={[mid.x, sill + height / 2, mid.z]} rotation={[0, yaw, 0]}>
+      <group position={[frameX, sill + height / 2, frameZ]} rotation={[0, yaw, 0]}>
         <mesh userData={{ pick }} position={[0, 0, face]}>
           <boxGeometry args={[width, height, 0.04]} />
           <meshStandardMaterial transparent opacity={0} depthWrite={false} />
@@ -743,7 +753,7 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
     const face = realistic ? colour.color : '#f8fafc'
     const jamb = realistic ? '#e7e5e4' : '#e2e8f0'
     return (
-      <group position={[mid.x, 0, mid.z]} rotation={[0, yaw, 0]}>
+      <group position={[frameX, 0, frameZ]} rotation={[0, yaw, 0]}>
         <mesh userData={{ pick }} position={[0, height / 2, 0]}>
           <boxGeometry args={[width, height, Math.max(0.12, depth)]} />
           <meshStandardMaterial transparent opacity={0} depthWrite={false} />
@@ -771,7 +781,7 @@ function OpeningMesh({ plan, opening, selected, hovered }) {
     )
   }
   return (
-    <group position={[mid.x, sill + height / 2, mid.z]} rotation={[0, yaw, 0]}>
+    <group position={[frameX, sill + height / 2, frameZ]} rotation={[0, yaw, 0]}>
       <Solid
         args={opening.kind === 'window' ? [width, height, 0.06] : [width * 0.96, height, 0.05]}
         position={[0, 0, opening.kind === 'window' ? 0 : outward * 0.02]}
