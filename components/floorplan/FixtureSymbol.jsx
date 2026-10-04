@@ -434,13 +434,22 @@ export function FixtureSymbol({ symbol, w, d, color, flues = 1 }) {
       </g>
     )
   }
-  if (mark === 'fireplace' || mark === 'insert' || mark === 'leivinuuni' || mark === 'kakluuni') {
+  if (mark === 'insert') {
+    return (
+      <g>
+        <path d={`M ${left} ${d / 2} V ${top} H ${w / 2} V ${d / 2}`} {...paper} />
+        <path d={`M ${-w * 0.06} ${d * 0.22} Q 0 ${-d * 0.18} ${w * 0.1} ${d * 0.02} Q ${w * 0.02} ${d * 0.16} ${-w * 0.06} ${d * 0.22}`} {...line} />
+        <path d={`M ${w * 0.02} ${d * 0.28} Q ${w * 0.16} ${d * 0.02} ${w * 0.22} ${d * 0.22}`} {...line} />
+      </g>
+    )
+  }
+  if (mark === 'fireplace' || mark === 'leivinuuni' || mark === 'kakluuni') {
     return (
       <g>
         <rect x={left} y={top} width={w} height={d} {...paper} />
         {mark === 'kakluuni' && [0.28, 0.5, 0.72].map((t) => <line key={t} x1={left + 2} y1={top + d * t} x2={w / 2 - 2} y2={top + d * t} {...line} />)}
         {mark === 'leivinuuni' && <path d={`M ${-w * 0.28} ${d * 0.2} Q 0 ${-d * 0.05} ${w * 0.28} ${d * 0.2}`} {...line} />}
-        {mark !== 'kakluuni' && <rect x={-w * (mark === 'insert' ? 0.32 : 0.22)} y={-d * 0.08} width={w * (mark === 'insert' ? 0.64 : 0.44)} height={d * 0.42} {...line} />}
+        {mark !== 'kakluuni' && <rect x={-w * 0.22} y={-d * 0.08} width={w * 0.44} height={d * 0.42} {...line} />}
         {mark === 'fireplace' && <path d={`M 0 ${d * 0.02} q ${w * 0.08} ${-d * 0.12} 0 ${-d * 0.18} q ${-w * 0.08} ${d * 0.08} 0 ${d * 0.18}`} {...line} />}
       </g>
     )
@@ -448,10 +457,11 @@ export function FixtureSymbol({ symbol, w, d, color, flues = 1 }) {
   if (mark === 'kamiina') {
     return (
       <g>
-        <rect x={left} y={top + d * 0.12} width={w} height={d * 0.76} rx={Math.min(w, d) * 0.2} {...paper} />
-        <circle cx={0} cy={top + d * 0.18} r={Math.min(w, d) * 0.12} {...line} />
-        <line x1={-w * 0.28} y1={d * 0.28} x2={-w * 0.16} y2={d * 0.48} {...line} />
-        <line x1={w * 0.28} y1={d * 0.28} x2={w * 0.16} y2={d * 0.48} {...line} />
+        <rect x={left + w * 0.08} y={top + d * 0.08} width={w * 0.84} height={d * 0.7} rx={Math.min(w, d) * 0.35} {...paper} />
+        <rect x={-w * 0.16} y={-d * 0.02} width={w * 0.32} height={d * 0.28} rx={1} {...line} />
+        <circle cx={0} cy={top + d * 0.16} r={Math.min(w, d) * 0.1} {...line} />
+        <line x1={-w * 0.22} y1={d * 0.22} x2={-w * 0.3} y2={d * 0.46} {...line} />
+        <line x1={w * 0.22} y1={d * 0.22} x2={w * 0.3} y2={d * 0.46} {...line} />
       </g>
     )
   }

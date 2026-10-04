@@ -1375,6 +1375,24 @@ function FixtureFields({ plan, id, onApply, onCommit }) {
           </Field>
         </>
       )}
+      {spec.heatKw != null && (
+        <>
+          <div data-testid="fireplace-storing" data-storing={spec.storing ? 'true' : 'false'} style={{ fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+            {spec.storing ? 'Varaava' : 'Ei varaa lämpöä'}
+          </div>
+          <Field label="Lämpöteho (kW)">
+            <input
+              data-testid="fireplace-kw"
+              style={inputStyle}
+              type="number"
+              min="0"
+              step="0.1"
+              value={Number.isFinite(Number(fixture.heatKw)) ? fixture.heatKw : spec.heatKw}
+              onChange={(event) => onApply(updateFixture(plan, id, { heatKw: event.target.value === '' ? undefined : Number(event.target.value) }))}
+            />
+          </Field>
+        </>
+      )}
       {spec.shieldClearance && (
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
           <input
