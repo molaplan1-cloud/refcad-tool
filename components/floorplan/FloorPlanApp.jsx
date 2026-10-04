@@ -381,6 +381,7 @@ function TempDim({ dim, X, Y, zoom, editing, onEdit, onChange, onCommit, onCance
                 data-testid="temp-dim-input"
                 autoFocus
                 value={editing}
+                onFocus={(event) => event.target.select()}
                 onChange={(event) => onChange(event.target.value)}
                 onKeyDown={(event) => {
                   event.stopPropagation()
