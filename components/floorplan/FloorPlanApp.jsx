@@ -32,8 +32,10 @@ import {
   hitTest,
   materialOf,
   materialsList,
+  moveCorner,
   moveFixture,
   moveOpening,
+  nearestEndpoint,
   moveRoomLabel,
   openingSymbol,
   openingTags,
@@ -168,7 +170,7 @@ import {
   saveProject,
   shellPlan,
 } from '@/lib/projects'
-import { snapAlongWall, snapFixturePoint, snapPoint } from '@/lib/snap'
+import { pointAtLength, shouldCloseChain, snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
 import { WORKSPACES, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
 import { FIT_CAMERA, fitRect, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 import { LanguageSwitch, usePlanLocale } from '@/components/i18n/Locale'
@@ -284,26 +286,40 @@ function AngleMarks({ marks, X, Y, zoom }) {
 function SnapMark({ snap, X, Y, zoom }) {
   if (!snap?.point || !snap.kind || snap.kind === 'grid') return null
   const s = 1 / (zoom || 1)
+  const label = snap.label || ''
   return (
     <g data-testid="snap-indicator" data-kind={snap.kind} style={{ pointerEvents: 'none' }}>
       {(snap.guides || []).map((guide, index) => (
         <line
           key={`${guide.x1}-${guide.z1}-${index}`}
+          data-testid="align-guide"
           x1={X(guide.x1)}
           y1={Y(guide.z1)}
           x2={X(guide.x2)}
           y2={Y(guide.z2)}
           stroke="#0f766e"
           strokeWidth={1.15 * s}
-          strokeDasharray={`${6 * s} ${4 * s}`}
+          strokeDasharray={`${5 * s} ${4 * s}`}
         />
       ))}
       <g transform={`translate(${X(snap.point.x)} ${Y(snap.point.z)}) scale(${s})`}>
         {snap.kind === 'corner' && <rect data-testid="snap-corner" x={-6} y={-6} width={12} height={12} fill="#f0fdfa" stroke="#0f766e" strokeWidth={2} />}
         {snap.kind === 'midpoint' && <polygon data-testid="snap-midpoint" points="0,-8 7,6 -7,6" fill="#f0fdfa" stroke="#0f766e" strokeWidth={1.7} />}
-        {snap.kind === 'perpendicular' && <path data-testid="snap-perpendicular" d="M-8 0 V-8 H0" fill="none" stroke="#0f766e" strokeWidth={2} />}
-        {snap.kind !== 'corner' && snap.kind !== 'midpoint' && snap.kind !== 'perpendicular' && (
-          <circle r={6} fill="none" stroke="#0f766e" strokeWidth={2} />
+        {snap.kind === 'perpendicular' && <path data-testid="snap-perpendicular" d="M-8 3 H3 V-8" fill="none" stroke="#0f766e" strokeWidth={2} />}
+        {snap.kind === 'intersection' && (
+          <g data-testid="snap-intersection" stroke="#0f766e" strokeWidth={2}>
+            <line x1="-6" y1="-6" x2="6" y2="6" />
+            <line x1="-6" y1="6" x2="6" y2="-6" />
+          </g>
+        )}
+        {snap.kind !== 'corner' && snap.kind !== 'midpoint' && snap.kind !== 'perpendicular' && snap.kind !== 'intersection' && (
+          <circle r={5} fill="none" stroke="#0f766e" strokeWidth={1.7} />
+        )}
+        {label && (
+          <g data-testid="snap-tooltip" transform="translate(12 -18)">
+            <rect x="0" y="-11" width={label.length * 6.4 + 10} height="16" rx="3" fill="#fbfaf7" stroke="#0f766e" strokeWidth="1" />
+            <text x="5" y="1" fontSize="11" fontWeight="700" fill="#0f766e">{label}</text>
+          </g>
         )}
       </g>
     </g>
@@ -716,6 +732,8 @@ export default function FloorPlanApp() {
   const [drawGuide, setDrawGuide] = useState(null)
   const angleMemory = useRef(90)
   const [altDown, setAltDown] = useState(false)
+  const [typedLen, setTypedLen] = useState('')
+  const [chainStart, setChainStart] = useState(null)
   const [snapVisual, setSnapVisual] = useState(null)
   const [cursorPpm, setCursorPpm] = useState(40)
   const history = useRef([])
@@ -732,6 +750,7 @@ export default function FloorPlanApp() {
   const dragOpen = useRef(null)
   const dragYard = useRef(null)
   const dragLabel = useRef(null)
+  const dragCorner = useRef(null)
   const northDrag = useRef(null)
   const clip = useRef(null)
   const hostRef = useRef(null)
@@ -749,6 +768,12 @@ export default function FloorPlanApp() {
   const suppressMenu = useRef(false)
   const altRef = useRef(false)
   altRef.current = altDown
+  const shiftRef = useRef(false)
+  const chainRef = useRef(null)
+  const typedRef = useRef('')
+  const draftRef = useRef(null)
+  const liveRef = useRef(null)
+  const commitWallRef = useRef(() => {})
 
   useEffect(() => {
     if (hydrated && plan.locale) setLocale(plan.locale)
@@ -816,6 +841,10 @@ export default function FloorPlanApp() {
     setSvcPoints([])
     setYardPoints([])
     setDrawGuide(null)
+    chainRef.current = null
+    setChainStart(null)
+    typedRef.current = ''
+    setTypedLen('')
     setRedrawId(null)
   }, [])
 
@@ -901,16 +930,39 @@ export default function FloorPlanApp() {
   const ppm2d = layout.scale * k * (camera.zoom || 1)
 
   const describeSnap = useCallback((world, ppm) => {
-    const radius = 12 / Math.max(ppm || ppm2d, 0.001)
+    const radius = snapRadius(ppm || ppm2d, 14)
     const enabled = !altRef.current
     const walls = plan.walls || []
+    const freeAngle = shiftRef.current
     if (svcTool) return null
     if (tool === 'exterior' || tool === 'interior') {
-      return snapPoint(world, { walls, grid: gridStep, radius, origin: draft, ortho: angleStep === 90, angleStep, enabled })
+      const origin = draft
+      return snapPoint(world, {
+        walls,
+        grid: gridStep,
+        radius,
+        origin,
+        headings: wallHeadings(origin, walls),
+        extraPoints: chainStart && origin ? [chainStart] : [],
+        polarAperture: freeAngle ? null : (7 * Math.PI) / 180,
+        freeAngle,
+        joinWalls: true,
+        enabled,
+      })
     }
     if (tool === 'room') {
       const origin = roomShape === 'poly' ? poly[poly.length - 1] : draft
-      return snapPoint(world, { walls, grid: gridStep, radius, origin: origin || null, ortho: angleStep === 90, angleStep, enabled })
+      return snapPoint(world, {
+        walls,
+        grid: gridStep,
+        radius,
+        origin: origin || null,
+        headings: wallHeadings(origin, walls),
+        polarAperture: freeAngle ? null : (7 * Math.PI) / 180,
+        freeAngle,
+        joinWalls: true,
+        enabled,
+      })
     }
     if (tool === 'door' || tool === 'window') {
       const along = snapAlongWall(world, walls, Math.max(radius, 0.35), enabled)
@@ -923,10 +975,10 @@ export default function FloorPlanApp() {
     }
     if (yardTool) {
       const origin = yardPoints[yardPoints.length - 1] || null
-      return snapYardPoint(world, plan, { grid: gridStep, radius, origin, ortho: angleStep === 90 && Boolean(origin) })
+      return snapYardPoint(world, plan, { grid: gridStep, radius, origin, ortho: angleStep === 90 && !shiftRef.current && Boolean(origin) })
     }
     return null
-  }, [ppm2d, plan, tool, draft, angleStep, gridStep, roomShape, poly, placing, svcTool, yardTool, yardPoints])
+  }, [ppm2d, plan, tool, draft, angleStep, gridStep, roomShape, poly, placing, svcTool, yardTool, yardPoints, chainStart])
 
   useEffect(() => {
     if (view !== '2d') return undefined
@@ -1165,8 +1217,24 @@ export default function FloorPlanApp() {
     } else if (active?.name === 'measure' && active.step === 'to') {
       setCommand((current) => (current ? { ...current, readout: measureReadout(current, world) } : current))
     }
-    if (!typingDraw) setDrawGuide(null)
+    if (typedRef.current && draft && (tool === 'exterior' || tool === 'interior')) {
+      const mm = Number(typedRef.current)
+      const toward = visual?.point || world
+      if (mm >= 50) setDrawGuide(pointAtLength(draft, toward, mm))
+    } else if (!typingDraw) setDrawGuide(null)
     const radius = Math.max(12 / Math.max(ppm2d, 0.001), 0.45)
+    if (dragCorner.current) {
+      const snap = altRef.current
+        ? { point: world }
+        : snapPoint(world, { walls: plan.walls, grid: gridStep, radius: snapRadius(ppm2d, 14), enabled: true, ignore: dragCorner.current.from })
+      const to = snap.point
+      if (Math.hypot(to.x - dragCorner.current.from.x, to.z - dragCorner.current.from.z) > 0.001) {
+        dragCorner.current.moved = true
+        const from = dragCorner.current.from
+        dragCorner.current.from = { x: to.x, z: to.z }
+        setPlan((current) => moveCorner(current, from, to))
+      }
+    }
     if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z, radius))
     if (dragYard.current) setPlan((current) => moveYardItem(current, dragYard.current.collection, dragYard.current.id, world.x, world.z))
     if (dragOpen.current) setPlan((current) => moveOpening(current, dragOpen.current, world))
@@ -1206,8 +1274,10 @@ export default function FloorPlanApp() {
     const movedRoute = routeDrag.current?.moved
     const movedNode = dragNode.current?.moved
     const draggedFixture = Boolean(dragId.current)
-    if ((dragId.current || dragLabel.current || dragOpen.current || movedYard || movedRoute || movedNode) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+    const movedCorner = dragCorner.current?.moved
+    if ((dragId.current || dragLabel.current || dragOpen.current || movedYard || movedRoute || movedNode || movedCorner) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
     dragId.current = null
+    dragCorner.current = null
     dragOpen.current = null
     dragLabel.current = null
     dragYard.current = null
@@ -1465,12 +1535,15 @@ export default function FloorPlanApp() {
     }
     if (tool === 'exterior' || tool === 'interior') {
       const next = drawGuide || point
-      if (!draft) setDraft(next)
-      else {
-        commit(refreshHeat(addWall(plan, draft, next, tool)))
-        setDraft(null)
-        setDrawGuide(null)
+      if (!draft) {
+        chainRef.current = { start: next, count: 0 }
+        setChainStart(next)
+        setDraft(next)
+        typedRef.current = ''
+        setTypedLen('')
+        return
       }
+      commitWallRef.current(draft, next)
       return
     }
     if (tool === 'door' || tool === 'window') {
@@ -1506,10 +1579,41 @@ export default function FloorPlanApp() {
     }
   }
 
+  commitWallRef.current = (start, end) => {
+    const chain = chainRef.current || (chainStart ? { start: chainStart, count: 0 } : null)
+    const closing = shouldCloseChain(chain, end)
+    const target = closing ? chain.start : end
+    if (!start || !target || segmentLength(start, target) <= 0.05) {
+      if (closing) {
+        chainRef.current = null
+        setChainStart(null)
+        setDraft(null)
+      }
+      return
+    }
+    commit(refreshHeat(addWall(plan, start, target, tool)))
+    setDrawGuide(null)
+    typedRef.current = ''
+    setTypedLen('')
+    if (closing) {
+      chainRef.current = null
+      setChainStart(null)
+      setDraft(null)
+      return
+    }
+    chainRef.current = { start: chain?.start || start, count: (chain?.count || 0) + 1 }
+    setDraft(target)
+  }
+
   endDrawingRef.current = (world) => {
     if ((tool === 'exterior' || tool === 'interior') && draft) {
-      const end = drawGuide || world
-      if (end && segmentLength(draft, end) > 0.05) commit(refreshHeat(addWall(plan, draft, end, tool)))
+      const end = drawGuide || snapVisual?.point || world
+      if (end && segmentLength(draft, end) > 0.05) commitWallRef.current(draft, end)
+      else {
+        chainRef.current = null
+        setChainStart(null)
+        setDraft(null)
+      }
     } else if (tool === 'room' && roomShape === 'poly' && poly.length >= 3) {
       closeRoom(poly)
     } else if (tool === 'room' && draft && world) {
@@ -1604,6 +1708,13 @@ export default function FloorPlanApp() {
       return
     }
     const yardHit = workspace === 'piha' && sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
+    const corner = workspace === 'rakenne' ? nearestEndpoint(plan.walls, world, snapRadius(ppm2d, 14)) : null
+    if (corner && !yardHit) {
+      dragCorner.current = { from: { x: corner.x, z: corner.z }, moved: false }
+      dragBefore.current = plan
+      choose({ kind: 'corner', id: 'corner', at: { x: corner.x, z: corner.z } })
+      return
+    }
     const hit = hitTest(plan, world)
     if (yardHit && hit.kind !== 'opening' && hit.kind !== 'wall' && (yardHit.collection !== 'plot' || hit.kind === 'canvas')) {
       choose(yardHit)
@@ -1641,12 +1752,37 @@ export default function FloorPlanApp() {
     const onKey = (event) => {
       const tag = event.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-      if (event.key === 'Shift' && !event.repeat) {
-        setAngleStep((value) => {
-          if (value === 0) return angleMemory.current || 90
-          angleMemory.current = value
-          return 0
-        })
+      if (event.key === 'Shift') {
+        shiftRef.current = true
+        return
+      }
+      const drawingWall = (tool === 'exterior' || tool === 'interior') && draftRef.current
+      if (drawingWall && !event.ctrlKey && !event.metaKey && !event.altKey && (/^[0-9]$/.test(event.key) || event.key === '.' || event.key === ',')) {
+        event.preventDefault()
+        const next = `${typedRef.current}${event.key === ',' ? '.' : event.key}`.replace(/^0+(?=\d)/, '').slice(0, 7)
+        typedRef.current = next
+        setTypedLen(next)
+        const mm = Number(next)
+        const origin = draftRef.current
+        const toward = liveRef.current
+        if (origin && toward && Number.isFinite(mm) && mm >= 50) setDrawGuide(pointAtLength(origin, toward, mm))
+        return
+      }
+      if (drawingWall && event.key === 'Backspace' && typedRef.current) {
+        event.preventDefault()
+        const next = typedRef.current.slice(0, -1)
+        typedRef.current = next
+        setTypedLen(next)
+        if (!next) setDrawGuide(null)
+        else if (draftRef.current && liveRef.current) setDrawGuide(pointAtLength(draftRef.current, liveRef.current, Number(next)))
+        return
+      }
+      if (drawingWall && event.key === 'Enter' && typedRef.current) {
+        event.preventDefault()
+        const mm = Number(typedRef.current)
+        const origin = draftRef.current
+        const toward = liveRef.current || origin
+        if (origin && toward && Number.isFinite(mm) && mm >= 50) commitWallRef.current(origin, pointAtLength(origin, toward, mm))
         return
       }
       const engaged = Boolean(placing || svcTool || yardTool || tool !== 'select')
@@ -1765,11 +1901,16 @@ export default function FloorPlanApp() {
     }
     const onKeyUp = (event) => {
       if (event.key === ' ') spaceRef.current = false
-      if (event.key === 'Alt') setAltDown(false)
+      if (event.key === 'Alt') {
+        altRef.current = false
+        setAltDown(false)
+      }
+      if (event.key === 'Shift') shiftRef.current = false
     }
     const onKeyDown = (event) => {
       if (event.key === 'Alt') {
         event.preventDefault()
+        altRef.current = true
         setAltDown(true)
       }
       onKey(event)
@@ -2087,6 +2228,8 @@ export default function FloorPlanApp() {
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = sheetMode === 'site' ? t('sheet.site') : (activeSystems.length === 1 ? text(locale, `service.${activeSystems[0].id}`, activeSystems[0].title) : t('sheet.plan'))
   const liveEnd = draft && (tool === 'exterior' || tool === 'interior') ? (drawGuide || snapVisual?.point || null) : null
+  draftRef.current = draft
+  liveRef.current = liveEnd
   const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
@@ -2514,9 +2657,7 @@ export default function FloorPlanApp() {
                 onCommit={() => {
                   const end = drawGuide || liveEnd
                   if (!draft || !end) return
-                  commit(refreshHeat(addWall(plan, draft, end, tool)))
-                  setDraft(null)
-                  setDrawGuide(null)
+                  commitWallRef.current(draft, end)
                 }}
               />
             ) : <span data-testid="status-tool">{status}</span>}
@@ -2775,7 +2916,10 @@ export default function FloorPlanApp() {
                 {liveEnd && tool !== 'room' && (
                   <g style={{ pointerEvents: 'none' }}>
                     <line x1={X(draft.x)} y1={Y(draft.z)} x2={X(liveEnd.x)} y2={Y(liveEnd.z)} stroke="#0f766e" strokeWidth={1.5 / camera.zoom} strokeDasharray={`${6 / camera.zoom} ${4 / camera.zoom}`} />
-                    <text x={(X(draft.x) + X(liveEnd.x)) / 2} y={(Y(draft.z) + Y(liveEnd.z)) / 2 - 10 / camera.zoom} textAnchor="middle" fontSize={13 / camera.zoom} fontWeight={700} fill="#0f766e">{formatMm(liveLength)}</text>
+                    <g data-testid="draw-readout" data-length={typedLen || String(Math.round(liveLength * 1000))} data-angle={wallDirection({ a: draft, b: liveEnd })} transform={`translate(${X(liveEnd.x)} ${Y(liveEnd.z)}) scale(${1 / (camera.zoom || 1)})`}>
+                      <rect x="14" y="8" width="128" height="18" rx="3" fill="#fbfaf7" stroke="#0f766e" strokeWidth="1" />
+                      <text x="78" y="21" textAnchor="middle" fontSize="12" fontWeight={700} fill="#0f766e">{typedLen || formatMm(liveLength)} mm  {wallDirection({ a: draft, b: liveEnd })}°</text>
+                    </g>
                   </g>
                 )}
                 {tool === 'room' && roomShape === 'rect' && draft && roomCursor && (
