@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { paymentActive } from '@/lib/access'
 
 const PLANS = [
   ['free', 'Ilmainen'],
@@ -10,9 +11,22 @@ const PLANS = [
   ['company', 'Yritys'],
 ]
 
+function planName(id) {
+  return PLANS.find((item) => item[0] === id)?.[1] || 'Ilmainen'
+}
+
+function statusOf(user) {
+  if (user.disabled) return 'Pois käytöstä'
+  if (user.payment === 'pending') return 'Odottaa maksun vahvistusta'
+  if (user.payment === 'received' && !paymentActive(user)) return 'Vanhentunut'
+  if (paymentActive(user)) return 'Voimassa'
+  return 'Ei maksua'
+}
+
 export default function AdminPage() {
   const [users, setUsers] = useState([])
   const [error, setError] = useState('')
+  const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({ email: '', name: '', password: '', plan: 'basic' })
 
   const load = async () => {
@@ -60,53 +74,74 @@ export default function AdminPage() {
   }
 
   return (
-    <div data-testid="admin-panel" style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a', padding: '28px 24px 64px' }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+    <div data-testid="admin-panel" style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a', padding: '24px 20px 48px' }}>
+      <div style={{ maxWidth: 1280, margin: '0 auto' }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <div>
             <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#0369a1', fontWeight: 700 }}>Ylläpito</div>
-            <h1 style={{ margin: '4px 0 0', fontSize: 32 }}>Käyttäjät ja maksut</h1>
+            <h1 style={{ margin: '4px 0 0', fontSize: 28 }}>Käyttäjät ja maksut</h1>
           </div>
           <Link href="/" style={{ color: '#0369a1' }}>Etusivu</Link>
         </header>
-        <p style={{ color: '#475569', maxWidth: 680 }}>Ylläpitäjä ei piirrä. Maksu kuitataan käsin. Käyttäjä pääsee maksullisiin työtiloihin vasta kuitauksen jälkeen, ja vain voimassaoloaikana.</p>
+        <p style={{ color: '#475569', marginTop: 0 }}>Ylläpitäjä ei piirrä. Maksulliset työtilat avautuvat, kun maksu on kuitattu ja voimassaolo on käynnissä.</p>
         {error && <p data-testid="admin-error" style={{ color: '#9f1239' }}>{error}</p>}
-        <form data-testid="admin-create" onSubmit={create} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr auto auto', gap: 8, margin: '20px 0', alignItems: 'end' }}>
+        <div data-testid="admin-users" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', background: '#f1f5f9' }}>
+                {['Käyttäjä', 'Tilaus', 'Tila', 'Voimassa alkaen', 'Voimassa asti', 'Toiminnot'].map((label) => (
+                  <th key={label} style={{ padding: '10px 12px', fontWeight: 700, borderBottom: '1px solid #e2e8f0' }}>{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => {
+                const status = statusOf(user)
+                const open = editing === user.id
+                return (
+                  <tr key={user.id} data-testid="admin-user" data-status={status} style={{ borderTop: '1px solid #e2e8f0', verticalAlign: 'top' }}>
+                    <td style={{ padding: '12px' }}>
+                      <strong>{user.name || user.email}</strong>
+                      <div style={{ color: '#64748b', fontSize: 12 }}>{user.email}</div>
+                      {user.requestedPlan && <div style={{ fontSize: 12 }}>Pyyntö: {planName(user.requestedPlan)}</div>}
+                    </td>
+                    <td style={{ padding: '12px' }} data-testid="admin-plan">{open ? (
+                      <select aria-label="Tilaus" value={user.plan || 'free'} onChange={(event) => patch(user.id, { plan: event.target.value })} style={field}>
+                        {PLANS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                      </select>
+                    ) : planName(user.plan)}</td>
+                    <td style={{ padding: '12px', fontWeight: 700 }} data-testid="admin-status">{status}</td>
+                    <td style={{ padding: '12px' }}>{open ? (
+                      <input aria-label="Voimassa alkaen" type="date" value={(user.validFrom || '').slice(0, 10)} onChange={(event) => patch(user.id, { validFrom: event.target.value })} style={field} />
+                    ) : (user.validFrom || '—')}</td>
+                    <td style={{ padding: '12px' }}>{open ? (
+                      <input aria-label="Voimassa asti" type="date" value={(user.validUntil || '').slice(0, 10)} onChange={(event) => patch(user.id, { validUntil: event.target.value })} style={field} />
+                    ) : (user.validUntil || '—')}</td>
+                    <td style={{ padding: '12px' }}>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>Kuittaa maksu</button>
+                        <button type="button" data-testid="admin-edit" style={quiet} onClick={() => setEditing(open ? null : user.id)}>{open ? 'Sulje' : 'Muokkaa'}</button>
+                        <button type="button" data-testid="admin-disable" style={quiet} onClick={() => patch(user.id, { disabled: !user.disabled })}>{user.disabled ? 'Ota käyttöön' : 'Poista käytöstä'}</button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <form data-testid="admin-create" onSubmit={create} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 140px auto', gap: 8, marginTop: 20, alignItems: 'end' }}>
           <label>Sähköposti<input data-testid="admin-email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required style={field} /></label>
           <label>Nimi<input data-testid="admin-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} style={field} /></label>
           <label>Salasana<input data-testid="admin-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required style={field} /></label>
           <label>Tilaus<select value={form.plan} onChange={(event) => setForm({ ...form, plan: event.target.value })} style={field}>{PLANS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
           <button type="submit" style={button}>Luo käyttäjä</button>
         </form>
-        <div data-testid="admin-users" style={{ display: 'grid', gap: 12 }}>
-          {users.map((user) => (
-            <article key={user.id} data-testid="admin-user" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                <div>
-                  <strong>{user.name || user.email}</strong>
-                  <div style={{ color: '#64748b', fontSize: 13 }}>{user.email}{user.username ? ` · ${user.username}` : ''} · {user.role}</div>
-                  {user.requestedPlan && <div style={{ fontSize: 13 }}>Pyyntö: {user.requestedPlan} / {user.billingCycle || 'kk'}</div>}
-                  {user.payment === 'pending' && <div data-testid="admin-pending">Odottaa maksun vahvistusta</div>}
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <select aria-label="Tilaus" value={user.plan || 'free'} onChange={(event) => patch(user.id, { plan: event.target.value })} style={field}>
-                    {PLANS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-                  </select>
-                  <input aria-label="Voimassa alkaen" type="date" value={(user.validFrom || '').slice(0, 10)} onChange={(event) => patch(user.id, { validFrom: event.target.value })} style={field} />
-                  <input aria-label="Voimassa asti" type="date" value={(user.validUntil || '').slice(0, 10)} onChange={(event) => patch(user.id, { validUntil: event.target.value })} style={field} />
-                  <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>Maksu kuitattu</button>
-                  <button type="button" style={quiet} onClick={() => patch(user.id, { disabled: !user.disabled })}>{user.disabled ? 'Ota käyttöön' : 'Poista käytöstä'}</button>
-                  <button type="button" style={quiet} onClick={() => { if (window.confirm('Poistetaanko käyttäjä?')) fetch(`/api/admin/users/${user.id}`, { method: 'DELETE' }).then(load) }}>Poista</button>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
       </div>
     </div>
   )
 }
 
-const field = { display: 'block', width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff' }
-const button = { padding: '9px 12px', borderRadius: 8, border: 'none', background: '#0f766e', color: '#fff', fontWeight: 700, cursor: 'pointer' }
-const quiet = { padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }
+const field = { display: 'block', width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }
+const button = { padding: '8px 10px', borderRadius: 8, border: 'none', background: '#0f766e', color: '#fff', fontWeight: 700, cursor: 'pointer' }
+const quiet = { padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }

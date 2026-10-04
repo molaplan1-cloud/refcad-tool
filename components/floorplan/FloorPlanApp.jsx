@@ -92,7 +92,7 @@ import {
 import { CadPrompt } from './CadTools'
 import { LayerDock, PlanChrome } from './PlanChrome'
 import { buildPlanPdf } from '@/lib/roominfo'
-import { DEMO_WATERMARK, accessFor } from '@/lib/access'
+import { accessFor } from '@/lib/access'
 import { stampDemoWatermark } from '@/lib/watermark'
 import { applyDisplay, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { blockHeightForLines, dimensionFont, fitLines, LINE_LEADING, paperFont, placeDimensionText } from '@/lib/annotations'
@@ -3361,25 +3361,6 @@ export default function FloorPlanApp() {
                   </g>
                 )}
                 {sheetMode !== 'site' && <AngleMarks marks={cornerAngles(plan.walls)} X={X} Y={Y} zoom={camera.zoom} />}
-                {access.watermark && (
-                  <g data-testid="sheet-watermark" style={{ pointerEvents: 'none' }}>
-                    {[0.32, 0.58, 0.84].map((fraction) => (
-                      <text
-                        key={fraction}
-                        x={sheet.x + sheet.w / 2}
-                        y={sheet.y + sheet.h * fraction}
-                        textAnchor="middle"
-                        fill="#9f1239"
-                        fillOpacity="0.55"
-                        fontSize={Math.max(18, sheet.w / 28)}
-                        fontWeight="800"
-                        transform={`rotate(-32 ${sheet.x + sheet.w / 2} ${sheet.y + sheet.h * fraction})`}
-                      >
-                        {DEMO_WATERMARK}
-                      </text>
-                    ))}
-                  </g>
-                )}
                 </g>
               </svg>
               {displayOpen && (
