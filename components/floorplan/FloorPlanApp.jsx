@@ -158,6 +158,7 @@ import {
   layerVisible,
   roomKind,
   setServiceLayer,
+  removeAutoAdded,
   snapServicePoint,
   updateServiceNode,
 } from '@/lib/services'
@@ -174,7 +175,7 @@ import {
   shellPlan,
 } from '@/lib/projects'
 import { pointAtLength, shouldCloseChain, snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
-import { WORKSPACES, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
+import { WORKSPACES, applyWorkspaceSwitch, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
 import { FIT_CAMERA, fitRect, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 import { LanguageSwitch, usePlanLocale } from '@/components/i18n/Locale'
 import { wallBearing } from '@/lib/orientation'
@@ -2524,6 +2525,8 @@ export default function FloorPlanApp() {
         }}
         workspace={workspace}
         onWorkspace={(id) => {
+          const nextPlan = applyWorkspaceSwitch(plan, id)
+          if (nextPlan !== plan) setPlan(nextPlan)
           setWorkspace(id)
           setGhosts([])
           exitToSelect()
@@ -2626,6 +2629,14 @@ export default function FloorPlanApp() {
           if (!result.removed) { showToast('Päällekkäisiä ei löytynyt'); return }
           commit(result.plan)
           showToast(`Poistettiin ${result.removed} päällekkäistä`)
+        }}
+        onRemoveAuto={() => {
+          const next = removeAutoAdded(plan)
+          const before = (plan.services?.nodes?.length || 0) + (plan.services?.runs?.length || 0)
+          const after = (next.services?.nodes?.length || 0) + (next.services?.runs?.length || 0)
+          if (before === after) { showToast('Automaattisesti lisättyjä ei löytynyt'); return }
+          commit(next)
+          showToast('Automaattisesti lisätyt poistettiin')
         }}
         onStraighten={() => {
           const next = straightenWalls(plan, 2)

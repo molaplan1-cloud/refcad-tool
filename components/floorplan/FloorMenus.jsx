@@ -56,7 +56,7 @@ import {
 import { usePlanLocale } from '@/components/i18n/Locale'
 import { BRICK_TONES, PAINTS, PLINTHS, ROOFINGS, ROOF_COLOURS, finishesOf, roofingOf } from '@/lib/finishes'
 import { text } from '@/lib/i18n'
-import { COUNTRIES, climateOf, countryById, countryPatch, heatingPatchFor } from '@/lib/places'
+import { COUNTRIES, climateOf, countryById } from '@/lib/places'
 import { wallBearing } from '@/lib/orientation'
 import { updateYardItem } from '@/lib/yard'
 import { FRAMES, GLAZING, SHADING, coincidentPeak } from '@/lib/cooling'
@@ -65,7 +65,7 @@ import { addChimneyFor, chimneyKind, defaultFlue, flueOptions, withChimneyFields
 import { ServiceMenu } from './ServicesLayer'
 import { YardFields, YardMenuBody } from './YardPanel'
 import { yardTitle } from '@/lib/yard'
-import { addServiceNode, applyHeating, ensureServices, refreshHeat, serviceObjectTitle, suggestFloorManifold } from '@/lib/services'
+import { addServiceNode, applyHeating, applyLocation, ensureServices, refreshHeat, serviceObjectTitle, suggestFloorManifold } from '@/lib/services'
 import { HEAT_SOURCES, HEATING_METHODS, LOOP_SPACINGS, normalizeHeating, normalizeRoomHeating } from '@/lib/hydronic'
 import { formatRoomInfo, roomReport, thermalOf } from '@/lib/roominfo'
 import { normalizeGround } from '@/lib/groundworks'
@@ -216,9 +216,7 @@ export function HouseSettings({ plan, onApply }) {
   const country = countryById(plan.country || 'FI')
   const climate = climateOf(plan)
   const choosePlace = (countryId, placeId) => {
-    const next = updateHouse(plan, countryPatch(plan, countryId, placeId))
-    const heat = heatingPatchFor(climateOf(next))
-    onApply(heat ? applyHeating(next, heat) : refreshHeat(next))
+    onApply(applyLocation(plan, countryId, placeId))
   }
   const localStructures = () => {
     const chosen = climateOf(plan).structures
@@ -966,9 +964,7 @@ function ThermalFields({ plan, onApply }) {
       <Field label={t('climate.place')}>
         <select data-testid="climate-place" data-house-place="true" style={inputStyle} value={plan.place || thermal.place || ''} onChange={(event) => {
           const place = country.places.find((item) => item.id === event.target.value)
-          const next = updateHouse(plan, countryPatch(plan, country.id, place?.id || ''))
-          const heat = heatingPatchFor(climateOf(next))
-          onApply(heat ? applyHeating(next, heat) : refreshHeat(next))
+          onApply(applyLocation(plan, country.id, place?.id || ''))
         }}>
           <option value="">{t('climate.byZone')}</option>
           {country.places.map((place) => <option key={place.id} value={place.id}>{place.name}</option>)}
