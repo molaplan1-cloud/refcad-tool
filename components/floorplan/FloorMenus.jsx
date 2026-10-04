@@ -1225,7 +1225,7 @@ function RoomInfo({ report, plan, onApply }) {
           <div data-testid="annual-kwh" style={{ fontSize: 12, marginTop: 4 }}>{t('heat.annual', { kwh: report.heat.annualKwh, hdd: report.heat.degreeDays })}</div>
         )}
         {report.heat.parts.map((part) => (
-          <div key={part.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 2 }}>
+          <div key={part.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, lineHeight: 1.3, marginTop: 2 }}>
             <span>{text(locale, `heat.${part.id}`, part.name)}</span>
             <span>{Math.round(part.watts)} W</span>
           </div>
@@ -1237,7 +1237,7 @@ function RoomInfo({ report, plan, onApply }) {
           <div style={{ fontSize: 11, color: '#57534e', marginBottom: 4 }}>{t('cool.hour', { hour: `${String(report.cooling.hour).padStart(2, '0')}:00` })}</div>
           <div style={{ fontSize: 16, fontWeight: 750 }}>{Math.round(report.cooling.watts)} W · {num(report.cooling.wattsPerM2, 1)} W/m²</div>
           {report.cooling.parts.map((part) => (
-            <div key={part.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 2 }}>
+            <div key={part.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, lineHeight: 1.3, marginTop: 2 }}>
               <span>{t(`cool.${part.id}`)}</span>
               <span>{Math.round(part.watts)} W</span>
             </div>
