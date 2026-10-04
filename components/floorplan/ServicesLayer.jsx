@@ -28,7 +28,7 @@ import {
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
 import { houseBox } from '@/lib/yard'
 import { CAD_COMMANDS } from '@/lib/cadEdit'
-import { annotationFont, placeLineLabels } from '@/lib/annotations'
+import { annotationFont, placeFlowLabel, placeLineLabels } from '@/lib/annotations'
 import { CadItem, CadMenu, CadSep, Flyout, Segmented } from './CadMenu'
 
 const barBtn = (active) => ({
@@ -602,14 +602,18 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     const h = dimFont * 1.35
     obstacles.push({ x: cx - w / 2, y: cy - h / 2, w, h, kind: 'dim' })
   })
+  const flowAnchor = new Map()
   drawnNodes.forEach((node) => {
     if (!live(node.system)) return
     const cx = X(node.x)
     const cy = Y(node.z)
-    const flowPad = node.flow && !quietLabels ? flowFont * 6.2 : 0
-    const wide = (node.kind === 'ahu' ? 40 : node.kind === 'hood' ? 30 : node.kind === 'silencer' ? 26 : 20) + flowPad
+    const wide = node.kind === 'ahu' ? 40 : node.kind === 'hood' ? 30 : node.kind === 'silencer' ? 26 : 20
     const tall = node.kind === 'ahu' ? 36 : 22
-    obstacles.push({ x: cx - (wide - flowPad) / 2, y: cy - tall / 2, w: wide, h: tall, kind: 'symbol' })
+    obstacles.push({ x: cx - wide / 2, y: cy - tall / 2, w: wide, h: tall, kind: 'symbol' })
+    if (!node.flow || quietLabels) return
+    const place = placeFlowLabel(cx, cy, `${node.flow} l/s`, flowFont, Math.max(wide, tall) / 2 + 3, obstacles)
+    flowAnchor.set(node.id, place)
+    obstacles.push({ ...place.box, kind: 'label' })
   })
   const callouts = quietLabels ? [] : manifoldCallouts(plan)
   const legendX = legendBox?.x ?? (sheet.x + sheet.w - 176)
@@ -632,7 +636,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const len = Math.hypot(b.x - a.x, b.z - a.z)
         if (!best || len > best.len) best = { len, a, b }
       }
-      if (!best || best.len < 0.85) return
+      if (!best || best.len < 0.7) return
       const sizeText = run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`
       const text = run.system === 'iv' && run.flow ? `${sizeText}  ${Math.round(run.flow)} l/s` : sizeText
       segments.push({
@@ -649,10 +653,16 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     })
     const kindOrder = { tulo: 0, poisto: 1, ulko: 2, jate: 3 }
     segments.sort((a, b) => (kindOrder[a.kind] ?? 9) - (kindOrder[b.kind] ?? 9) || b.len - a.len)
+    const labelBounds = view ? {
+      x: view.x + 4,
+      y: view.y + (chrome?.h || 0) + 2,
+      w: Math.max(40, view.w - 8),
+      h: Math.max(40, view.h - (chrome?.h || 0) - 8),
+    } : null
     placeLineLabels(segments, obstacles, {
       font: labelFont,
       minLength: labelFont * 2,
-      bounds: view,
+      bounds: labelBounds,
     }).forEach((item) => leaders.push(item))
   }
   return (
@@ -822,7 +832,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
             ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
             : <NodeSymbol node={node} />}
           {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
-            <text data-testid="valve-flow" x={node.kind === 'hood' ? 16 : node.kind === 'ahu' ? 22 : 10} y="0.5" textAnchor="start" dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
+            <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 12} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
           ) : null}
           {node.system === 'electric' && node.circuit && node.kind !== 'panel' && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
             <text data-testid="circuit-badge" x="11" y="-2" fontSize="9" fontWeight="700" fill="#1c1917" stroke="#fbfaf7" strokeWidth="2.4" paintOrder="stroke">{`R${node.circuit}`}</text>
