@@ -2914,7 +2914,7 @@ export default function FloorPlanApp() {
                       </g>
                     )
                   }
-                  const arcs = fig.arcs?.length ? fig.arcs : (fig.arc?.length ? [fig.arc] : [])
+                  const arcs = fig.style === 'folding' ? [] : (fig.arcs?.length ? fig.arcs : (fig.arc?.length ? [fig.arc] : []))
                   return (
                     <g key={opening.id} data-testid="door-mark" data-style={fig.style || 'hinged'} data-mount={fig.mount || ''} data-panels={fig.panels || 1} data-swing={opening.swing >= 0 ? 'left' : 'right'} data-leaf={opening.inward ? 'in' : 'out'} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.05} fill="none">
                       <line data-testid="door-jamb" x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} />
