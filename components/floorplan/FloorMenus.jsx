@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CAD_COMMANDS, CAD_LAYERS, sharedProperties } from '@/lib/cadEdit'
+import { CAD_COMMANDS, CAD_LAYERS, mirrorOpenings, sharedProperties } from '@/lib/cadEdit'
 import { CadItem, CadMenu, CadSep, CadStyles, Flyout, Segmented } from './CadMenu'
 import { MultiProperties } from './CadTools'
 import {
@@ -837,11 +837,13 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
           )}
         </>
       )}
-      <div style={{ display: 'flex', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         <MenuBtn testid="opening-swing-left" onClick={() => onCommit(updateOpening(plan, id, { swing: 1 }))}>{t('opening.swingLeft')}</MenuBtn>
         <MenuBtn testid="opening-swing-right" onClick={() => onCommit(updateOpening(plan, id, { swing: -1 }))}>{t('opening.swingRight')}</MenuBtn>
         <MenuBtn testid="opening-leaf-out" onClick={() => onCommit(updateOpening(plan, id, { inward: false }))}>{t('opening.out')}</MenuBtn>
         <MenuBtn testid="opening-leaf-in" onClick={() => onCommit(updateOpening(plan, id, { inward: true }))}>{t('opening.in')}</MenuBtn>
+        <MenuBtn testid="opening-mirror" onClick={() => onCommit(mirrorOpenings(plan, [{ kind: 'opening', id }]))}>Peilaa</MenuBtn>
+        <MenuBtn testid="opening-mirror-leaf" onClick={() => onCommit(mirrorOpenings(plan, [{ kind: 'opening', id }], { direction: true }))}>Peilaa suunta</MenuBtn>
       </div>
     </div>
   )
@@ -1455,6 +1457,8 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
         <CadEditItems onNavigate={onNavigate} />
         <CadSep />
         <CadItem testid="ctx-flip" onClick={() => act(flipOpening(plan, opening.id))}>Käännä</CadItem>
+        <CadItem testid="ctx-mirror-opening" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }]))}>Peilaa</CadItem>
+        <CadItem testid="ctx-mirror-leaf" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }], { direction: true }))}>Peilaa suunta</CadItem>
         <CadSep />
         <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteOpening(plan, opening.id), true)}>Poista</CadItem>
       </>

@@ -73,6 +73,7 @@ import {
   mergeSelection,
   pasteFloorClipboard,
   patchShared,
+  mirrorOpenings,
   runCommand,
   selectionBounds,
   selectionBox,
@@ -920,6 +921,12 @@ export default function FloorPlanApp() {
       setMenu(null)
       return
     }
+    if (name === 'mirror' && selected.length > 0 && selected.every((item) => item.kind === 'opening')) {
+      const direction = Boolean(extra && typeof extra === 'object' && (extra.shiftKey || extra.shift))
+      commit(mirrorOpenings(plan, selected, { direction }))
+      setMenu(null)
+      return
+    }
     if (!selected.length && name !== 'stretch' && name !== 'measure' && name !== 'match') return
     originPlan.current = plan
     setCommand({
@@ -1631,7 +1638,7 @@ export default function FloorPlanApp() {
       } else if (!event.ctrlKey && !event.metaKey && !event.altKey && !command && tool === 'select') {
         const key = event.key.toLowerCase()
         const shortcut = { m: 'move', c: 'copy', e: 'rotate', s: 'scale', f: 'mirror', b: 'array', o: 'offset', t: 'stretch', n: 'align', d: 'measure' }[key]
-        if (shortcut) beginCommand(shortcut)
+        if (shortcut) beginCommand(shortcut, { shift: event.shiftKey })
       } else if ((event.key === 'z' || event.key === 'Z') && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
         undo()
       }
