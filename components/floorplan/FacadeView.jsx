@@ -124,14 +124,59 @@ function ElevationOpening({ opening, X, Y, metres, colour, trim, technical }) {
       </g>
     )
   }
+  const style = opening.doorStyle || 'hinged'
+  const glazed = style === 'glass' || style === 'patio'
+  const sliding = style === 'sliding' || style === 'patio'
+  const leaf = technical ? '#f5f5f4' : '#f5f0e8'
+  const pane = '#dbeafe'
+  const slideRight = (opening.swing || 1) >= 0
+  const arrow = (x1, x2, yMid) => {
+    const tip = slideRight ? x2 : x1
+    const tail = slideRight ? x1 : x2
+    const head = Math.max(4, Math.min(10, Math.abs(x2 - x1) * 0.28))
+    return (
+      <g data-testid="facade-door-arrow">
+        <line x1={tail} y1={yMid} x2={tip} y2={yMid} stroke="#1c1917" strokeWidth="1.1" />
+        <polyline points={`${tip - (slideRight ? head : -head)},${yMid - head * 0.45} ${tip},${yMid} ${tip - (slideRight ? head : -head)},${yMid + head * 0.45}`} fill="none" stroke="#1c1917" strokeWidth="1.1" />
+      </g>
+    )
+  }
   return (
-    <g data-testid="facade-door">
+    <g data-testid="facade-door" data-style={style} data-mount={opening.slideMount || ''}>
       <rect x={x - casing} y={y - casing * 0.4} width={w + casing * 2} height={h + casing} fill={board} stroke="#1c1917" strokeWidth="0.7" />
       <rect x={x} y={y} width={w} height={h} fill={face} stroke="#1c1917" strokeWidth="1.4" />
-      <rect x={x + frame} y={y + frame * 0.55} width={Math.max(1, w - frame * 2)} height={Math.max(1, h - frame * 1.2)} fill={technical ? '#f5f5f4' : '#f5f0e8'} stroke="#1c1917" strokeWidth="0.9" />
-      <line x1={x + frame} y1={y + h * 0.38} x2={x + w - frame} y2={y + h * 0.38} stroke="#1c1917" strokeWidth="0.7" />
-      <line x1={x + frame} y1={y + h * 0.68} x2={x + w - frame} y2={y + h * 0.68} stroke="#1c1917" strokeWidth="0.7" />
-      <circle cx={x + w - frame * 2.1} cy={y + h * 0.52} r={Math.max(1.5, frame * 0.32)} fill="#1c1917" />
+      {glazed ? (
+        <rect x={x + frame} y={y + frame * 0.55} width={Math.max(1, w - frame * 2)} height={Math.max(1, h - frame * 1.2)} fill={pane} stroke="#1c1917" strokeWidth="0.9" />
+      ) : (
+        <rect x={x + frame} y={y + frame * 0.55} width={Math.max(1, w - frame * 2)} height={Math.max(1, h - frame * 1.2)} fill={leaf} stroke="#1c1917" strokeWidth="0.9" />
+      )}
+      {style === 'double' && <line data-testid="facade-door-mullion" x1={x + w / 2} y1={y + frame * 0.55} x2={x + w / 2} y2={y + h - frame * 0.65} stroke="#1c1917" strokeWidth="1.3" />}
+      {style === 'patio' && <line data-testid="facade-door-mullion" x1={x + w / 2} y1={y + frame} x2={x + w / 2} y2={y + h - frame * 0.7} stroke="#1c1917" strokeWidth="1.15" />}
+      {style === 'folding' && [1, 2, 3].map((index) => (
+        <line key={index} x1={x + (w * index) / 4} y1={y + frame * 0.7} x2={x + (w * index) / 4} y2={y + h - frame * 0.7} stroke="#1c1917" strokeWidth="0.8" />
+      ))}
+      {style === 'folding' && (
+        <polyline data-testid="facade-door-fold" fill="none" stroke="#1c1917" strokeWidth="1" points={[0, 1, 2, 3, 4].map((index) => {
+          const px = x + frame + ((w - frame * 2) * index) / 4
+          const py = y + h * 0.5 + (index % 2 === 0 ? 0 : h * 0.08)
+          return `${px},${py}`
+        }).join(' ')} />
+      )}
+      {!glazed && style !== 'sliding' && style !== 'folding' && (
+        <>
+          <line x1={x + frame} y1={y + h * 0.38} x2={x + w - frame} y2={y + h * 0.38} stroke="#1c1917" strokeWidth="0.7" />
+          <line x1={x + frame} y1={y + h * 0.68} x2={x + w - frame} y2={y + h * 0.68} stroke="#1c1917" strokeWidth="0.7" />
+        </>
+      )}
+      {sliding && arrow(x + frame * 1.4, x + w - frame * 1.4, y + h * (style === 'patio' ? 0.18 : 0.22))}
+      {style === 'glass' && <circle cx={x + w - frame * 2.1} cy={y + h * 0.52} r={Math.max(1.5, frame * 0.32)} fill="#1c1917" />}
+      {style === 'double' && (
+        <>
+          <circle cx={x + w / 2 - frame * 1.3} cy={y + h * 0.52} r={Math.max(1.4, frame * 0.28)} fill="#1c1917" />
+          <circle cx={x + w / 2 + frame * 1.3} cy={y + h * 0.52} r={Math.max(1.4, frame * 0.28)} fill="#1c1917" />
+        </>
+      )}
+      {(style === 'hinged' || !opening.doorStyle) && <circle cx={x + w - frame * 2.1} cy={y + h * 0.52} r={Math.max(1.5, frame * 0.32)} fill="#1c1917" />}
     </g>
   )
 }

@@ -10,7 +10,7 @@ import { BUILDINGS, OBJECTS, PLANTS, ensureYard } from '@/lib/yard'
 import { LanguageSwitch } from '@/components/i18n/Locale'
 import { zoomPercent } from '@/lib/zoom'
 import { CadToolbar } from './CadTools'
-import { DoorHandControls } from './FloorMenus'
+import { DoorPlaceControls } from './FloorMenus'
 import { YARD_DRAW_TOOLS } from './YardLayer'
 
 const rib = (active) => ({
@@ -116,7 +116,7 @@ export function PlanChrome({
   onFinish, onRoute, onRewire, onSchedule, onDiagram, onRewireWater, onRewireHeat, onHeatTable,
   onHeatSchematic,   onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup, onRemoveAuto, onStraighten,
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
-  doorHand = { swing: 1, inward: false }, onDoorHand,
+  doorHand = { swing: 1, inward: false, doorStyle: 'hinged', slideMount: 'pocket', panels: 1 }, onDoorHand,
 }) {
   const [open, setOpen] = useState(null)
   const close = () => setOpen(null)
@@ -321,12 +321,11 @@ export function PlanChrome({
               <Group>
                 {drawTools(toolStyle)}
                 {tool === 'door' && (
-                  <DoorHandControls
+                  <DoorPlaceControls
                     compact
-                    swing={doorHand.swing}
-                    inward={doorHand.inward}
-                    onSwing={(swing) => onDoorHand?.({ ...doorHand, swing })}
-                    onInward={(inward) => onDoorHand?.({ ...doorHand, inward })}
+                    t={t}
+                    value={doorHand}
+                    onChange={(next) => onDoorHand?.(next)}
                   />
                 )}
               </Group>
