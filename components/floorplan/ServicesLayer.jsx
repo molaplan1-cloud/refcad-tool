@@ -630,9 +630,12 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     obstacles.push({ ...place.box, kind: 'label' })
   })
   const callouts = quietLabels ? [] : manifoldCallouts(plan)
+  const legendFont = 10
+  const legendStep = legendFont * 1.3
+  const legendTitle = legendFont * 1.05
   const legendX = legendBox?.x ?? (sheet.x + sheet.w - 176)
   const legendW = Math.max(108, legendBox?.w ?? 160)
-  const legendH = legend.length ? 22 + legend.length * 15 : 0
+  const legendH = legend.length ? legendTitle + legend.length * legendStep + legendFont * 0.4 : 0
   let legendY = legendBox?.y ?? (sheet.y + 74)
   if (legendBox?.maxBottom && legendY + legendH > legendBox.maxBottom) {
     legendY = Math.max(legendBox.y ?? sheet.y + 8, legendBox.maxBottom - legendH)
@@ -868,13 +871,16 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
       {legendH > 0 && (
         <g data-testid="service-legend" transform={`translate(${legendX} ${legendY}) scale(${legendScale})`} style={{ pointerEvents: 'none' }}>
           <rect width={legendW} height={legendH} fill="#ffffff" stroke="#1c1917" strokeWidth={1 / legendScale} />
-          <text x={8} y={14} fontSize="10" fontWeight="700" fill="#1c1917">Selite</text>
-          {legend.map((item, index) => (
-            <g key={`${item.system}-${item.name}`} transform={`translate(8 ${22 + index * 15})`}>
-              <rect width="12" height="8" fill={item.color} stroke="#44403c" strokeWidth="0.5" />
-              <text x="18" y="8" fontSize="10" fill="#1c1917">{item.name}</text>
-            </g>
-          ))}
+          <text x={8} y={legendTitle} fontSize={legendFont} fontWeight="700" fill="#1c1917">Selite</text>
+          {legend.map((item, index) => {
+            const y = legendTitle + legendStep * (index + 1)
+            return (
+              <g key={`${item.system}-${item.name}`}>
+                <rect x={8} y={y - legendFont * 0.72} width="12" height={legendFont * 0.7} fill={item.color} stroke="#44403c" strokeWidth="0.5" />
+                <text x={26} y={y} fontSize={legendFont} fill="#1c1917">{item.name}</text>
+              </g>
+            )
+          })}
         </g>
       )}
     </g>

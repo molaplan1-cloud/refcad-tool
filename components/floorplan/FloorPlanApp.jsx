@@ -93,7 +93,7 @@ import { CadPrompt } from './CadTools'
 import { LayerDock, PlanChrome } from './PlanChrome'
 import { buildPlanPdf } from '@/lib/roominfo'
 import { applyDisplay, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
-import { dimensionFont, paperFont, placeDimensionText } from '@/lib/annotations'
+import { blockHeightForLines, dimensionFont, fitLines, LINE_LEADING, paperFont, placeDimensionText } from '@/lib/annotations'
 import { DisplayPanel } from './DisplayPanel'
 import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
@@ -412,9 +412,9 @@ function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
   const cy = Y(label.z)
   const name = label.text || ''
   const area = label.area || ''
-  const block = (name ? nameSize : 0) + (area ? areaSize + 1 : 0)
-  const nameY = cy - block / 2 + nameSize * 0.35
-  const areaY = name ? nameY + nameSize + 1 : cy + areaSize * 0.15
+  const leading = Math.max(nameSize || 0, areaSize || 0) * LINE_LEADING
+  const nameY = name && area ? cy - leading / 2 + nameSize * 0.15 : cy + (nameSize || areaSize) * 0.15
+  const areaY = name ? nameY + leading : cy + areaSize * 0.15
   const ink = label.halo ? '#fbfaf7' : 'none'
   const haloW = label.halo ? Math.max(1.1, nameSize * 0.28) : 0
   return (
@@ -3043,10 +3043,10 @@ export default function FloorPlanApp() {
                     {(() => {
                       const rows = structureCatalog(plan)
                       const font = paperFont(k, camera.zoom || 1, 2.5)
-                      const rowH = font + 4
+                      const rowH = font * LINE_LEADING
                       const widest = Math.max(...rows.map((row) => `${row.code}  ${row.name}  U ${Number(row.u).toFixed(2)}`.length), 16)
                       const boxW = Math.min(sheet.w * 0.46, Math.max(168, widest * font * 0.58 + 16))
-                      const boxH = rowH * (rows.length + 1) + 8
+                      const boxH = rowH * (rows.length + 1) + font * 0.45
                       const x = sheet.x + 8 * k
                       const y = Math.max(sheet.y + 8, sheet.y + sheet.h - boxH - 8 * k)
                       return (
@@ -3160,32 +3160,44 @@ export default function FloorPlanApp() {
                       t('sheet.rooms', { count: visibleRooms(plan).length }),
                       t('sheet.area', { area: formatArea(totalArea) }),
                     ]
-                    const header = Math.min(22, th * 0.28)
-                    const scaleTop = ty + th - 18
-                    const top = ty + header + 13
-                    const last = scaleTop - 16
-                    const step = lines.length > 1 ? Math.min(14, (last - top) / (lines.length - 1)) : 0
+                    const preferred = 2.8 * k
+                    const header = 8 * k
+                    const footer = 9 * k
+                    const topInset = header + 1.4 * k
+                    const need = blockHeightForLines({ count: lines.length, font: preferred, top: topInset, bottom: footer })
+                    let boxY = ty
+                    let boxH = th
+                    if (need > boxH + 0.5) {
+                      const limit = boxY + boxH - (sheet.y + 4)
+                      const grown = Math.min(Math.max(boxH, need), Math.max(boxH, limit))
+                      boxY = boxY + boxH - grown
+                      boxH = grown
+                    }
+                    const stack = fitLines({ height: boxH, count: lines.length, font: preferred, top: topInset, bottom: footer })
+                    const heading = Math.min(preferred * 1.25, header * 0.62)
                     return (
-                      <g data-testid="title-block">
-                        <rect x={tx} y={ty} width={tw} height={th} fill="#fff" stroke="#1c1917" strokeWidth={1} />
-                        <line x1={tx} y1={ty + header} x2={tx + tw} y2={ty + header} stroke="#1c1917" strokeWidth={0.7} />
-                        <text x={tx + 8} y={ty + header * 0.68} fontSize={13} fontWeight={750} fill="#1c1917">{sheetTitle}</text>
+                      <g data-testid="title-block" data-font={stack.font} data-step={stack.step}>
+                        <rect x={tx} y={boxY} width={tw} height={boxH} fill="#fff" stroke="#1c1917" strokeWidth={1} />
+                        <line x1={tx} y1={boxY + header} x2={tx + tw} y2={boxY + header} stroke="#1c1917" strokeWidth={0.7} />
+                        <text x={tx + 8} y={boxY + header * 0.72} fontSize={heading} fontWeight={750} fill="#1c1917">{sheetTitle}</text>
                         {lines.map((line, index) => (
-                          <text key={`${index}-${line}`} x={tx + 8} y={top + step * index} fontSize={10} fill="#292524">{line}</text>
+                          <text key={`${index}-${line}`} data-testid="title-line" x={tx + 8} y={boxY + stack.ys[index]} fontSize={stack.font} fill="#292524">{line}</text>
                         ))}
                         <g data-testid="scale-bar">
                           {(() => {
                             const metres = layout.worldW >= 8 ? 5 : 2
                             const maxW = tw - 28
                             const natural = metres * layout.scale * k
-                            const bar = Math.min(maxW, Math.max(36, natural))
-                            const sy = ty + th - 12
+                            const bar = Math.min(maxW, Math.max(28, natural))
+                            const barFont = Math.min(stack.font, 2.1 * k)
+                            const barH = Math.max(3, 1.5 * k)
+                            const sy = boxY + boxH - barH - 1.2 * k
                             return (
                               <>
-                                <text x={tx + 8} y={sy - 3} fontSize={8} fill="#1c1917">0</text>
-                                <text x={tx + 8 + bar} y={sy - 3} textAnchor="end" fontSize={8} fill="#1c1917">{metres} m</text>
+                                <text x={tx + 8} y={sy - barFont * 0.35} fontSize={barFont} fill="#1c1917">0</text>
+                                <text x={tx + 8 + bar} y={sy - barFont * 0.35} textAnchor="end" fontSize={barFont} fill="#1c1917">{metres} m</text>
                                 {Array.from({ length: metres }, (_, index) => (
-                                  <rect key={index} x={tx + 8 + (bar / metres) * index} y={sy} width={bar / metres} height={5} fill={index % 2 ? '#fff' : '#1c1917'} stroke="#1c1917" strokeWidth={0.4} />
+                                  <rect key={index} x={tx + 8 + (bar / metres) * index} y={sy} width={bar / metres} height={barH} fill={index % 2 ? '#fff' : '#1c1917'} stroke="#1c1917" strokeWidth={0.4} />
                                 ))}
                               </>
                             )
@@ -3397,7 +3409,7 @@ export default function FloorPlanApp() {
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>{t('bom.title')}</div>
           {rows.length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>{t('bom.empty')}</div>}
           {rows.map((row) => (
-            <div key={row.key} data-testid={row.group === 'structure' ? 'structure-bom' : row.group === 'cover' ? 'cover-bom' : row.group === 'ground' ? 'ground-bom' : undefined} data-code={row.code || undefined} data-unit={row.unit || undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
+            <div key={row.key} data-testid={row.group === 'structure' ? 'structure-bom' : row.group === 'cover' ? 'cover-bom' : row.group === 'ground' ? 'ground-bom' : undefined} data-code={row.code || undefined} data-unit={row.unit || undefined} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6, fontSize: 12, lineHeight: 1.3 }}>
               <span style={{ width: 14, height: 14, borderRadius: 3, background: row.color, border: '1px solid #a8a29e', flexShrink: 0 }} />
               <span data-testid={row.group === 'plinth' ? 'plinth-bom' : 'bom-line'} data-code={row.code || ''} style={{ flex: 1 }}>{row.group === 'structure' ? `${row.code} ${text(locale, `struct.${row.structureId}`, row.structureName)}: ${text(locale, `layer.${row.materialId}`, row.name)}` : `${row.roomName ? `${row.roomName}: ` : ''}${text(locale, `group.${row.group}`, row.groupLabel)}: ${text(locale, `mat.${row.group}.${row.id}`, row.name)}${row.code ? ` ${row.code}` : ''}`}</span>
               <span style={{ color: '#78716c' }}>{row.unit ? `${num(row.area || 0, row.unit === 'm³' ? 2 : 1)} ${row.unit}` : `${num(row.area || 0, 1)} m²`}</span>
@@ -3408,7 +3420,7 @@ export default function FloorPlanApp() {
             <div key={group} style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{t(`group.${group}`)}</div>
               {MATERIALS[group].map((item) => (
-                <div key={`${group}-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
+                <div key={`${group}-${item.id}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, lineHeight: 1.3, color: '#44403c', marginBottom: 3 }}>
                   <span style={{ width: 12, height: 12, background: item.color, border: '1px solid #d6d3d1' }} />
                   <span>{text(locale, `mat.${group}.${item.id}`, item.name)}</span>
                 </div>
@@ -3419,7 +3431,7 @@ export default function FloorPlanApp() {
             <div data-testid="facade-area-legend" style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{t('house.facade')}</div>
               {claddingAreas(plan).map((item) => (
-                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
+                <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, lineHeight: 1.3, color: '#44403c', marginBottom: 3 }}>
                   <span style={{ width: 12, height: 12, background: item.color, border: '1px solid #d6d3d1' }} />
                   <span style={{ flex: 1 }}>{item.group}: {item.name}</span>
                   <span>{formatArea(item.area)}</span>

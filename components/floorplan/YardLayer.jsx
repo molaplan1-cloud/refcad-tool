@@ -591,7 +591,7 @@ export default function YardLayer({ plan, X, Y, px, sheet, selected: selectedHit
       {layerVisible(plan, 'ground') && (showClearances || ['wells', 'waste-units', 'waste-areas', 'waste-lines'].includes(selectedHit?.collection)) && groundWarnings(plan).length > 0 && (
         <g data-testid="ground-warnings">
           {groundWarnings(plan).slice(0, 4).map((warning, index) => (
-            <text key={`${warning.code}-${index}`} x={sheet.x + 16} y={sheet.y + sheet.h - 28 - index * 12} fontSize={9} fill={warning.level === 'fail' ? '#b91c1c' : '#b45309'}>{warning.text}</text>
+            <text key={`${warning.code}-${index}`} x={sheet.x + 16} y={sheet.y + sheet.h - 28 - index * 9 * 1.3} fontSize={9} fill={warning.level === 'fail' ? '#b91c1c' : '#b45309'}>{warning.text}</text>
           ))}
         </g>
       )}
