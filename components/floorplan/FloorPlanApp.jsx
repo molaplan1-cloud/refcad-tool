@@ -19,6 +19,7 @@ import {
   deleteRoom,
   deleteWall,
   detectRoomAt,
+  detectRoomGaps,
   detectRooms,
   dimensionRotation,
   faceSide,
@@ -924,6 +925,7 @@ export default function FloorPlanApp() {
             services: ensureServices(parsed),
             yard: ensureYard(parsed),
             rooms: detectRooms(parsed.walls, parsed.rooms || []),
+            roomGaps: detectRoomGaps(parsed.walls),
           }
           setPlan(straightenWalls(loaded, 0.5))
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
@@ -2865,6 +2867,20 @@ export default function FloorPlanApp() {
                     stroke={item.id === selectedRoom ? '#0f766e' : 'none'}
                     strokeWidth={1.2}
                   />
+                ))}
+                {sheetMode !== 'site' && (plan.roomGaps || []).map((gap, index) => (
+                  <g
+                    key={`gap-${index}-${gap.x}-${gap.z}`}
+                    data-testid="room-gap"
+                    data-text={t('room.unclosed')}
+                    transform={`translate(${X(gap.x)} ${Y(gap.z)})`}
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    <circle r={Math.max(7, px(0.16))} fill="#fff7ed" stroke="#c2410c" strokeWidth={1.5} />
+                    <line x1={-4} y1={-4} x2={4} y2={4} stroke="#c2410c" strokeWidth={1.6} />
+                    <line x1={4} y1={-4} x2={-4} y2={4} stroke="#c2410c" strokeWidth={1.6} />
+                    <text x={Math.max(10, px(0.22))} y={-4} fontSize={Math.max(11, px(0.18))} fontWeight={700} fill="#9a3412">{t('room.unclosed')}</text>
+                  </g>
                 ))}
                 </g>
                 {sheetMode === 'site' && (
