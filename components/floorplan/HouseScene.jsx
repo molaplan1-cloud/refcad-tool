@@ -199,7 +199,7 @@ function paintCanvas(look) {
   return tex
 }
 
-function bindTexture(tex, { color = false, anisotropy = 8 } = {}) {
+function bindTexture(tex, { color = false, anisotropy = 16 } = {}) {
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
   if (color) tex.colorSpace = THREE.SRGBColorSpace
@@ -224,21 +224,21 @@ function brickMaps(look) {
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')
-  ctx.fillStyle = '#5e5954'
+  ctx.fillStyle = '#322f2c'
   ctx.fillRect(0, 0, width, height)
   const stepX = width / cols
   const stepY = height / rows
   const brickW = stepX * (275 / 285)
-  const brickH = stepY * (75 / 85)
+  const brickH = stepY * (70 / 85)
   const ox = (stepX - brickW) / 2
   const oy = (stepY - brickH) / 2
   const bump = document.createElement('canvas')
   bump.width = width
   bump.height = height
   const bctx = bump.getContext('2d')
-  bctx.fillStyle = '#3a3a3a'
+  bctx.fillStyle = '#2a2a2a'
   bctx.fillRect(0, 0, width, height)
-  bctx.fillStyle = '#d0d0d0'
+  bctx.fillStyle = '#d8d8d8'
   for (let row = 0; row < rows; row += 1) {
     const shift = row % 2 ? stepX / 2 : 0
     for (let col = -1; col <= cols; col += 1) {
@@ -333,19 +333,13 @@ function roofSurface(finish) {
     const tileH = 80
     for (let row = 0, y = 0; y < 520; row += 1, y += tileH) {
       const shift = row % 2 ? tileW / 2 : 0
-      ctx.fillStyle = shadeHex(base, 0.62)
-      ctx.fillRect(0, y + tileH - 6, 512, 6)
+      ctx.fillStyle = shadeHex(base, 0.42)
+      ctx.fillRect(0, y + tileH - 16, 512, 16)
       for (let x = -tileW + shift; x < 512; x += tileW) {
-        ctx.fillStyle = shadeHex(base, 0.94 + ((row + x) % 5) * 0.02)
-        ctx.fillRect(x + 3, y + 4, tileW - 8, tileH - 12)
-        ctx.strokeStyle = shadeHex(base, 0.5)
-        ctx.lineWidth = 2
-        ctx.strokeRect(x + 3, y + 4, tileW - 8, tileH - 12)
-        ctx.strokeStyle = shadeHex(base, 1.15)
-        ctx.beginPath()
-        ctx.moveTo(x + 8, y + 10)
-        ctx.quadraticCurveTo(x + tileW / 2, y, x + tileW - 8, y + 10)
-        ctx.stroke()
+        ctx.fillStyle = shadeHex(base, 0.96 + ((row * 3 + x) % 5) * 0.015)
+        ctx.fillRect(x + 2, y + 2, tileW - 4, tileH - 18)
+        ctx.fillStyle = shadeHex(base, 0.72)
+        ctx.fillRect(x + tileW - 3, y + 2, 2, tileH - 18)
       }
     }
   }
@@ -651,19 +645,27 @@ function roofGeometry(model) {
   const positions = []
   const normals = []
   const uvs = []
+  const up = new THREE.Vector3(0, 1, 0)
   roofFaces(model).forEach((face) => {
     const a = new THREE.Vector3(...face[0])
     const b = new THREE.Vector3(...face[1])
     const c = new THREE.Vector3(...face[2])
     const normal = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a)).normalize()
-    const tangent = Math.abs(normal.y) > 0.2
-      ? new THREE.Vector3(1, 0, 0).addScaledVector(normal, -normal.x).normalize()
-      : new THREE.Vector3(0, 1, 0).addScaledVector(normal, -normal.y).normalize()
-    const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize()
+    // Courses follow the eave: the horizontal axis in the face. The other axis
+    // runs up the slope, in metres, so hip ends match the main slopes.
+    const along = new THREE.Vector3().crossVectors(normal, up)
+    if (along.lengthSq() < 1e-8) along.set(1, 0, 0)
+    else along.normalize()
+    let rise = new THREE.Vector3().crossVectors(along, normal)
+    if (rise.y < 0) {
+      along.negate()
+      rise = new THREE.Vector3().crossVectors(along, normal)
+    }
+    rise.normalize()
     ;[a, b, c].forEach((point) => {
       positions.push(point.x, point.y, point.z)
       normals.push(normal.x, normal.y, normal.z)
-      uvs.push(point.dot(tangent), point.dot(bitangent))
+      uvs.push(point.dot(along), point.dot(rise))
     })
   })
   const geometry = new THREE.BufferGeometry()
