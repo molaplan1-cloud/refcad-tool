@@ -953,6 +953,23 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
           }}
         />
       )}
+      {opening.kind === 'passage' && (
+        <>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 650, marginBottom: 8 }}>
+            <input data-testid="passage-lintel" type="checkbox" checked={Boolean(opening.lintel)} onChange={(event) => patch({ lintel: event.target.checked })} />
+            {t('opening.lintel')}
+          </label>
+          {opening.lintel && (
+            <Field label={t('opening.lintel')}>
+              <input data-testid="passage-lintel-height" style={inputStyle} type="number" value={mm(opening.lintelHeight || 0.15)} onChange={(event) => patch({ lintelHeight: fromMm(event.target.value) || 0.15 })} />
+            </Field>
+          )}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 650, marginBottom: 8 }}>
+            <input data-testid="passage-merge" type="checkbox" checked={Boolean(opening.mergeSpaces)} onChange={(event) => onCommit(refreshHeat(updateOpening(plan, id, { mergeSpaces: event.target.checked })))} />
+            {t('opening.merge')}
+          </label>
+        </>
+      )}
       {compass && (
         <div data-testid="window-compass" data-compass={compass.code} style={{ fontSize: 13, fontWeight: 750, marginBottom: 8 }}>
           {t('opening.compass')}: {compass.code} · {t(`compass.${compass.code}`)}
@@ -971,9 +988,10 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
       <Field label={t('opening.kind')}>
         <select style={inputStyle} value={opening.kind} onChange={(event) => {
           const kind = event.target.value
-          patch({ kind, height: kind === 'window' ? 1.2 : 2.1, sill: kind === 'window' ? 0.9 : 0, width: kind === 'window' ? 1.2 : 0.9 })
+          patch({ kind, height: kind === 'window' ? 1.2 : 2.1, sill: kind === 'window' ? 0.9 : 0, width: kind === 'window' || kind === 'passage' ? 1.2 : 0.9, swing: kind === 'passage' ? 0 : (opening.swing || 1), mergeSpaces: kind === 'passage' ? Boolean(opening.mergeSpaces) : false, ...(kind === 'passage' ? { doorStyle: undefined, panels: undefined, slideMount: undefined } : {}) })
         }}>
           <option value="door">{t('opening.door')}</option>
+          <option value="passage">{t('opening.passage')}</option>
           <option value="window">{t('opening.window')}</option>
         </select>
       </Field>
@@ -1129,6 +1147,15 @@ function RoomFields({ plan, id, wallId, onApply }) {
           {ROOM_TYPES.map((item) => <option key={item.id} value={item.id}>{text(locale, `roomType.${item.id}`, item.name)}</option>)}
         </select>
       </Field>
+      {(room.connections || []).length > 0 && (
+        <div data-testid="room-connections" style={{ fontSize: 12, margin: '4px 0 8px' }}>
+          {(room.connections || []).map((link) => (
+            <div key={link.openingId} data-testid="room-connection" data-kind={link.kind} data-merge={link.mergeSpaces ? '1' : '0'}>
+              {link.name} {Math.round((link.width || 0) * 1000)} mm{link.mergeSpaces ? ' · yhdistetty' : ''}
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Lattia</div>
       <SwatchRow group="floor" value={room.floorId} onPick={(material) => patch({ floorId: material })} />
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Tämän huoneen seinäpinnat</div>
@@ -1647,10 +1674,13 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
       </>
     )
   } else if (menu.kind === 'opening' && opening) {
-    title = `${opening.kind === 'window' ? 'Ikkuna' : 'Ovi'} ${mm(opening.width)} mm`
+    title = `${opening.kind === 'window' ? 'Ikkuna' : opening.kind === 'passage' ? 'Oviaukko' : 'Ovi'} ${mm(opening.width)} mm`
     body = (
       <>
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        {opening.kind === 'passage' && (
+          <CadItem testid="ctx-merge-spaces" onClick={() => act(updateOpening(plan, opening.id, { mergeSpaces: !opening.mergeSpaces }), true)}>{opening.mergeSpaces ? 'Erota tilat' : 'Yhdistä tilat'}</CadItem>
+        )}
         {opening.kind === 'door' && (
           <>
             <CadItem testid="ctx-handedness" shortcut="F" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }]))}>Vaihda kätisyys</CadItem>

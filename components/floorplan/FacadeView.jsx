@@ -114,6 +114,16 @@ function ElevationOpening({ opening, X, Y, metres, colour, trim, technical }) {
   const casing = Math.max(1.6, frame * 0.55)
   const face = technical ? '#f8fafc' : colour
   const board = technical ? '#f8fafc' : trim
+  if (opening.kind === 'passage') {
+    return (
+      <g data-testid="facade-passage" data-lintel={opening.lintel ? '1' : '0'}>
+        <rect x={x} y={y} width={w} height={h} fill="#f8fafc" stroke="#1c1917" strokeWidth="0.8" />
+        <line x1={x} y1={y} x2={x} y2={y + h} stroke="#1c1917" strokeWidth="0.6" />
+        <line x1={x + w} y1={y} x2={x + w} y2={y + h} stroke="#1c1917" strokeWidth="0.6" />
+        {opening.lintel && <rect data-testid="facade-lintel" x={x - 2} y={y - Math.max(4, h * 0.08)} width={w + 4} height={Math.max(4, h * 0.08)} fill={board} stroke="#1c1917" strokeWidth="0.7" />}
+      </g>
+    )
+  }
   if (opening.kind === 'window') {
     return (
       <g data-testid="facade-window">
