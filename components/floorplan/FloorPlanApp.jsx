@@ -2923,6 +2923,11 @@ export default function FloorPlanApp() {
                   onContext={openServiceMenu}
                   flashId={flashId}
                   activeSystems={workspace === 'sahko' || workspace === 'iv' || workspace === 'lvi' ? workspaceSystems(workspace) : []}
+                  zoom={camera.zoom || 1}
+                  camera={camera}
+                  viewport={size}
+                  roomLabels={sheetMode === 'site' ? [] : roomLabels}
+                  dimensions={sheetMode === 'site' ? [] : dimLines}
                 />
                 {ghosts.map((node) => (
                   <g key={node.id} data-testid="equip-ghost" opacity={0.9} style={{ pointerEvents: 'none' }}>
