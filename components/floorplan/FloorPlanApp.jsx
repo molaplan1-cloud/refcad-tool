@@ -2890,14 +2890,14 @@ export default function FloorPlanApp() {
                   const selectedOpening = picks.some((item) => item.kind === 'opening' && item.id === opening.id)
                   if (fig.kind === 'passage') {
                     return (
-                      <g key={opening.id} data-testid="passage-mark" data-merge={opening.mergeSpaces ? '1' : '0'} data-lintel={opening.lintel ? '1' : '0'} stroke="#1c1917" strokeWidth={0.7} fill="none">
+                      <g key={opening.id} data-testid="passage-mark" data-merge={opening.mergeSpaces ? '1' : '0'} data-lintel={opening.lintel ? '1' : '0'} stroke="#1c1917" fill="none" strokeLinecap="butt">
                         {(fig.faces || []).map((line, index) => (
-                          <line key={index} data-testid="passage-face" x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} />
+                          <line key={index} data-testid="passage-face" x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
                         ))}
-                        <line data-testid="passage-jamb" x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} />
-                        <line data-testid="passage-jamb" x1={X(fig.jambB[0].x)} y1={Y(fig.jambB[0].z)} x2={X(fig.jambB[1].x)} y2={Y(fig.jambB[1].z)} />
+                        <line data-testid="passage-jamb" x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
+                        <line data-testid="passage-jamb" x1={X(fig.jambB[0].x)} y1={Y(fig.jambB[0].z)} x2={X(fig.jambB[1].x)} y2={Y(fig.jambB[1].z)} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
                         {!opening.mergeSpaces && (
-                          <line data-testid="passage-boundary" x1={X(fig.boundary.x1)} y1={Y(fig.boundary.z1)} x2={X(fig.boundary.x2)} y2={Y(fig.boundary.z2)} strokeDasharray="4 3" />
+                          <line data-testid="passage-boundary" x1={X(fig.boundary.x1)} y1={Y(fig.boundary.z1)} x2={X(fig.boundary.x2)} y2={Y(fig.boundary.z2)} strokeWidth={1.3} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
                         )}
                       </g>
                     )
