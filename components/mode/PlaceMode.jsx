@@ -1,13 +1,14 @@
-export function modeChipText({ name, repeat = false, drawing = false }) {
-  if (!name) return 'Valitse'
+export function modeChipText({ name, repeat = false, drawing = false, workspace = '' }) {
+  const head = workspace ? `${workspace} › ` : ''
+  if (!name) return `${head}Valitse`
   const bits = [`${drawing ? 'Piirrä' : 'Lisää'}: ${name}`]
   if (repeat) bits.push('Toista')
   bits.push('Esc lopettaa')
-  return bits.join(' — ')
+  return head + bits.join(' — ')
 }
 
-export function ModeChip({ name, repeat = false, drawing = false }) {
-  const label = modeChipText({ name, repeat, drawing })
+export function ModeChip({ name, repeat = false, drawing = false, workspace = '' }) {
+  const label = modeChipText({ name, repeat, drawing, workspace })
   const select = !name
   return (
     <div

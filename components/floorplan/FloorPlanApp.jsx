@@ -132,8 +132,9 @@ import {
   addServiceRun,
   deleteServiceNode,
   deleteServiceRun,
-  autoRouteAll,
-  applyHeating,
+  acceptEquipment,
+  autoRoute,
+  suggestEquipment,
   assignDeviceCircuit,
   commitRunGeometry,
   dragServiceRun,
@@ -141,8 +142,6 @@ import {
   buildElectricPdf,
   buildHydronicPdf,
   buildServicePdf,
-  rewireElectric,
-  rewireWater,
   SERVICE_SYSTEMS,
   ensureServices,
   hitService,
@@ -165,6 +164,7 @@ import {
   shellPlan,
 } from '@/lib/projects'
 import { snapAlongWall, snapFixturePoint, snapPoint } from '@/lib/snap'
+import { WORKSPACES, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
 import { FIT_CAMERA, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 import { LanguageSwitch, usePlanLocale } from '@/components/i18n/Locale'
 import { wallBearing } from '@/lib/orientation'
@@ -626,6 +626,9 @@ export default function FloorPlanApp() {
   const [electricView, setElectricView] = useState(null)
   const [heatView, setHeatView] = useState(null)
   const [sheetMode, setSheetMode] = useState('plan')
+  const [workspace, setWorkspace] = useState('rakenne')
+  const [ghosts, setGhosts] = useState([])
+  const [fixtureGroup, setFixtureGroup] = useState('Kaikki')
   const [displayOpen, setDisplayOpen] = useState(false)
   const [showClearances, setShowClearances] = useState(false)
   const [layersOpen, setLayersOpen] = useState(true)
@@ -1184,22 +1187,23 @@ export default function FloorPlanApp() {
     event.preventDefault()
     const world = toWorld(event)
     const joint = cornerJoint(plan.walls, world, Math.max(0.32, 18 / Math.max(ppm2d, 0.001)))
-    if (joint) {
+    if (joint && workspace === 'rakenne') {
       setMenu({ x: event.clientX, y: event.clientY, kind: 'corner', id: 'corner', at: { x: joint.x, z: joint.z } })
       return
     }
     const serviceHit = hitService(plan, world)
-    if (serviceHit) {
+    if (serviceHit && workspaceAllows(workspace, serviceHit)) {
       openServiceMenu(event, serviceHit)
       return
     }
     const hit = hitTest(plan, world)
     const yardHit = sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
-    if (hit.kind !== 'opening' && hit.kind !== 'wall' && yardHit && (yardHit.collection !== 'plot' || hit.kind === 'canvas')) {
+    if (workspace === 'piha' && hit.kind !== 'opening' && hit.kind !== 'wall' && yardHit && (yardHit.collection !== 'plot' || hit.kind === 'canvas')) {
       setMenu({ x: event.clientX, y: event.clientY, kind: 'yard', id: yardHit.id, collection: yardHit.collection, at: world })
       choose(yardHit)
       return
     }
+    if (!workspaceAllows(workspace, hit)) return
     setMenu({ x: event.clientX, y: event.clientY, kind: hit.kind, id: hit.id, at: world })
     if (hit.kind !== 'canvas') choose(hit)
   }
@@ -1461,7 +1465,8 @@ export default function FloorPlanApp() {
       placeAt(world, ppm2d, { at: Date.now(), px: event.clientX, py: event.clientY, shift: event.shiftKey })
       return
     }
-    const serviceHit = hitService(plan, world)
+    let serviceHit = hitService(plan, world)
+    if (serviceHit && !workspaceAllows(workspace, serviceHit)) serviceHit = null
     if (serviceHit?.target === 'node') {
       choose({ kind: 'service', service: serviceHit })
       dragNode.current = { id: serviceHit.id, origin: { x: world.x, z: world.z }, moved: false }
@@ -1474,7 +1479,7 @@ export default function FloorPlanApp() {
       beginRouteDrag(serviceHit.id, mode, index, world)
       return
     }
-    const yardHit = sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
+    const yardHit = workspace === 'piha' && sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
     const hit = hitTest(plan, world)
     if (yardHit && hit.kind !== 'opening' && hit.kind !== 'wall' && (yardHit.collection !== 'plot' || hit.kind === 'canvas')) {
       choose(yardHit)
@@ -1485,9 +1490,17 @@ export default function FloorPlanApp() {
       return
     }
     if (hit.kind === 'opening') {
+      if (!workspaceAllows(workspace, hit)) {
+        pending.current = { x: world.x, z: world.z, hit: { kind: 'canvas' }, shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey, moved: false }
+        return
+      }
       dragOpen.current = hit.id
       dragBefore.current = plan
       choose(hit, { shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey })
+      return
+    }
+    if (!workspaceAllows(workspace, hit)) {
+      pending.current = { x: world.x, z: world.z, hit: { kind: 'canvas' }, shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey, moved: false }
       return
     }
     pending.current = {
@@ -1564,6 +1577,7 @@ export default function FloorPlanApp() {
       }
       if (event.key === 'Escape') {
         if (command) cancelCommand()
+        setGhosts([])
         exitToSelect()
         setMenu(null)
         setElectricView(null)
@@ -1714,6 +1728,7 @@ export default function FloorPlanApp() {
   }
 
   const onFixtureDrag3d = (id, spot, phase) => {
+    if (workspace !== 'kalusteet') return
     const fixture = (plan.fixtures || []).find((item) => item.id === id)
     if (!dragGrab.current && fixture) {
       dragBefore.current = plan
@@ -1736,6 +1751,7 @@ export default function FloorPlanApp() {
   }
 
   const onOpeningDrag3d = (id, spot, phase) => {
+    if (workspace !== 'rakenne') return
     if (!dragBefore.current) dragBefore.current = plan
     setPlan((current) => moveOpening(current, id, { x: spot.x, z: spot.z }))
     setPick({ kind: 'opening', id })
@@ -1746,6 +1762,7 @@ export default function FloorPlanApp() {
   }
 
   const onServiceDrag3d = (service, spot, phase) => {
+    if (!workspaceAllows(workspace, { kind: 'service', service })) return
     if (!service) return
     if (service.target === 'node') {
       if (phase === 'start') {
@@ -1797,6 +1814,7 @@ export default function FloorPlanApp() {
   }
 
   const onYardDrag3d = (hit, spot, phase) => {
+    if (workspace !== 'piha') return
     if (!dragBefore.current) dragBefore.current = plan
     setPlan((current) => moveYardItem(current, hit.collection, hit.id, spot.x, spot.z))
     setPick(hit)
@@ -1922,7 +1940,7 @@ export default function FloorPlanApp() {
   const matchesQuery = (item) => !query || item.name.toLowerCase().includes(query) || item.group.toLowerCase().includes(query)
   const roomKindId = room ? roomKind(room) : ''
   const suggested = suggestionsFor(roomKindId).filter(matchesQuery)
-  const groups = FURNITURE_GROUPS.map((id) => ({
+  const groups = FURNITURE_GROUPS.filter((id) => fixtureGroup === 'Kaikki' || fixtureGroup === id).map((id) => ({
     id,
     items: FIXTURES.filter((item) => item.group === id && matchesQuery(item)),
   })).filter((group) => group.items.length)
@@ -1954,7 +1972,8 @@ export default function FloorPlanApp() {
       : yardTool
         ? yardToolLabel(yardTool)
         : (TOOL_LABELS[tool] || null)
-  const modeLabel = modeChipText({ name: activeName, repeat: repeatPlace && placingOne, drawing: drawingTool })
+  const workspaceName = WORKSPACES.find((item) => item.id === workspace)?.name || ''
+  const modeLabel = modeChipText({ workspace: workspaceName, name: activeName, repeat: repeatPlace && placingOne, drawing: drawingTool })
   const engaged = Boolean(activeName)
   const status = engaged
     ? `${modeLabel}${liveEnd ? ` · ${formatMm(liveLength)}` : ''}`
@@ -1994,8 +2013,8 @@ export default function FloorPlanApp() {
         onMode={(next) => {
           if (next === '3d') setView('3d')
           else if (next === 'facade') setView('facade')
-          else if (next === 'site') { setView('2d'); setSheetMode('site'); setCamera(FIT_CAMERA); setYardTool(null); setYardPoints([]) }
-          else { setView('2d'); setSheetMode('plan'); setYardTool(null); setYardPoints([]) }
+          else if (next === 'site') { setWorkspace('piha'); setView('2d'); setSheetMode('site'); setCamera(FIT_CAMERA); setYardTool(null); setYardPoints([]) }
+          else { if (workspace === 'piha') setWorkspace('rakenne'); setView('2d'); setSheetMode('plan'); setYardTool(null); setYardPoints([]) }
         }}
         onTool={(next) => {
           if (next === 'select' || (next === tool && !placing && !svcTool && !yardTool)) {
@@ -2072,20 +2091,106 @@ export default function FloorPlanApp() {
         onFloorHeating={setFloorHeating}
         onFinish={finishServiceRun}
         onRoute={() => {
-          commit(syncYardServices(autoRouteAll(plan, { floorHeating })))
+          const systems = workspaceSystems(workspace)
+          if (!systems.length) {
+            showToast('Reititys on Sähkö-, IV- ja LVI-työtiloissa')
+            return
+          }
+          let next = plan
+          const notes = []
+          systems.forEach((system) => {
+            const routed = autoRoute(next, system, { floorHeating: workspace === 'lvi' && floorHeating })
+            if (routed.routeNotice) notes.push(`${system === 'electric' ? 'Sähkö' : system === 'iv' ? 'IV' : system === 'water' ? 'Vesi' : system === 'drain' ? 'Viemäri' : 'Lämmitys'}: ${routed.routeNotice}`)
+            next = routed
+          })
+          const clean = { ...next }
+          delete clean.routeNotice
+          const changed = JSON.stringify(clean.services?.runs || []) !== JSON.stringify(plan.services?.runs || [])
+          if (notes.length) showToast(notes.join(' · '))
+          else if (changed) showToast('Reitit päivitetty')
+          else showToast('Reitit olivat jo ajan tasalla')
+          if (changed) commit(syncYardServices(clean))
           setSvcPoints([])
-          setView('2d')
         }}
+        workspace={workspace}
+        onWorkspace={(id) => {
+          setWorkspace(id)
+          setGhosts([])
+          exitToSelect()
+          if (id === 'piha') {
+            setView('2d')
+            setSheetMode('site')
+            setCamera(FIT_CAMERA)
+          } else if (sheetMode === 'site') setSheetMode('plan')
+          const systems = workspaceSystems(id)
+          if (systems[0]) {
+            setSvcSystem(systems[0])
+            const next = PLACEABLES.find((item) => item.system === systems[0] && item.mode === 'node')
+            if (next) setSvcKind(next.id)
+          }
+        }}
+        onPlaceDevice={(item) => {
+          if (!item) return
+          const mode = item.drawing || item.mode === 'run' ? 'run' : 'node'
+          if (svcTool === mode && svcKind === item.id) { exitToSelect(); return }
+          setSvcSystem(item.system)
+          setSvcKind(item.id)
+          setSvcTool(mode)
+          setTool('select')
+          setPlacing(null)
+          setYardTool(null)
+          setDraft(null)
+          setPoly([])
+        }}
+        onSuggest={() => {
+          const systems = workspaceSystems(workspace)
+          const proposals = systems.flatMap((system) => suggestEquipment(plan, system, { floorHeating }).proposals)
+          if (!proposals.length) {
+            setGhosts([])
+            showToast('Ei uusia laite-ehdotuksia')
+            return
+          }
+          setGhosts(proposals)
+          showToast('Ehdotukset näkyvät katkoviivalla. Hyväksy tai paina Esc.')
+        }}
+        onAccept={() => {
+          const systems = workspaceSystems(workspace)
+          let next = plan
+          systems.forEach((system) => { next = acceptEquipment(next, system, { floorHeating }) })
+          if (next === plan) { setGhosts([]); return }
+          commit(next)
+          setGhosts([])
+          showToast('Ehdotetut laitteet lisätty')
+        }}
+        ghostCount={ghosts.length}
         onRewire={() => {
-          commit(rewireElectric(plan))
+          const routed = autoRoute(plan, 'electric')
+          if (routed.routeNotice) showToast(routed.routeNotice)
+          const clean = { ...routed }
+          delete clean.routeNotice
+          if (JSON.stringify(clean.services?.runs || []) !== JSON.stringify(plan.services?.runs || [])) commit(clean)
           setSvcPoints([])
-          setView('2d')
           setElectricView(null)
         }}
         onSchedule={() => { setView('2d'); setElectricView('list') }}
         onDiagram={() => { setView('2d'); setElectricView('diagram') }}
-        onRewireWater={() => { commit(rewireWater(plan)); setView('2d'); setHeatView(null) }}
-        onRewireHeat={() => { commit(applyHeating(plan, {})); setView('2d'); setSvcSystem('heat'); setHeatView(null) }}
+        onRewireWater={() => {
+          const routed = autoRoute(plan, 'water', { floorHeating })
+          if (routed.routeNotice) showToast(routed.routeNotice)
+          const clean = { ...routed }
+          delete clean.routeNotice
+          if (JSON.stringify(clean.services?.runs || []) !== JSON.stringify(plan.services?.runs || [])) commit(clean)
+          setHeatView(null)
+        }}
+        onRewireHeat={() => {
+          const routed = autoRoute(plan, 'heat')
+          if (routed.routeNotice) showToast(routed.routeNotice)
+          const clean = { ...routed }
+          delete clean.routeNotice
+          if (JSON.stringify(clean.services?.runs || []) !== JSON.stringify(plan.services?.runs || [])) commit(clean)
+          setSvcSystem('heat')
+          setHeatView(null)
+        }}
         onHeatTable={() => { setView('2d'); setHeatView('table'); setElectricView(null) }}
         onHeatSchematic={() => { setView('2d'); setHeatView('schematic'); setElectricView(null) }}
         onPdf={exportPdf}
@@ -2113,7 +2218,36 @@ export default function FloorPlanApp() {
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <aside style={{ width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}>
-          <LayerDock plan={plan} open={layersOpen} onToggle={() => setLayersOpen((open) => !open)} onLayer={(id, visible) => setPlan((current) => setServiceLayer(current, id, visible))} t={t} />
+          <div data-testid="workspace-side-title" style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.4, color: '#0f766e', margin: '0 4px 8px' }}>{workspaceName}</div>
+          {workspace === 'rakenne' && (
+            <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Seinät, huoneet, ovet, ikkunat, katto ja rakenteet. Muut tasot ovat himmennettyjä ja lukittuja.</p>
+          )}
+          {workspace === 'piha' && (
+            <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Asemapiirros ja piha. Työkalut ovat nauhassa. Talo ja talotekniikka ovat lukittuja.</p>
+          )}
+          {(workspace === 'sahko' || workspace === 'iv' || workspace === 'lvi') && (
+            <div data-testid="device-library">
+              <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Vain tämän järjestelmän laitteet ja reitit. Muut tasot ovat himmennettyjä.</p>
+              {PLACEABLES.filter((item) => workspaceSystems(workspace).includes(item.system) && item.mode === 'node').map((item) => (
+                <button key={item.id} type="button" data-testid={`side-device-${item.id}`} style={sideBtn(svcTool === 'node' && svcKind === item.id)} onClick={() => {
+                  if (svcTool === 'node' && svcKind === item.id) { exitToSelect(); return }
+                  setSvcSystem(item.system)
+                  setSvcKind(item.id)
+                  setSvcTool('node')
+                  setTool('select')
+                  setPlacing(null)
+                  setYardTool(null)
+                }}>{item.name}</button>
+              ))}
+            </div>
+          )}
+          {workspace === 'kalusteet' && (
+          <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+            {['Kaikki', ...FURNITURE_GROUPS].map((id) => (
+              <button key={id} type="button" data-testid={`fixture-cat-${id}`} aria-pressed={fixtureGroup === id} onClick={() => setFixtureGroup(id)} style={{ ...sideBtn(fixtureGroup === id), width: 'auto', padding: '4px 8px' }}>{id}</button>
+            ))}
+          </div>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '4px 4px 8px' }}>KALUSTEET</div>
           <input
             data-testid="fixture-search"
@@ -2197,6 +2331,8 @@ export default function FloorPlanApp() {
               ))}
             </div>
           )}
+          </>
+          )}
         </aside>
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
@@ -2249,7 +2385,7 @@ export default function FloorPlanApp() {
             <FacadeView plan={plan} side={facadeSideId} onSide={setFacadeSideId} onApply={setPlan} onCommit={commit} />
           ) : view === '2d' ? (
             <div ref={hostRef} data-testid="plan-canvas-frame" data-active={engaged ? 'place' : 'select'} style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative', ...placeFrame(engaged) }}>
-              <ModeChip name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />
+              <ModeChip workspace={workspaceName} name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />
               <PlaceToast text={toast} />
               <svg
                 ref={svgRef}
@@ -2273,6 +2409,7 @@ export default function FloorPlanApp() {
                 <g data-testid="plan-camera" transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
                 <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.4} />
                 <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
+                <g data-testid="structure-layer" opacity={workspace === 'rakenne' ? 1 : 0.32} style={{ pointerEvents: workspace === 'rakenne' ? 'auto' : 'none' }}>
                 {sheetMode !== 'site' && visibleRooms(plan).map((item) => (
                   <polygon
                     key={item.id}
@@ -2283,7 +2420,9 @@ export default function FloorPlanApp() {
                     strokeWidth={1.2}
                   />
                 ))}
+                </g>
                 {sheetMode === 'site' && (
+                  <g data-testid="yard-layer" opacity={workspace === 'piha' ? 1 : 0.28} style={{ pointerEvents: workspace === 'piha' ? 'auto' : 'none' }}>
                   <YardLayer
                     plan={plan}
                     X={X}
@@ -2295,7 +2434,9 @@ export default function FloorPlanApp() {
                     legendAt={{ x: sheet.x + layout.title.x * k, y: sheet.y + 52, w: Math.max(140, layout.title.w * k) }}
                     preview={yardPoints.length ? { points: yardPoints, cursor: snapVisual?.point || cursor } : null}
                   />
+                  </g>
                 )}
+                <g data-testid="structure-shell" opacity={workspace === 'rakenne' ? 1 : 0.32} style={{ pointerEvents: workspace === 'rakenne' ? 'auto' : 'none' }}>
                 <WallOutlines plan={plan} X={X} Y={Y} simple={sheetMode === 'site'} selectedIds={picks.filter((item) => item.kind === 'wall').map((item) => item.id)} />
                 {sheetMode !== 'site' && (plan.openings || []).filter((opening) => !opening.hidden).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
@@ -2323,6 +2464,8 @@ export default function FloorPlanApp() {
                     </g>
                   )
                 })}
+                </g>
+                <g data-testid="fixture-layer" opacity={workspace === 'kalusteet' ? 1 : 0.28} style={{ pointerEvents: workspace === 'kalusteet' ? 'auto' : 'none' }}>
                 {sheetMode !== 'site' && display.fixtures && (plan.fixtures || []).filter((fixture) => !fixture.hidden).map((fixture) => {
                   const spec = resolveFixture(fixture)
                   const draw = drawingOf(fixture)
@@ -2338,7 +2481,7 @@ export default function FloorPlanApp() {
                       key={fixture.id}
                       data-testid={`placed-${fixture.type}`}
                       transform={`translate(${X(fixture.x)} ${Y(fixture.z)}) rotate(${fixture.rotation || 0})${fixture.mirror ? ' scale(-1 1)' : ''}`}
-                      style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none' }}
+                      style={{ pointerEvents: workspace === 'kalusteet' && tool === 'select' && !placing && !svcTool ? 'auto' : 'none' }}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return
                         if (commandRef.current) return
@@ -2402,12 +2545,15 @@ export default function FloorPlanApp() {
                     </g>
                   )
                 })}
+                </g>
+                <g opacity={workspace === 'rakenne' ? 1 : 0.32} style={{ pointerEvents: workspace === 'rakenne' ? 'auto' : 'none' }}>
                 {sheetMode !== 'site' && <FaceLines plan={plan} X={X} Y={Y} selected={pick?.kind === 'room' ? pick : null} onSelect={(face) => {
                   setPick(face)
                   setSelectedRoom(face.id)
                   setPanel('object')
                   setMenu(null)
                 }} />}
+                </g>
                 {sheetMode !== 'site' && plan.walls.length > 0 && (
                   <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
                     {dimLines.map((dim, index) => (
@@ -2627,7 +2773,14 @@ export default function FloorPlanApp() {
                   preview={svcTool === 'run' ? { points: svcPoints, cursor: cursor ? snapServicePoint(cursor, plan, { mode: 'free', system: svcSystem }) : null } : null}
                   onContext={openServiceMenu}
                   flashId={flashId}
+                  activeSystems={workspace === 'sahko' || workspace === 'iv' || workspace === 'lvi' ? workspaceSystems(workspace) : []}
                 />
+                {ghosts.map((node) => (
+                  <g key={node.id} data-testid="equip-ghost" opacity={0.9} style={{ pointerEvents: 'none' }}>
+                    <circle cx={X(node.x)} cy={Y(node.z)} r={11} fill="rgba(234,88,12,0.12)" stroke="#ea580c" strokeWidth={1.4} strokeDasharray="3 2" />
+                    <text x={X(node.x) + 14} y={Y(node.z) - 8} fontSize={9} fontWeight={700} fill="#9a3412">{node.name}</text>
+                  </g>
+                ))}
                 {sheetMode !== 'site' && roomLabels.map((label) => (
                   <g
                     key={`label-${label.id}`}
@@ -2641,7 +2794,7 @@ export default function FloorPlanApp() {
                       choose({ kind: 'room', id: label.id })
                       setMenu({ x: event.clientX, y: event.clientY, kind: 'room', id: label.id, at: world })
                     }}
-                    style={{ pointerEvents: tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
+                    style={{ pointerEvents: workspace === 'rakenne' && tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
                     onPointerDown={(event) => {
                       if (event.button !== 0) return
                       if (commandRef.current) return
@@ -2716,7 +2869,7 @@ export default function FloorPlanApp() {
             </div>
           ) : (
             <div ref={hostRef} data-testid="floor-3d" data-active={engaged ? 'place' : 'select'} style={{ flex: 1, minHeight: 0, position: 'relative', background: '#e7e5e4', ...placeFrame(engaged) }}>
-              <ModeChip name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />
+              <ModeChip workspace={workspaceName} name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />
               <PlaceToast text={toast} />
               <HouseScene
                 plan={plan}
@@ -2735,7 +2888,7 @@ export default function FloorPlanApp() {
                 liveLabel={liveEnd ? `${formatMm(liveLength)} mm` : ''}
                 roomDraft={tool === 'room' && roomShape === 'rect' ? draft : null}
                 roomCursor={roomCursor}
-                onSelect={(hit) => { setMenu(null); choose(hit) }}
+                onSelect={(hit) => { if (!workspaceAllows(workspace, hit)) return; setMenu(null); choose(hit) }}
                 onHover={onHover3d}
                 onContext={openHitMenu}
                 onPreview={onPreview3d}
@@ -2745,6 +2898,8 @@ export default function FloorPlanApp() {
                 onYardDrag={onYardDrag3d}
                 onServiceDrag={onServiceDrag3d}
                 onDropFixture={onDropFixture3d}
+                activeSystems={workspace === 'sahko' || workspace === 'iv' || workspace === 'lvi' ? workspaceSystems(workspace) : []}
+                dimFixtures={workspace !== 'kalusteet'}
               />
             </div>
           )}

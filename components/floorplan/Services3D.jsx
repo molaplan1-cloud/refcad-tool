@@ -146,14 +146,23 @@ function NodeMesh({ node, selected, hovered }) {
   )
 }
 
-export default function Services3D({ plan, selected = null, hovered = null }) {
+export default function Services3D({ plan, selected = null, hovered = null, activeSystems = null }) {
   const services = ensureServices(plan)
   const runs = services.runs.filter((run) => serviceItemVisible(plan, run))
   const nodes = services.nodes.filter((node) => serviceItemVisible(plan, node))
+  const live = (system) => !Array.isArray(activeSystems) || activeSystems.includes(system)
   return (
     <group>
-      {runs.map((run) => <RunMesh key={run.id} run={run} selected={selected} hovered={hovered} />)}
-      {nodes.map((node) => <NodeMesh key={node.id} node={node} selected={selected} hovered={hovered} />)}
+      {runs.map((run) => (
+        <group key={run.id} opacity={live(run.system) ? 1 : 0.22}>
+          <RunMesh run={run} selected={selected} hovered={hovered} />
+        </group>
+      ))}
+      {nodes.map((node) => (
+        <group key={node.id} opacity={live(node.system) ? 1 : 0.22}>
+          <NodeMesh node={node} selected={selected} hovered={hovered} />
+        </group>
+      ))}
     </group>
   )
 }
