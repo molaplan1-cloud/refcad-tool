@@ -58,7 +58,7 @@ import {
   thicknessOf,
   claddingOf,
 } from '@/lib/floorplan'
-import { wallFigures } from '@/lib/wall-outline'
+import { faceOffsets, wallFigures } from '@/lib/wall-outline'
 import { layerFaces, resolveWallStructure, structureCatalog } from '@/lib/structures'
 import { FixtureSymbol } from './FixtureSymbol'
 import { FURNITURE_GROUPS, layoutFor, resolveFixture, scheduleRows, suggestionsFor } from '@/lib/furniture'
@@ -700,12 +700,12 @@ function selectionRibbon(wall, plan) {
   const len = Math.hypot(dx, dz) || 1
   const nx = -dz / len
   const nz = dx / len
-  const half = thicknessOf(wall, plan) / 2
+  const offsets = faceOffsets(wall, thicknessOf(wall, plan))
   return [
-    { x: wall.a.x + nx * half, z: wall.a.z + nz * half },
-    { x: wall.b.x + nx * half, z: wall.b.z + nz * half },
-    { x: wall.b.x - nx * half, z: wall.b.z - nz * half },
-    { x: wall.a.x - nx * half, z: wall.a.z - nz * half },
+    { x: wall.a.x + nx * offsets.left, z: wall.a.z + nz * offsets.left },
+    { x: wall.b.x + nx * offsets.left, z: wall.b.z + nz * offsets.left },
+    { x: wall.b.x + nx * offsets.right, z: wall.b.z + nz * offsets.right },
+    { x: wall.a.x + nx * offsets.right, z: wall.a.z + nz * offsets.right },
   ]
 }
 

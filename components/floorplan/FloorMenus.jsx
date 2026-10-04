@@ -743,6 +743,18 @@ function WallFields({ plan, id, onApply, onCommit }) {
       <Field label={t('wall.custom')}>
         <input style={inputStyle} type="number" value={thick} onChange={(event) => setThick(fromMm(event.target.value) || 0.12)} />
       </Field>
+      <Field label="Kohdistus">
+        <select
+          data-testid="wall-align"
+          style={inputStyle}
+          value={wall.align === 'left' || wall.align === 'right' ? wall.align : 'center'}
+          onChange={(event) => onCommit(updateWall(plan, id, { align: event.target.value }))}
+        >
+          <option value="center">Keskeltä</option>
+          <option value="left">Vasemmasta pinnasta</option>
+          <option value="right">Oikeasta pinnasta</option>
+        </select>
+      </Field>
       <Field label={t('wall.kind')}>
         <select data-testid="wall-type" style={inputStyle} value={wall.kind === 'bearing' ? 'bearing' : wall.kind === 'interior' ? 'interior' : 'exterior'} onChange={(event) => setKind(event.target.value)}>
           <option value="exterior">{t('tool.exterior')}</option>
@@ -1446,6 +1458,19 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
             { value: 120, label: '120', testid: 'ctx-thick-120' },
           ]}
         />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
+          Kohdistus
+          <select
+            data-testid="ctx-wall-align"
+            value={wall.align === 'left' || wall.align === 'right' ? wall.align : 'center'}
+            onChange={(event) => onCommit(updateWall(plan, wall.id, { align: event.target.value }))}
+            style={{ flex: 1, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
+          >
+            <option value="center">Keskeltä</option>
+            <option value="left">Vasemmasta pinnasta</option>
+            <option value="right">Oikeasta pinnasta</option>
+          </select>
+        </label>
         <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
         <CadEditItems onNavigate={onNavigate} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
