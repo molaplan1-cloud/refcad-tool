@@ -41,6 +41,8 @@ import {
   openingTags,
   planBounds,
   planDimensions,
+  dedupeDimensions,
+  straightenWalls,
   structureMarks,
   pointInPolygon,
   duplicateFixture,
@@ -91,7 +93,7 @@ import { CadPrompt } from './CadTools'
 import { LayerDock, PlanChrome } from './PlanChrome'
 import { buildPlanPdf } from '@/lib/roominfo'
 import { applyDisplay, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
-import { paperFont } from '@/lib/annotations'
+import { dimensionFont, paperFont, placeDimensionText } from '@/lib/annotations'
 import { DisplayPanel } from './DisplayPanel'
 import { FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ShellDialog, StartDialog } from './ProjectDialogs'
@@ -428,29 +430,69 @@ function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
   )
 }
 
-function DimLine({ dim, X, Y, fontSize, ppm }) {
+function DimLine({ dim, X, Y, zoom }) {
+  const view = Math.max(0.2, zoom || 1)
+  const fontSize = dimensionFont(view)
+  const stroke = 1 / view
+  const thin = 0.8 / view
   const off = Number.isFinite(dim.offset) ? dim.offset : 0
   const x1 = X(dim.x1 + (dim.nx || 0) * off)
   const y1 = Y(dim.z1 + (dim.nz || 0) * off)
   const x2 = X(dim.x2 + (dim.nx || 0) * off)
   const y2 = Y(dim.z2 + (dim.nz || 0) * off)
-  const ang = Math.atan2(y2 - y1, x2 - x1)
   const len = Math.hypot(x2 - x1, y2 - y1) || 1
   const ux = (x2 - x1) / len
   const uy = (y2 - y1) / len
-  const tick = Math.max(3.2, fontSize * 0.42)
-  const tx = Math.cos(ang + Math.PI / 4) * tick
-  const ty = Math.sin(ang + Math.PI / 4) * tick
+  const place = placeDimensionText(len, dim.label, fontSize)
+  const tick = Math.max(4 / view, fontSize * 0.42)
+  const tx = (ux - uy) * tick * 0.7
+  const ty = (uy + ux) * tick * 0.7
+  let px = -uy
+  let py = ux
+  const midWorldX = (dim.x1 + dim.x2) / 2
+  const midWorldZ = (dim.z1 + dim.z2) / 2
+  const ox = X(midWorldX + (dim.nx || 0)) - X(midWorldX)
+  const oy = Y(midWorldZ + (dim.nz || 0)) - Y(midWorldZ)
+  if (Math.hypot(dim.nx || 0, dim.nz || 0) > 0.2) {
+    if (px * ox + py * oy < 0) { px = -px; py = -py }
+  } else if (py > 0) {
+    px = -px
+    py = -py
+  }
+  const label = String(dim.label ?? '')
+  const midX = (x1 + x2) / 2
+  const midY = (y1 + y2) / 2
+  let labelX = midX
+  let labelY = midY
+  let leader = null
+  const lift = Number(dim.lift) || 0
+  let gap = place.mode === 'gap' && lift < 0.5 ? place.gap : 0
+  if (place.mode === 'leader') {
+    const rise = fontSize * 1.25 + lift
+    const extra = place.textW / 2 + fontSize * 0.35
+    labelX = x2 + ux * extra + px * rise
+    labelY = y2 + uy * extra + py * rise
+    leader = {
+      x1: x2,
+      y1: y2,
+      x2: labelX - ux * (place.textW / 2 + fontSize * 0.15) - px * fontSize * 0.2,
+      y2: labelY - uy * (place.textW / 2 + fontSize * 0.15) - py * fontSize * 0.2,
+    }
+  } else if (lift >= 0.5) {
+    labelX = midX + px * (lift + fontSize * 0.15)
+    labelY = midY + py * (lift + fontSize * 0.15)
+    leader = {
+      x1: midX,
+      y1: midY,
+      x2: labelX - px * fontSize * 0.55,
+      y2: labelY - py * fontSize * 0.55,
+    }
+    gap = 0
+  }
   const vertical = Math.abs(x2 - x1) < Math.abs(y2 - y1)
-  const textW = Math.max(fontSize * 1.6, String(dim.label).length * fontSize * 0.58)
-  const textSide = dim.textSide || 0
-  const textT = Number.isFinite(dim.textT) ? dim.textT : 0.5
-  const gap = !textSide && len > textW + fontSize ? textW : 0
-  const alongX = x1 + (x2 - x1) * textT
-  const alongY = y1 + (y2 - y1) * textT
-  const side = textSide * 0.16 * ppm
-  const labelX = alongX - uy * side
-  const labelY = alongY + ux * side
+  const rot = vertical ? `rotate(${dimensionRotation(true)} ${labelX} ${labelY})` : null
+  const haloW = place.textW + fontSize * 0.7
+  const haloH = fontSize * 1.45
   const ax1 = X(dim.ax ?? dim.x1)
   const ay1 = Y(dim.az ?? dim.z1)
   const ax2 = X(dim.bx ?? dim.x2)
@@ -459,36 +501,87 @@ function DimLine({ dim, X, Y, fontSize, ppm }) {
     const dx = ex - sx
     const dy = ey - sy
     const span = Math.hypot(dx, dy) || 1
-    const inset = Math.min(fontSize * 0.7, span * 0.35)
+    const inset = Math.min(fontSize * 0.55, span * 0.35)
     return { x1: sx + (dx / span) * inset, y1: sy + (dy / span) * inset, x2: ex, y2: ey }
   }
   const ext1 = gapLine(ax1, ay1, x1, y1)
   const ext2 = gapLine(ax2, ay2, x2, y2)
-  const breakAt = gap ? textT : 0.5
-  const bx = x1 + (x2 - x1) * breakAt
-  const by = y1 + (y2 - y1) * breakAt
+  const breakX = x1 + (x2 - x1) * 0.5
+  const breakY = y1 + (y2 - y1) * 0.5
   return (
-    <g data-testid={`dim-${dim.kind || 'dim'}`} data-label={dim.label} stroke="#44403c" fill="#292524" strokeWidth={0.6}>
-      {Math.hypot(ax1 - x1, ay1 - y1) > 6 && <line x1={ext1.x1} y1={ext1.y1} x2={ext1.x2} y2={ext1.y2} stroke="#a8a29e" strokeWidth={0.4} />}
-      {Math.hypot(ax2 - x2, ay2 - y2) > 6 && <line x1={ext2.x1} y1={ext2.y1} x2={ext2.x2} y2={ext2.y2} stroke="#a8a29e" strokeWidth={0.4} />}
-      <line x1={x1} y1={y1} x2={bx - ux * gap / 2} y2={by - uy * gap / 2} />
-      <line x1={bx + ux * gap / 2} y1={by + uy * gap / 2} x2={x2} y2={y2} />
-      <line x1={x1 - tx} y1={y1 - ty} x2={x1 + tx} y2={y1 + ty} />
-      <line x1={x2 - tx} y1={y2 - ty} x2={x2 + tx} y2={y2 + ty} />
-      <text
-        x={labelX}
-        y={labelY}
-        textAnchor="middle"
-        dominantBaseline="middle"
-        fontSize={fontSize}
-        fontWeight={400}
-        fill="#292524"
-        transform={vertical ? `rotate(${dimensionRotation(true)} ${labelX} ${labelY})` : undefined}
-      >
-        {dim.label}
-      </text>
+    <g data-testid={`dim-${dim.kind || 'dim'}`} data-label={dim.label} data-place={place.mode} fill="#292524">
+      {Math.hypot(ax1 - x1, ay1 - y1) > 4 / view && <line x1={ext1.x1} y1={ext1.y1} x2={ext1.x2} y2={ext1.y2} stroke="#a8a29e" strokeWidth={thin} />}
+      {Math.hypot(ax2 - x2, ay2 - y2) > 4 / view && <line x1={ext2.x1} y1={ext2.y1} x2={ext2.x2} y2={ext2.y2} stroke="#a8a29e" strokeWidth={thin} />}
+      <line x1={x1} y1={y1} x2={breakX - ux * gap / 2} y2={breakY - uy * gap / 2} stroke="#44403c" strokeWidth={stroke} />
+      <line x1={breakX + ux * gap / 2} y1={breakY + uy * gap / 2} x2={x2} y2={y2} stroke="#44403c" strokeWidth={stroke} />
+      <line x1={x1 - tx} y1={y1 - ty} x2={x1 + tx} y2={y1 + ty} stroke="#44403c" strokeWidth={stroke} />
+      <line x1={x2 - tx} y1={y2 - ty} x2={x2 + tx} y2={y2 + ty} stroke="#44403c" strokeWidth={stroke} />
+      {leader && <line data-testid="dim-leader" x1={leader.x1} y1={leader.y1} x2={leader.x2} y2={leader.y2} stroke="#44403c" strokeWidth={thin} />}
+      <g transform={rot || undefined}>
+        <rect data-testid="dim-halo" x={labelX - haloW / 2} y={labelY - haloH / 2} width={haloW} height={haloH} fill="#fbfaf7" stroke="none" />
+        <text
+          data-testid="dim-text"
+          x={labelX}
+          y={labelY}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontSize={fontSize}
+          fontWeight={600}
+          fill="#292524"
+          stroke="none"
+        >
+          {label}
+        </text>
+      </g>
     </g>
   )
+}
+
+function stackDimensionLabels(dims, X, Y, zoom) {
+  const view = Math.max(0.2, zoom || 1)
+  const font = dimensionFont(view)
+  const boxes = []
+  const hits = (box) => boxes.some((item) => (
+    item.x < box.x + box.w && item.x + item.w > box.x && item.y < box.y + box.h && item.y + item.h > box.y
+  ))
+  return (dims || []).map((dim) => {
+    const off = Number.isFinite(dim.offset) ? dim.offset : 0
+    const x1 = X(dim.x1 + (dim.nx || 0) * off)
+    const y1 = Y(dim.z1 + (dim.nz || 0) * off)
+    const x2 = X(dim.x2 + (dim.nx || 0) * off)
+    const y2 = Y(dim.z2 + (dim.nz || 0) * off)
+    const len = Math.hypot(x2 - x1, y2 - y1) || 1
+    const ux = (x2 - x1) / len
+    const uy = (y2 - y1) / len
+    let px = -uy
+    let py = ux
+    const mx = (dim.x1 + dim.x2) / 2
+    const mz = (dim.z1 + dim.z2) / 2
+    const ox = X(mx + (dim.nx || 0)) - X(mx)
+    const oy = Y(mz + (dim.nz || 0)) - Y(mz)
+    if (Math.hypot(dim.nx || 0, dim.nz || 0) > 0.2) {
+      if (px * ox + py * oy < 0) { px = -px; py = -py }
+    } else if (py > 0) { px = -px; py = -py }
+    const place = placeDimensionText(len, dim.label, font)
+    const textW = place.textW
+    let lift = 0
+    let box = { x: 0, y: 0, w: textW, h: font * 1.4 }
+    for (let step = 0; step < 6; step += 1) {
+      lift = step * font * 1.2
+      const along = place.mode === 'leader' ? 1 : 0.5
+      const extra = place.mode === 'leader' ? textW / 2 + font * 0.35 : 0
+      const rise = (place.mode === 'leader' ? font * 1.25 : 0) + lift
+      const cx = x1 + (x2 - x1) * along + ux * extra + px * rise
+      const cy = y1 + (y2 - y1) * along + uy * extra + py * rise
+      const vertical = Math.abs(x2 - x1) < Math.abs(y2 - y1)
+      const bw = vertical ? font * 1.4 : textW
+      const bh = vertical ? textW : font * 1.4
+      box = { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh }
+      if (!hits(box)) break
+    }
+    boxes.push(box)
+    return lift > 0.5 ? { ...dim, lift } : dim
+  })
 }
 
 function worldPath(points, X, Y) {
@@ -599,7 +692,22 @@ function HatchDefs() {
   )
 }
 
-function WallOutlines({ plan, X, Y, selectedIds = [], simple = false }) {
+function selectionRibbon(wall, plan) {
+  const dx = wall.b.x - wall.a.x
+  const dz = wall.b.z - wall.a.z
+  const len = Math.hypot(dx, dz) || 1
+  const nx = -dz / len
+  const nz = dx / len
+  const half = thicknessOf(wall, plan) / 2
+  return [
+    { x: wall.a.x + nx * half, z: wall.a.z + nz * half },
+    { x: wall.b.x + nx * half, z: wall.b.z + nz * half },
+    { x: wall.b.x - nx * half, z: wall.b.z - nz * half },
+    { x: wall.a.x - nx * half, z: wall.a.z - nz * half },
+  ]
+}
+
+function WallOutlines({ plan, X, Y, selectedIds = [], simple = false, zoom = 1 }) {
   const walls = (plan.walls || []).filter((wall) => !wall.hidden)
   const openings = (plan.openings || []).filter((opening) => !opening.hidden && walls.some((wall) => wall.id === opening.wallId))
   const figures = useMemo(
@@ -658,9 +766,16 @@ function WallOutlines({ plan, X, Y, selectedIds = [], simple = false }) {
           strokeLinecap="square"
         />
       ))}
-      {walls.filter((wall) => selectedIds.includes(wall.id)).flatMap((wall) => wallQuads(wall, openings, walls, plan).map((quad, index) => (
-        <polygon key={`sel-${wall.id}-${index}`} points={quad.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} fill="rgba(15,118,110,0.18)" stroke="#0f766e" strokeWidth={2.6} />
-      )))}
+      {walls.filter((wall) => selectedIds.includes(wall.id)).map((wall) => (
+        <polygon
+          key={`sel-${wall.id}`}
+          data-testid="wall-selection"
+          points={selectionRibbon(wall, plan).map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
+          fill="rgba(15,118,110,0.18)"
+          stroke="#0f766e"
+          strokeWidth={2 / Math.max(zoom || 1, 0.2)}
+        />
+      ))}
       {walls.map((wall) => (
         <line
           key={`axis-${wall.id}`}
@@ -800,13 +915,14 @@ export default function FloorPlanApp() {
       if (raw) {
         const parsed = JSON.parse(raw)
         if (parsed && Array.isArray(parsed.walls)) {
-          setPlan({
+          const loaded = {
             ...emptyPlan(),
             ...parsed,
             services: ensureServices(parsed),
             yard: ensureYard(parsed),
             rooms: detectRooms(parsed.walls, parsed.rooms || []),
-          })
+          }
+          setPlan(straightenWalls(loaded, 0.5))
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
           setReady(true)
           setHydrated(true)
@@ -2510,6 +2626,12 @@ export default function FloorPlanApp() {
           commit(result.plan)
           showToast(`Poistettiin ${result.removed} päällekkäistä`)
         }}
+        onStraighten={() => {
+          const next = straightenWalls(plan, 2)
+          if (next === plan) { showToast('Seinät ovat jo suorassa'); return }
+          commit(next)
+          showToast('Seinät suoristettiin')
+        }}
       />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -2743,7 +2865,7 @@ export default function FloorPlanApp() {
                   </g>
                 )}
                 <g data-testid="structure-shell" opacity={workspace === 'rakenne' ? 1 : 0.32} style={{ pointerEvents: workspace === 'rakenne' ? 'auto' : 'none' }}>
-                <WallOutlines plan={plan} X={X} Y={Y} simple={sheetMode === 'site'} selectedIds={picks.filter((item) => item.kind === 'wall').map((item) => item.id)} />
+                <WallOutlines plan={plan} X={X} Y={Y} zoom={camera.zoom || 1} simple={sheetMode === 'site'} selectedIds={picks.filter((item) => item.kind === 'wall').map((item) => item.id)} />
                 {sheetMode !== 'site' && (plan.openings || []).filter((opening) => !opening.hidden).map((opening) => {
                   const wall = plan.walls.find((item) => item.id === opening.wallId)
                   if (!wall || wall.hidden) return null
@@ -2862,8 +2984,8 @@ export default function FloorPlanApp() {
                 </g>
                 {sheetMode !== 'site' && plan.walls.length > 0 && (
                   <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
-                    {dimLines.map((dim, index) => (
-                      <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}-${dim.x1}`} dim={dim} X={X} Y={Y} fontSize={paperFont(k, camera.zoom || 1, 2.5)} ppm={layout.scale * k} />
+                    {stackDimensionLabels(dedupeDimensions(dimLines, 18 / (Math.max(camera.zoom || 1, 0.2) * Math.max(layout.scale * k, 0.001))), X, Y, camera.zoom || 1).map((dim, index) => (
+                      <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}-${dim.x1}-${dim.z1}`} dim={dim} X={X} Y={Y} zoom={camera.zoom || 1} />
                     ))}
                   </g>
                 )}
