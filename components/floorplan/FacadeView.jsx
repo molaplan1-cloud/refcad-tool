@@ -6,6 +6,7 @@ import { finishesOf } from '@/lib/finishes'
 import { ensureYard, terraceFacade } from '@/lib/yard'
 import { text } from '@/lib/i18n'
 import { northAngle, sideCompass } from '@/lib/orientation'
+import { stampDemoWatermark } from '@/lib/watermark'
 import {
   CLADDING,
   FACADE_SIDES,
@@ -286,7 +287,7 @@ function RoofElevation({ X, Y, metres, length, wallH, ridge, overhang, gableEnd,
   )
 }
 
-export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSelect, selected }) {
+export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSelect, selected, watermark = false }) {
   const { t, locale } = usePlanLocale(plan)
   const north = northAngle(plan)
   const hostRef = useRef(null)
@@ -446,8 +447,8 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
         <span style={{ width: 1, height: 18, background: '#d6d3d1', flexShrink: 0 }} />
         <button type="button" data-testid="facade-realistic" style={chip(realistic)} onClick={() => onApply({ ...plan, sceneStyle: 'realistic' })}>{t('finish.realistic')}</button>
         <button type="button" data-testid="facade-technical" style={chip(!realistic)} onClick={() => onApply({ ...plan, sceneStyle: 'technical' })}>{t('finish.technical')}</button>
-        <button type="button" data-testid="facade-pdf" style={chip(false)} onClick={() => buildElevationPdf(plan, side).save(`julkisivu-${side}.pdf`)}>PDF</button>
-        <button type="button" data-testid="facade-pdf-all" title={t('facade.allSides')} style={chip(false)} onClick={() => buildElevationPdf(plan, 'all').save('julkisivut.pdf')}>PDF 4</button>
+        <button type="button" data-testid="facade-pdf" style={chip(false)} onClick={() => { const doc = buildElevationPdf(plan, side); if (watermark) stampDemoWatermark(doc); doc.save(`julkisivu-${side}.pdf`) }}>PDF</button>
+        <button type="button" data-testid="facade-pdf-all" title={t('facade.allSides')} style={chip(false)} onClick={() => { const doc = buildElevationPdf(plan, 'all'); if (watermark) stampDemoWatermark(doc); doc.save('julkisivut.pdf') }}>PDF 4</button>
       </div>
       <div ref={hostRef} data-testid="facade-view" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <svg

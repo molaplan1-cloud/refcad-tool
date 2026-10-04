@@ -92,6 +92,8 @@ import {
 import { CadPrompt } from './CadTools'
 import { LayerDock, PlanChrome } from './PlanChrome'
 import { buildPlanPdf } from '@/lib/roominfo'
+import { DEMO_WATERMARK, accessFor } from '@/lib/access'
+import { stampDemoWatermark } from '@/lib/watermark'
 import { applyDisplay, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { blockHeightForLines, dimensionFont, fitLines, LINE_LEADING, paperFont, placeDimensionText } from '@/lib/annotations'
 import { DisplayPanel } from './DisplayPanel'
@@ -845,6 +847,7 @@ export default function FloorPlanApp() {
   const [heatView, setHeatView] = useState(null)
   const [sheetMode, setSheetMode] = useState('plan')
   const [workspace, setWorkspace] = useState('rakenne')
+  const [account, setAccount] = useState(null)
   const [ghosts, setGhosts] = useState([])
   const [fixtureGroup, setFixtureGroup] = useState('Kaikki')
   const [displayOpen, setDisplayOpen] = useState(false)
@@ -908,6 +911,15 @@ export default function FloorPlanApp() {
   useEffect(() => {
     if (hydrated && plan.locale) setLocale(plan.locale)
   }, [hydrated, plan.locale, setLocale])
+
+  useEffect(() => {
+    let cancel = false
+    fetch('/api/auth/session')
+      .then((res) => res.json())
+      .then((data) => { if (!cancel) setAccount(data.user || null) })
+      .catch(() => { if (!cancel) setAccount(null) })
+    return () => { cancel = true }
+  }, [])
 
   useEffect(() => {
     const storedLibrary = loadLibrary(window.localStorage.getItem(LIBRARY_KEY))
@@ -2300,8 +2312,17 @@ export default function FloorPlanApp() {
     }
   }
 
+  const access = accessFor(account, plan.projectType || null)
+  useEffect(() => {
+    if (access.workspaces.length && !access.workspaces.includes(workspace)) setWorkspace('rakenne')
+  }, [account, plan.projectType, workspace, access.workspaces])
+  const savePdf = (doc, name) => {
+    if (access.watermark) stampDemoWatermark(doc)
+    doc.save(name)
+  }
+
   const exportPdf = () => {
-    buildPlanPdf(plan).save(`${(plan.name || 'pohjakuva').replace(/\s+/g, '-')}.pdf`)
+    savePdf(buildPlanPdf(plan), `${(plan.name || 'pohjakuva').replace(/\s+/g, '-')}.pdf`)
   }
 
   const exportPng = () => {
@@ -2382,8 +2403,24 @@ export default function FloorPlanApp() {
 
   const px = (metres) => metres * layout.scale * k
 
+  if (access.admin || !access.draw) {
+    return (
+      <div data-testid="draw-blocked" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', color: '#0f172a' }}>
+        <div style={{ textAlign: 'center', maxWidth: 460 }}>
+          <h1>{access.admin ? 'Ylläpitäjä ei piirrä' : 'Tili ei ole käytössä'}</h1>
+          <a href={access.admin ? '/admin' : '/'}>{access.admin ? 'Ylläpito' : 'Etusivu'}</a>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
+      {access.pending && (
+        <div data-testid="payment-pending" style={{ background: '#fff7ed', color: '#9a3412', textAlign: 'center', padding: '8px 12px', fontWeight: 700 }}>
+          Odottaa maksun vahvistusta
+        </div>
+      )}
       <PlanChrome
         t={t}
         plan={plan}
@@ -2524,7 +2561,9 @@ export default function FloorPlanApp() {
           setSvcPoints([])
         }}
         workspace={workspace}
+        access={access}
         onWorkspace={(id) => {
+          if (!access.workspaces.includes(id)) return
           const nextPlan = applyWorkspaceSwitch(plan, id)
           if (nextPlan !== plan) setPlan(nextPlan)
           setWorkspace(id)
@@ -2612,12 +2651,12 @@ export default function FloorPlanApp() {
         onPdf={exportPdf}
         onServicePdf={(id) => {
           if (id === 'site') {
-            buildSitePdf(plan).save(`${(plan.name || 'site').replace(/\s+/g, '-')}-site.pdf`)
+            savePdf(buildSitePdf(plan), `${(plan.name || 'site').replace(/\s+/g, '-')}-site.pdf`)
             return
           }
           if (id === 'png') { exportPng(); return }
           const doc = id === 'electric' ? buildElectricPdf(plan) : id === 'heat' || id === 'water' ? buildHydronicPdf(plan) : buildServicePdf(plan, id)
-          doc.save(`${(plan.name || 'talotekniikka').replace(/\s+/g, '-')}-${id}.pdf`)
+          savePdf(doc, `${(plan.name || 'talotekniikka').replace(/\s+/g, '-')}-${id}.pdf`)
         }}
         onCommand={beginCommand}
         onSelectType={(type) => remember(targetsByType(plan, type))}
@@ -2815,6 +2854,7 @@ export default function FloorPlanApp() {
           {view === 'facade' ? (
             <FacadeView
               plan={plan}
+              watermark={access.watermark}
               side={facadeSideId}
               selected={pick}
               onSide={setFacadeSideId}
@@ -3321,6 +3361,25 @@ export default function FloorPlanApp() {
                   </g>
                 )}
                 {sheetMode !== 'site' && <AngleMarks marks={cornerAngles(plan.walls)} X={X} Y={Y} zoom={camera.zoom} />}
+                {access.watermark && (
+                  <g data-testid="sheet-watermark" style={{ pointerEvents: 'none' }}>
+                    {[0.32, 0.58, 0.84].map((fraction) => (
+                      <text
+                        key={fraction}
+                        x={sheet.x + sheet.w / 2}
+                        y={sheet.y + sheet.h * fraction}
+                        textAnchor="middle"
+                        fill="#9f1239"
+                        fillOpacity="0.55"
+                        fontSize={Math.max(18, sheet.w / 28)}
+                        fontWeight="800"
+                        transform={`rotate(-32 ${sheet.x + sheet.w / 2} ${sheet.y + sheet.h * fraction})`}
+                      >
+                        {DEMO_WATERMARK}
+                      </text>
+                    ))}
+                  </g>
+                )}
                 </g>
               </svg>
               {displayOpen && (
@@ -3374,7 +3433,7 @@ export default function FloorPlanApp() {
               mode={electricView}
               onMode={setElectricView}
               onClose={() => setElectricView(null)}
-              onPrint={() => buildElectricPdf(plan).save(`${(plan.name || 'sahko').replace(/\s+/g, '-')}-sahko.pdf`)}
+              onPrint={() => savePdf(buildElectricPdf(plan), `${(plan.name || 'sahko').replace(/\s+/g, '-')}-sahko.pdf`)}
               onAssign={(deviceId, circuitId) => commit(assignDeviceCircuit(plan, deviceId, circuitId))}
             />
           )}
@@ -3384,7 +3443,7 @@ export default function FloorPlanApp() {
               mode={heatView}
               onMode={setHeatView}
               onClose={() => setHeatView(null)}
-              onPrint={() => buildHydronicPdf(plan).save(`${(plan.name || 'lammitys').replace(/\s+/g, '-')}-lammitys.pdf`)}
+              onPrint={() => savePdf(buildHydronicPdf(plan), `${(plan.name || 'lammitys').replace(/\s+/g, '-')}-lammitys.pdf`)}
             />
           )}
         </div>

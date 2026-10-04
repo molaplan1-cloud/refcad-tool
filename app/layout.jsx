@@ -2,8 +2,8 @@ import './globals.css'
 import { LocaleProvider } from '@/components/i18n/Locale'
 
 export const metadata = {
-  title: 'RefCAD Tool | Cold Room Designer',
-  description: 'Design the room around the business, not the enquiry. RefCAD Tool turns the discovery conversation into the cold room layout for refrigeration contractors.',
+  title: 'RefCAD',
+  description: 'Piirrä kylmiö, talo tai halli. Pohjakuva on ilmainen, talotekniikka ja kylmätekniikka avautuvat kuitatun maksun jälkeen.',
   manifest: '/manifest.json'
 }
 
@@ -20,7 +20,7 @@ export default function RootLayout({ children }) {
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link rel="manifest" href="/manifest.json" />
       </head>
-      <body style={{ margin: 0, fontFamily: '-apple-system, BlinkMacSystemFont, Inter, sans-serif', background: '#0a0f1e', color: '#f1f5f9', overflow: 'hidden', height: '100vh' }}>
+      <body style={{ margin: 0, fontFamily: '-apple-system, BlinkMacSystemFont, Inter, sans-serif', background: '#0a0f1e', color: '#f1f5f9', minHeight: '100vh' }}>
         <LocaleProvider>{children}</LocaleProvider>
       </body>
     </html>
