@@ -36,6 +36,7 @@ import {
   moveFixture,
   moveOpening,
   nearestEndpoint,
+  nearestWall,
   moveRoomLabel,
   openingSymbol,
   openingTags,
@@ -175,6 +176,18 @@ import {
   shellPlan,
 } from '@/lib/projects'
 import { pointAtLength, shouldCloseChain, snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
+import {
+  applyTemporaryDimension,
+  defaultOpeningWidth,
+  nextTrackAxis,
+  offsetForEndGap,
+  placementGaps,
+  pointAtOffset,
+  temporaryDimensions,
+  trackedPoint,
+  wallAxes,
+  wallShiftMetres,
+} from '@/lib/tracking'
 import { WORKSPACES, applyWorkspaceSwitch, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
 import { FIT_CAMERA, fitRect, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 import { LanguageSwitch, usePlanLocale } from '@/components/i18n/Locale'
@@ -336,6 +349,66 @@ function SnapMark({ snap, X, Y, zoom }) {
           <g data-testid="snap-tooltip" transform="translate(14 -22)">
             <rect x="0" y="-12" width={label.length * 7.2 + 12} height="18" rx="3" fill="#fff" stroke={accent} strokeWidth="2" />
             <text x="6" y="1" fontSize="12" fontWeight="700" fill="#9a3412">{label}</text>
+          </g>
+        )}
+      </g>
+    </g>
+  )
+}
+
+const statusBtn = {
+  border: '1px solid #d6d3d1',
+  background: '#fff',
+  color: '#1c1917',
+  borderRadius: 6,
+  padding: '2px 8px',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+}
+
+function TempDim({ dim, X, Y, zoom, editing, onEdit, onChange, onCommit, onCancel }) {
+  const s = 1 / (zoom || 1)
+  const label = dim.text
+  return (
+    <g data-testid="temp-dim" data-role={dim.role} data-mm={dim.mm}>
+      <line x1={X(dim.x1)} y1={Y(dim.z1)} x2={X(dim.x2)} y2={Y(dim.z2)} stroke="#b45309" strokeWidth={1.3 * s} style={{ pointerEvents: 'none' }} />
+      <g transform={`translate(${X(dim.labelX)} ${Y(dim.labelZ)}) scale(${s})`}>
+        {editing != null ? (
+          <foreignObject x={-40} y={-16} width={84} height={30}>
+            <div xmlns="http://www.w3.org/1999/xhtml">
+              <input
+                data-testid="temp-dim-input"
+                autoFocus
+                value={editing}
+                onChange={(event) => onChange(event.target.value)}
+                onKeyDown={(event) => {
+                  event.stopPropagation()
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    onCommit()
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault()
+                    onCancel()
+                  }
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                style={{ width: 72, height: 22, fontSize: 12, fontWeight: 700, border: '1px solid #b45309', borderRadius: 4, boxSizing: 'border-box' }}
+              />
+            </div>
+          </foreignObject>
+        ) : (
+          <g
+            data-testid="temp-dim-label"
+            style={{ cursor: 'text' }}
+            onPointerDown={(event) => {
+              event.stopPropagation()
+              event.preventDefault()
+              onEdit(dim)
+            }}
+          >
+            <rect x={-34} y={-14} width={68} height={20} rx={3} fill="#fffbeb" stroke="#b45309" strokeWidth={1} />
+            <text x={0} y={1} textAnchor="middle" dominantBaseline="middle" fontSize={12} fontWeight={700} fill="#9a3412" style={{ pointerEvents: 'none' }}>{label}</text>
           </g>
         )}
       </g>
@@ -863,6 +936,8 @@ export default function FloorPlanApp() {
   const angleMemory = useRef(90)
   const [altDown, setAltDown] = useState(false)
   const [typedLen, setTypedLen] = useState('')
+  const [track, setTrack] = useState(null)
+  const [dimEdit, setDimEdit] = useState(null)
   const [chainStart, setChainStart] = useState(null)
   const [snapVisual, setSnapVisual] = useState(null)
   const [cursorPpm, setCursorPpm] = useState(40)
@@ -901,6 +976,7 @@ export default function FloorPlanApp() {
   const shiftRef = useRef(false)
   const chainRef = useRef(null)
   const typedRef = useRef('')
+  const trackRef = useRef(null)
   const draftRef = useRef(null)
   const liveRef = useRef(null)
   const commitWallRef = useRef(() => {})
@@ -976,6 +1052,9 @@ export default function FloorPlanApp() {
     setChainStart(null)
     typedRef.current = ''
     setTypedLen('')
+    trackRef.current = null
+    setTrack(null)
+    setDimEdit(null)
     setRedrawId(null)
   }, [])
 
@@ -1217,6 +1296,25 @@ export default function FloorPlanApp() {
       setMenu(null)
       return
     }
+    if (name === 'shift-wall') {
+      const wallPick = pick?.kind === 'wall' ? pick : selected.find((item) => item.kind === 'wall')
+      if (!wallPick) return
+      originPlan.current = plan
+      const next = {
+        name: 'shift-wall',
+        step: 'from',
+        wallId: wallPick.id,
+        value: '',
+        distanceMode: 'offset',
+        readout: '',
+      }
+      commandRef.current = next
+      setCommand(next)
+      setTool('select')
+      setPlacing(null)
+      setMenu(null)
+      return
+    }
     if (!selected.length && name !== 'stretch' && name !== 'measure' && name !== 'match') return
     originPlan.current = plan
     setCommand({
@@ -1336,6 +1434,24 @@ export default function FloorPlanApp() {
     const visual = describeSnap(world, ppm2d)
     setSnapVisual(visual)
     setCursor(world)
+    const canTrack = !draft && !commandRef.current && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)
+    if (canTrack) {
+      const current = trackRef.current
+      if (current?.armed !== 'pick' && current?.armed !== 'type' && !current?.text) {
+        const corner = nearestEndpoint(plan.walls, world, snapRadius(ppm2d, 16))
+        const kind = visual?.kind
+        const snapped = corner
+          ? { x: corner.x, z: corner.z }
+          : ((kind === 'corner' || kind === 'intersection' || kind === 'midpoint') && visual?.point
+            ? { x: visual.point.x, z: visual.point.z }
+            : null)
+        if (snapped && (!current?.base || Math.hypot(current.base.x - snapped.x, current.base.z - snapped.z) > 0.02)) {
+          const next = { base: snapped, axis: current?.axis || 'along', text: '', armed: null }
+          trackRef.current = next
+          setTrack(next)
+        }
+      }
+    }
     if (pending.current && Math.hypot(world.x - pending.current.x, world.z - pending.current.z) > 0.08) {
       pending.current.moved = true
       const box = selectionBox({ x: pending.current.x, z: pending.current.z }, world)
@@ -1786,6 +1902,19 @@ export default function FloorPlanApp() {
     const world = toWorld(event)
     if (command && !svcTool && !yardTool && !placing && (tool === 'select' || tool === 'detect')) {
       const point = snappedPoint(world)
+      if (command.name === 'shift-wall' && command.step === 'from') {
+        const host = (originPlan.current || plan).walls.find((item) => item.id === command.wallId)
+        const hit = nearestWall(host ? [host] : [], point, 0.45)
+        if (!hit) return
+        const next = { ...command, step: 'to', from: { x: hit.x, z: hit.z } }
+        commandRef.current = next
+        setCommand(next)
+        return
+      }
+      if (command.name === 'shift-wall' && command.step === 'to') {
+        confirmCommand(point)
+        return
+      }
       if (command.name === 'stretch' && command.step === 'window') {
         pending.current = { x: point.x, z: point.z, stretch: true, moved: false }
         return
@@ -1816,6 +1945,15 @@ export default function FloorPlanApp() {
       return
     }
     if (svcTool || yardTool || tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing) {
+      if (trackRef.current?.armed === 'pick' && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)) {
+        const visual = describeSnap(world, ppm2d)
+        const corner = nearestEndpoint(plan.walls, world, snapRadius(ppm2d, 16))
+        const base = corner ? { x: corner.x, z: corner.z } : (visual?.point || world)
+        const next = { base: { x: base.x, z: base.z }, axis: trackRef.current.axis || 'along', text: '', armed: 'type' }
+        trackRef.current = next
+        setTrack(next)
+        return
+      }
       const drawing = tool === 'room' || tool === 'exterior' || tool === 'interior' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool))
       if (event.detail >= 2 && drawing) {
         endDrawingRef.current(world)
@@ -1916,6 +2054,83 @@ export default function FloorPlanApp() {
         if (origin && toward && Number.isFinite(mm) && mm >= 50) commitWallRef.current(origin, pointAtLength(origin, toward, mm))
         return
       }
+      const trackingTool = !draftRef.current && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)
+      if (trackingTool && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (event.key === 'Tab') {
+          event.preventDefault()
+          setTrack((current) => {
+            const next = {
+              base: current?.base || null,
+              axis: nextTrackAxis(current?.axis || 'along'),
+              text: current?.text || '',
+              armed: current?.armed || null,
+            }
+            trackRef.current = next
+            return next
+          })
+          return
+        }
+        if (event.key.toLowerCase() === 'g') {
+          event.preventDefault()
+          const next = { base: null, axis: 'along', text: '', armed: 'pick' }
+          trackRef.current = next
+          setTrack(next)
+          return
+        }
+        const trackNow = trackRef.current
+        const canType = Boolean(trackNow?.base)
+        if (canType && event.key === 'Backspace' && trackNow.text) {
+          event.preventDefault()
+          const next = { ...trackNow, text: trackNow.text.slice(0, -1) }
+          trackRef.current = next
+          setTrack(next)
+          return
+        }
+        if (canType && (/^[0-9]$/.test(event.key) || event.key === '.' || event.key === ',' || event.key === ';' || event.key === '-')) {
+          event.preventDefault()
+          const next = { ...trackNow, text: `${trackNow.text || ''}${event.key}`.slice(0, 18) }
+          trackRef.current = next
+          setTrack(next)
+          return
+        }
+        if (event.key === 'Enter' && canType && trackNow.text) {
+          event.preventDefault()
+          const live = trackedPoint(trackNow.base, cursor || trackNow.base, plan.walls, { axis: trackNow.axis || 'along', text: trackNow.text })
+          const cleared = { ...trackNow, text: '' }
+          trackRef.current = cleared
+          setTrack(cleared)
+          if (tool === 'exterior' || tool === 'interior') {
+            chainRef.current = { start: live.point, count: 0 }
+            setChainStart(live.point)
+            setDraft(live.point)
+            typedRef.current = ''
+            setTypedLen('')
+          } else if (tool === 'door' || tool === 'window') {
+            const hit = nearestWall(plan.walls, live.point, 0.8)
+            if (hit?.wall) {
+              const nextPlan = refreshHeat(addOpening(plan, hit.wall.id, live.point, tool, tool === 'door' ? doorHand : {}))
+              commit(nextPlan)
+              const created = (nextPlan.openings || []).slice(-1)[0]
+              if (created) choose({ kind: 'opening', id: created.id })
+              trackRef.current = null
+              setTrack(null)
+              if (!repeatPlace) exitToSelect()
+            }
+          } else if (placing) {
+            const drafted = addFixture(plan, placing, live.point.x, live.point.z, 0.45)
+            const created = drafted.fixtures?.[drafted.fixtures.length - 1]
+            if (created) {
+              commit(drafted)
+              setSelectedFixture(created.id)
+              setPick({ kind: 'fixture', id: created.id })
+              trackRef.current = null
+              setTrack(null)
+              if (!repeatPlace) exitToSelect()
+            }
+          }
+          return
+        }
+      }
       const engaged = Boolean(placing || svcTool || yardTool || tool !== 'select')
       if (event.key === ' ' && !event.repeat) {
         event.preventDefault()
@@ -1967,6 +2182,9 @@ export default function FloorPlanApp() {
         return
       }
       if (event.key === 'Escape') {
+        trackRef.current = null
+        setTrack(null)
+        setDimEdit(null)
         if (command) cancelCommand()
         setGhosts([])
         exitToSelect()
@@ -2052,7 +2270,7 @@ export default function FloorPlanApp() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [commit, plan, selectedFixture, undo, redoChange, tool, placing, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode, exitToSelect, requestFit])
+  }, [commit, plan, selectedFixture, undo, redoChange, tool, placing, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode, exitToSelect, requestFit, doorHand, repeatPlace])
 
   const loadHouse = (house, roomName, panel) => {
     const next = { ...house, services: ensureServices(house) }
@@ -2361,6 +2579,75 @@ export default function FloorPlanApp() {
   const liveEnd = draft && (tool === 'exterior' || tool === 'interior') ? (drawGuide || snapVisual?.point || null) : null
   draftRef.current = draft
   liveRef.current = liveEnd
+  trackRef.current = track
+  const trackingActive = !draft && !command && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)
+  const trackLive = trackingActive && track?.base && cursor
+    ? trackedPoint(track.base, cursor, plan.walls, { axis: track.axis || 'along', text: track.text || '' })
+    : null
+  const placeDims = (tool === 'door' || tool === 'window') && snapVisual?.wall
+    ? placementGaps(snapVisual.wall, snapVisual.point || cursor, tool)
+    : []
+  const dimTarget = command?.name === 'shift-wall'
+    ? { kind: 'wall', id: command.wallId }
+    : (tool === 'select' && !placing
+      ? (pick?.kind === 'wall' || pick?.kind === 'opening'
+        ? pick
+        : (selectedFixture ? { kind: 'fixture', id: selectedFixture } : (picks.find((item) => item.kind === 'wall' || item.kind === 'opening') || null)))
+      : null)
+  const selectedDims = dimTarget && placeDims.length === 0 ? temporaryDimensions(plan, dimTarget) : []
+  const shownDims = [...placeDims, ...selectedDims]
+  let shiftLive = null
+  if (command?.name === 'shift-wall' && command.step === 'to' && command.from && cursor && originPlan.current) {
+    const host = (originPlan.current.walls || []).find((item) => item.id === command.wallId)
+    if (host) {
+      const metres = wallShiftMetres(host, command.from, snapVisual?.point || cursor, command.value, command.distanceMode || 'offset')
+      const axes = wallAxes(host)
+      const mid = { x: (host.a.x + host.b.x) / 2, z: (host.a.z + host.b.z) / 2 }
+      shiftLive = {
+        x1: mid.x,
+        z1: mid.z,
+        x2: mid.x + axes.nx * metres,
+        z2: mid.z + axes.nz * metres,
+        mm: Math.abs(Math.round(metres * 1000)),
+      }
+    }
+  }
+  const applyDimValue = (dim, raw) => {
+    const mm = Number(String(raw ?? '').replace(',', '.'))
+    if (!Number.isFinite(mm)) return
+    if (dim.role === 'place-start' || dim.role === 'place-end') {
+      const wall = (plan.walls || []).find((item) => item.id === dim.wallId)
+      if (!wall) return
+      const kind = dim.kind || tool
+      const width = defaultOpeningWidth(kind)
+      const offset = offsetForEndGap(wall, width, dim.role === 'place-start' ? { fromStart: mm / 1000 } : { fromEnd: mm / 1000 })
+      const point = pointAtOffset(wall, offset)
+      const next = refreshHeat(addOpening(plan, wall.id, point, kind, kind === 'door' ? doorHand : {}))
+      commit(next)
+      const created = (next.openings || []).slice(-1)[0]
+      if (created) choose({ kind: 'opening', id: created.id })
+      setDimEdit(null)
+      trackRef.current = null
+      setTrack(null)
+      if (!repeatPlace) exitToSelect()
+      return
+    }
+    const source = command?.name === 'shift-wall' ? plan : (originPlan.current || plan)
+    const next = applyTemporaryDimension(source, dim, mm)
+    if (originPlan.current) {
+      const baseline = originPlan.current
+      history.current = [...history.current, baseline].slice(-40)
+      redo.current = []
+      originPlan.current = null
+      commandRef.current = null
+      setCommand(null)
+      const bound = bindFlues(next)
+      setPlan(fixtureServiceKey(baseline) === fixtureServiceKey(bound) ? bound : syncFixtureServices(bound))
+    } else {
+      commit(next)
+    }
+    setDimEdit(null)
+  }
   const roomCursor = tool === 'room' ? snapVisual?.point || null : null
   const liveLength = draft && liveEnd ? segmentLength(draft, liveEnd) : 0
   const spec = PLACEABLES.find((item) => item.id === svcKind)
@@ -2773,7 +3060,6 @@ export default function FloorPlanApp() {
             {command ? (
               <CadPrompt
                 command={command}
-                readout={command.readout}
                 onChange={(patch) => {
                   setCommand((current) => {
                     if (!current) return current
@@ -2785,7 +3071,8 @@ export default function FloorPlanApp() {
                     return next
                   })
                 }}
-                onApply={() => { if (command.step === 'to') confirmCommand(snappedPoint(cursor || command.base || { x: 0, z: 0 })) }}
+                readout={shiftLive ? `${shiftLive.mm} mm` : command.readout}
+                onApply={() => { if (command.step === 'to') confirmCommand(snappedPoint(cursor || command.from || command.base || { x: 0, z: 0 })) }}
                 onCancel={cancelCommand}
               />
             ) : draft && liveEnd && (tool === 'exterior' || tool === 'interior') ? (
@@ -2810,7 +3097,27 @@ export default function FloorPlanApp() {
                   commitWallRef.current(draft, end)
                 }}
               />
-            ) : <span data-testid="status-tool">{status}</span>}
+            ) : (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <span data-testid="status-tool">{track?.armed === 'pick' ? 'Mistä: napsauta peruspiste' : status}</span>
+                {trackLive && <span data-testid="track-status" data-label={trackLive.label}>{trackLive.label}</span>}
+                {trackingActive && (
+                  <button
+                    type="button"
+                    data-testid="from-base"
+                    style={statusBtn}
+                    onClick={() => {
+                      const next = { base: null, axis: 'along', text: '', armed: 'pick' }
+                      trackRef.current = next
+                      setTrack(next)
+                    }}
+                  >Mistä</button>
+                )}
+                {tool === 'select' && !command && picks.some((item) => item.kind === 'wall') && (
+                  <button type="button" data-testid="shift-wall" style={statusBtn} onClick={() => beginCommand('shift-wall')}>Siirrä seinä</button>
+                )}
+              </span>
+            )}
           </div>
           {view === 'facade' ? (
             <FacadeView
@@ -3304,6 +3611,51 @@ export default function FloorPlanApp() {
                   />
                 )}
                 <SnapMark snap={snapVisual} X={X} Y={Y} zoom={camera.zoom} />
+                {track?.base && !draft && (
+                  <g data-testid="track-base" style={{ pointerEvents: 'none' }}>
+                    <circle cx={X(track.base.x)} cy={Y(track.base.z)} r={8 / (camera.zoom || 1)} fill="#fff" stroke="#0f766e" strokeWidth={2 / (camera.zoom || 1)} />
+                    <circle cx={X(track.base.x)} cy={Y(track.base.z)} r={2.4 / (camera.zoom || 1)} fill="#0f766e" />
+                  </g>
+                )}
+                {trackLive && track?.base && (
+                  <g data-testid="track-readout" data-label={trackLive.label} data-axis={trackLive.axis} style={{ pointerEvents: 'none' }}>
+                    <line
+                      x1={X(track.base.x)}
+                      y1={Y(track.base.z)}
+                      x2={X(trackLive.point.x)}
+                      y2={Y(trackLive.point.z)}
+                      stroke="#0f766e"
+                      strokeWidth={1.6 / (camera.zoom || 1)}
+                      strokeDasharray={`${7 / (camera.zoom || 1)} ${4 / (camera.zoom || 1)}`}
+                    />
+                    <g transform={`translate(${X(trackLive.point.x)} ${Y(trackLive.point.z)}) scale(${1 / (camera.zoom || 1)})`}>
+                      <rect x={10} y={-22} width={Math.max(88, trackLive.label.length * 7.4)} height={18} rx={3} fill="#fff" stroke="#0f766e" />
+                      <text x={16} y={-9} fontSize={12} fontWeight={700} fill="#0f766e">{trackLive.label}</text>
+                    </g>
+                  </g>
+                )}
+                {shiftLive && (
+                  <g data-testid="shift-live" data-mm={shiftLive.mm} style={{ pointerEvents: 'none' }}>
+                    <line x1={X(shiftLive.x1)} y1={Y(shiftLive.z1)} x2={X(shiftLive.x2)} y2={Y(shiftLive.z2)} stroke="#0f766e" strokeWidth={1.6 / (camera.zoom || 1)} />
+                    <g transform={`translate(${X((shiftLive.x1 + shiftLive.x2) / 2)} ${Y((shiftLive.z1 + shiftLive.z2) / 2)}) scale(${1 / (camera.zoom || 1)})`}>
+                      <text x={8} y={-8} fontSize={12} fontWeight={700} fill="#0f766e">{shiftLive.mm} mm</text>
+                    </g>
+                  </g>
+                )}
+                {shownDims.map((dim) => (
+                  <TempDim
+                    key={dim.id}
+                    dim={dim}
+                    X={X}
+                    Y={Y}
+                    zoom={camera.zoom}
+                    editing={dimEdit?.id === dim.id ? dimEdit.value : null}
+                    onEdit={(item) => setDimEdit({ id: item.id, value: String(Math.max(0, Math.round(item.mm))), dim: item })}
+                    onChange={(value) => setDimEdit((current) => (current ? { ...current, value } : current))}
+                    onCommit={() => { if (dimEdit?.dim) applyDimValue(dimEdit.dim, dimEdit.value) }}
+                    onCancel={() => setDimEdit(null)}
+                  />
+                ))}
                 {engaged && cursor && (
                   <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${X((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).x)} ${Y((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).z)})`}>
                     <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
