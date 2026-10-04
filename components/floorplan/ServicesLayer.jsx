@@ -650,7 +650,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const len = Math.hypot(b.x - a.x, b.z - a.z)
         if (!best || len > best.len) best = { len, a, b, index: i }
       }
-      if (!best || best.len < 0.85) return
+      if (!best || best.len < 0.7) return
       const sizeText = run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`
       const text = run.system === 'iv' && run.flow ? `${sizeText}  ${Math.round(run.flow)} l/s` : sizeText
       segments.push({
@@ -668,10 +668,16 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     })
     const kindOrder = { tulo: 0, poisto: 1, ulko: 2, jate: 3 }
     segments.sort((a, b) => (kindOrder[a.kind] ?? 9) - (kindOrder[b.kind] ?? 9) || b.len - a.len)
+    const labelBounds = view ? {
+      x: view.x + 4,
+      y: view.y + (chrome?.h || 0) + 2,
+      w: Math.max(40, view.w - 8),
+      h: Math.max(40, view.h - (chrome?.h || 0) - 8),
+    } : null
     placeLineLabels(segments, obstacles, {
       font: labelFont,
       minLength: labelFont * 2,
-      bounds: view,
+      bounds: labelBounds,
     }).forEach((item) => leaders.push(item))
   }
   return (
