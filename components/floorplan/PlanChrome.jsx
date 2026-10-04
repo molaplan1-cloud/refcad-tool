@@ -114,7 +114,7 @@ export function PlanChrome({
   onPartitions, onCloseRoom, onYardTool, onNorth, onGrid, onAngle, onZoomOut, onZoomIn, onZoomFit,
   onClearances, onWallMode, onRoofMode, onSceneStyle, onSystem, onKind, onSvcTool, onFloorHeating,
   onFinish, onRoute, onRewire, onSchedule, onDiagram, onRewireWater, onRewireHeat, onHeatTable,
-  onHeatSchematic,   onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup,
+  onHeatSchematic,   onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup, onStraighten,
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
   doorHand = { swing: 1, inward: false }, onDoorHand,
 }) {
@@ -244,6 +244,7 @@ export function PlanChrome({
           <button type="button" data-testid="undo" title={t('edit.undo')} style={menuItem(false)} onClick={() => { close(); onUndo() }}>{t('edit.undo')}</button>
           <button type="button" data-testid="redo" title={t('edit.redo')} style={menuItem(false)} onClick={() => { close(); onRedo() }}>{t('edit.redo')}</button>
           <button type="button" data-testid="cleanup-duplicates" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>Siivoa päällekkäiset</button>
+          <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>Suorista seinät</button>
         </Menu>
         <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="open-display" style={menuItem(false)} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
