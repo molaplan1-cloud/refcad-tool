@@ -819,7 +819,7 @@ const handBtn = (on) => ({
   cursor: 'pointer',
 })
 
-export function DoorHandControls({ swing = 1, inward = false, onSwing, onInward, compact = false }) {
+export function DoorHandControls({ swing = 1, inward = false, onSwing, onInward, compact = false, handLabel = 'Kätisyys:', leafLabel = 'Aukeaa:', showHand = true, showLeaf = true }) {
   const left = (swing || 1) >= 0
   const choice = (testid, label, on, click) => (
     <button type="button" data-testid={testid} aria-pressed={on} onClick={click} style={{ ...handBtn(on), flex: compact ? '0 0 auto' : 1, minWidth: compact ? 58 : 0 }}>{label}</button>
@@ -833,14 +833,97 @@ export function DoorHandControls({ swing = 1, inward = false, onSwing, onInward,
   )
   return (
     <div data-testid="door-hand" style={{ display: compact ? 'flex' : 'block', alignItems: 'center', gap: compact ? 14 : 0, marginBottom: compact ? 0 : 4 }}>
-      {row('door-handedness', 'Kätisyys:', compact ? null : 'F', <>
+      {showHand && row('door-handedness', handLabel, compact ? null : 'F', <>
         {choice('door-hand-left', 'Vasen', left, () => onSwing?.(1))}
         {choice('door-hand-right', 'Oikea', !left, () => onSwing?.(-1))}
       </>)}
-      {row('door-leaf', 'Aukeaa:', compact ? null : 'Shift+F', <>
+      {showLeaf && row('door-leaf', leafLabel, compact ? null : 'Shift+F', <>
         {choice('door-leaf-in', 'Sisään', Boolean(inward), () => onInward?.(true))}
         {choice('door-leaf-out', 'Ulos', !inward, () => onInward?.(false))}
       </>)}
+    </div>
+  )
+}
+
+const DOOR_TYPE_OPTIONS = [
+  ['hinged', 'opening.door'],
+  ['sliding', 'opening.sliding'],
+  ['patio', 'opening.patio'],
+  ['double', 'opening.double'],
+  ['glass', 'opening.glass'],
+  ['folding', 'opening.folding'],
+]
+
+function doorTypePatch(style, opening) {
+  const next = { doorStyle: style }
+  if (style === 'sliding') {
+    next.slideMount = opening?.slideMount === 'surface' ? 'surface' : 'pocket'
+    next.panels = opening?.panels === 2 ? 2 : 1
+    next.width = next.panels === 2 ? 1.8 : 1.2
+  } else if (style === 'patio') {
+    next.width = 1.8
+    next.panels = 2
+  } else if (style === 'double' || style === 'folding') {
+    next.width = 1.6
+  } else {
+    next.width = 0.9
+  }
+  return next
+}
+
+export function DoorPlaceControls({ value, onChange, compact = false, t }) {
+  const style = value?.doorStyle || 'hinged'
+  const label = (key, fallback) => (t ? t(key) : fallback)
+  const set = (patch) => onChange?.({
+    swing: 1,
+    inward: false,
+    doorStyle: 'hinged',
+    slideMount: 'pocket',
+    panels: 1,
+    ...value,
+    ...patch,
+  })
+  const sliding = style === 'sliding'
+  const direction = sliding || style === 'patio'
+  const leafFace = style === 'hinged' || style === 'glass' || style === 'double' || style === 'folding' || (sliding && value?.slideMount === 'surface')
+  const selectStyle = { height: 28, padding: '0 6px', borderRadius: 6, border: '1px solid #d6d3d1', background: '#fff', fontSize: 12, fontWeight: 650 }
+  return (
+    <div data-testid="door-place" style={{ display: 'flex', alignItems: compact ? 'center' : 'stretch', flexDirection: compact ? 'row' : 'column', gap: compact ? 8 : 0, flexWrap: 'wrap' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: compact ? 0 : 8, fontSize: 12, fontWeight: 750 }}>
+        {label('opening.kind', 'Tyyppi')}
+        <select data-testid="door-style" style={selectStyle} value={style} onChange={(event) => set(doorTypePatch(event.target.value, value))}>
+          {DOOR_TYPE_OPTIONS.map(([id, key]) => <option key={id} value={id}>{label(key, id)}</option>)}
+        </select>
+      </label>
+      {sliding && (
+        <>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: compact ? 0 : 8, fontSize: 12, fontWeight: 750 }}>
+            {label('opening.mount', 'Asennus')}
+            <select data-testid="door-mount" style={selectStyle} value={value?.slideMount === 'surface' ? 'surface' : 'pocket'} onChange={(event) => set({ slideMount: event.target.value })}>
+              <option value="pocket">{label('opening.pocket', 'Seinän sisään')}</option>
+              <option value="surface">{label('opening.surface', 'Seinän pinnalle')}</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: compact ? 0 : 8, fontSize: 12, fontWeight: 750 }}>
+            {label('opening.panels', 'Lehdet')}
+            <select data-testid="door-panels" style={selectStyle} value={value?.panels === 2 ? '2' : '1'} onChange={(event) => set({ panels: Number(event.target.value), width: Number(event.target.value) === 2 ? 1.8 : 1.2 })}>
+              <option value="1">{label('opening.panelOne', 'Yksi')}</option>
+              <option value="2">{label('opening.panelTwo', 'Kaksilehtinen')}</option>
+            </select>
+          </label>
+        </>
+      )}
+      <DoorHandControls
+        compact={compact}
+        swing={value?.swing}
+        inward={value?.inward}
+        showHand
+        showLeaf={leafFace}
+        handLabel={direction || style === 'folding' ? `${label('opening.slideTo', 'Liukuu')}:` : 'Kätisyys:'}
+        leafLabel={sliding ? `${label('opening.mount', 'Asennus')}:` : 'Aukeaa:'}
+        onSwing={(swing) => set({ swing })}
+        onInward={(inward) => set({ inward })}
+      />
     </div>
   )
 }
@@ -853,18 +936,22 @@ function OpeningFields({ plan, id, onApply, onCommit }) {
   const wall = (plan.walls || []).find((item) => item.id === opening.wallId)
   const compass = wall && wall.kind !== 'interior' ? wallBearing(plan, wall) : null
   const left = (opening.swing || 1) >= 0
-  const setHand = (swing) => {
-    if ((swing >= 0) === left) return
-    onCommit(updateOpening(plan, id, { swing }))
-  }
-  const setLeaf = (inward) => {
-    if (Boolean(opening.inward) === inward) return
-    onCommit(updateOpening(plan, id, { inward }))
-  }
   return (
     <div>
       {opening.kind === 'door' && (
-        <DoorHandControls swing={opening.swing} inward={opening.inward} onSwing={setHand} onInward={setLeaf} />
+        <DoorPlaceControls
+          t={t}
+          value={opening}
+          onChange={(next) => {
+            const swingChanged = (next.swing >= 0) !== left
+            const leafChanged = Boolean(next.inward) !== Boolean(opening.inward)
+            const typeChanged = (next.doorStyle || 'hinged') !== (opening.doorStyle || 'hinged')
+              || next.slideMount !== opening.slideMount
+              || next.panels !== opening.panels
+              || next.width !== opening.width
+            if (swingChanged || leafChanged || typeChanged) onCommit(updateOpening(plan, id, next))
+          }}
+        />
       )}
       {compass && (
         <div data-testid="window-compass" data-compass={compass.code} style={{ fontSize: 13, fontWeight: 750, marginBottom: 8 }}>
@@ -1216,7 +1303,13 @@ function RoomInfo({ report, plan, onApply }) {
       <div style={{ fontSize: 11, fontWeight: 700, margin: '6px 0 3px' }}>{t('room.windows')} {report.windowCount} · {num(report.windowArea, 2)} m²</div>
       {report.windows.map((item) => <div key={item.id} style={{ fontSize: 11 }}>{item.size}</div>)}
       <div style={{ fontSize: 11, fontWeight: 700, margin: '6px 0 3px' }}>{t('room.doors')} {report.doorCount} · {num(report.doorArea, 2)} m²</div>
-      {report.doors.map((item) => <div key={item.id} style={{ fontSize: 11 }}>{item.type} {item.size}</div>)}
+      <div data-testid="room-door-schedule">
+        {report.doors.map((item) => (
+          <div key={item.id} data-testid="door-schedule-row" data-style={item.style || 'hinged'} data-mount={item.mount || ''} style={{ fontSize: 11 }}>
+            {item.typeKey ? t(item.typeKey) : item.type}{item.mountKey ? ` · ${t(item.mountKey)}` : ''} {item.size}
+          </div>
+        ))}
+      </div>
       <div data-testid="room-heat" style={{ marginTop: 8, padding: 8, background: '#f5f5f4', borderRadius: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 750 }}>{t('heat.title')}</div>
         <div style={{ fontSize: 11, color: '#57534e', marginBottom: 4 }}>{t('heat.summary', { zone: report.heat.zoneName, outdoor: report.heat.outdoor, indoor: report.heat.setpoint })}</div>

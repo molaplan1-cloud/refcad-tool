@@ -38,6 +38,7 @@ import {
   nearestEndpoint,
   moveRoomLabel,
   openingSymbol,
+  doorSchedule,
   openingTags,
   planBounds,
   planDimensions,
@@ -815,7 +816,7 @@ export default function FloorPlanApp() {
   const [library, setLibrary] = useState(() => ({ projects: [] }))
   const [hover, setHover] = useState(null)
   const [tool, setTool] = useState('select')
-  const [doorHand, setDoorHand] = useState({ swing: 1, inward: false })
+  const [doorHand, setDoorHand] = useState({ swing: 1, inward: false, doorStyle: 'hinged', slideMount: 'pocket', panels: 1 })
   const [placing, setPlacing] = useState(null)
   const [repeatPlace, setRepeatPlace] = useState(false)
   const [toast, setToast] = useState('')
@@ -2652,6 +2653,21 @@ export default function FloorPlanApp() {
           {workspace === 'rakenne' && (
             <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Seinät, huoneet, ovet, ikkunat, katto ja rakenteet. Muut tasot ovat himmennettyjä ja lukittuja.</p>
           )}
+          {workspace === 'rakenne' && doorSchedule(plan).length > 0 && (
+            <div data-testid="door-schedule" style={{ margin: '4px 4px 12px' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', marginBottom: 4 }}>{t('opening.schedule')}</div>
+              {doorSchedule(plan).map((row, index) => (
+                <div key={row.id} data-testid="door-schedule-row" data-style={row.style} data-mount={row.mount || ''} data-panels={row.panels} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid #f5f5f4' }}>
+                  <div style={{ fontWeight: 700 }}>{index + 1}. {t(row.nameKey)}</div>
+                  <div style={{ color: '#57534e' }}>
+                    {Math.round(row.width * 1000)}×{Math.round(row.height * 1000)}
+                    {row.mount ? ` · ${t(row.mount === 'surface' ? 'opening.surface' : 'opening.pocket')}` : ''}
+                    {row.style === 'sliding' && row.panels === 2 ? ` · ${t('opening.panelTwo')}` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           {workspace === 'piha' && (
             <>
               <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Asemapiirros ja piha. Työkalut ovat nauhassa. Talo ja talotekniikka ovat lukittuja.</p>
@@ -2898,12 +2914,37 @@ export default function FloorPlanApp() {
                       </g>
                     )
                   }
+                  const arcs = fig.style === 'folding' ? [] : (fig.arcs?.length ? fig.arcs : (fig.arc?.length ? [fig.arc] : []))
                   return (
-                    <g key={opening.id} data-testid="door-mark" data-swing={opening.swing >= 0 ? 'left' : 'right'} data-leaf={opening.inward ? 'in' : 'out'} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.05} fill="none">
+                    <g key={opening.id} data-testid="door-mark" data-style={fig.style || 'hinged'} data-mount={fig.mount || ''} data-panels={fig.panels || 1} data-swing={opening.swing >= 0 ? 'left' : 'right'} data-leaf={opening.inward ? 'in' : 'out'} stroke={selectedOpening ? '#0f766e' : '#1c1917'} strokeWidth={1.05} fill="none">
                       <line data-testid="door-jamb" x1={X(fig.jambA[0].x)} y1={Y(fig.jambA[0].z)} x2={X(fig.jambA[1].x)} y2={Y(fig.jambA[1].z)} />
                       <line data-testid="door-jamb" x1={X(fig.jambB[0].x)} y1={Y(fig.jambB[0].z)} x2={X(fig.jambB[1].x)} y2={Y(fig.jambB[1].z)} />
-                      <polyline points={fig.arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} />
-                      <line x1={X(fig.hinge.x)} y1={Y(fig.hinge.z)} x2={X(fig.leaf.x)} y2={Y(fig.leaf.z)} />
+                      {(fig.glass || []).map((line, index) => (
+                        <line key={`glass-${index}`} x1={X(line.x1)} y1={Y(line.z1)} x2={X(line.x2)} y2={Y(line.z2)} />
+                      ))}
+                      {(fig.leaves || []).map((line, index) => (
+                        <line key={`leaf-${index}`} data-testid="door-leaf-line" x1={X(line.a.x)} y1={Y(line.a.z)} x2={X(line.b.x)} y2={Y(line.b.z)} />
+                      ))}
+                      {arcs.map((arc, index) => (
+                        <polyline key={`arc-${index}`} data-testid="door-arc" points={arc.map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')} />
+                      ))}
+                      {(fig.rails || []).map((rail, index) => (
+                        <line key={`rail-${index}`} data-testid="door-rail" data-dashed={rail.dashed ? '1' : '0'} strokeDasharray={rail.dashed ? '5 3' : undefined} x1={X(rail.a.x)} y1={Y(rail.a.z)} x2={X(rail.b.x)} y2={Y(rail.b.z)} />
+                      ))}
+                      {(fig.arrows || []).map((arrow, index) => {
+                        const len = Math.hypot(arrow.to.x - arrow.from.x, arrow.to.z - arrow.from.z) || 1
+                        const ux = (arrow.to.x - arrow.from.x) / len
+                        const uz = (arrow.to.z - arrow.from.z) / len
+                        const head = 0.14
+                        const left = { x: arrow.to.x - ux * head + uz * head * 0.45, z: arrow.to.z - uz * head - ux * head * 0.45 }
+                        const right = { x: arrow.to.x - ux * head - uz * head * 0.45, z: arrow.to.z - uz * head + ux * head * 0.45 }
+                        return (
+                          <g key={`arrow-${index}`} data-testid="door-arrow">
+                            <line x1={X(arrow.from.x)} y1={Y(arrow.from.z)} x2={X(arrow.to.x)} y2={Y(arrow.to.z)} />
+                            <polyline points={`${X(left.x)},${Y(left.z)} ${X(arrow.to.x)},${Y(arrow.to.z)} ${X(right.x)},${Y(right.z)}`} />
+                          </g>
+                        )
+                      })}
                     </g>
                   )
                 })}
