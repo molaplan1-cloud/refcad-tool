@@ -1157,7 +1157,7 @@ function ChimneyShaft({ fixture, plan, w, d }) {
   )
 }
 
-function FixtureMesh({ fixture, plan, selected, hovered }) {
+function FixtureMesh({ fixture, plan, selected, hovered, dim = false }) {
   const tpl = fixtureTemplate(fixture.type)
   const variant = (tpl.variants || []).find((entry) => entry.id === fixture.variant) || tpl.variants?.[0]
   const w = fixture.w || variant?.w || tpl.w
@@ -1171,7 +1171,7 @@ function FixtureMesh({ fixture, plan, selected, hovered }) {
   const plateW = hearth ? w + (hearth.side || 0) * 2 : 0
   const plateD = hearth ? d + (hearth.front || 0) : 0
   return (
-    <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]} userData={{ pick }}>
+    <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]} userData={dim ? undefined : { pick }}>
       {hearth && (
         <mesh position={[0, 0.012, -d / 2 + plateD / 2]}>
           <boxGeometry args={[plateW, 0.02, plateD]} />
@@ -1560,6 +1560,8 @@ export default function HouseScene({
   onYardDrag,
   onServiceDrag,
   onDropFixture,
+  activeSystems = null,
+  dimFixtures = false,
 }) {
   const controlsRef = useRef(null)
   const house = planBounds(plan)
@@ -1622,9 +1624,9 @@ export default function HouseScene({
       <RoofMesh plan={plan} mode={roofMode} selected={selected} hovered={hovered} />
       {wallMode !== 'hidden' && <Dressing plan={plan} />}
       {normalizeDisplay(plan.display).fixtures && (plan.fixtures || []).map((fixture) => (
-        <FixtureMesh key={fixture.id} plan={plan} fixture={fixture} selected={selected} hovered={hovered} />
+        <FixtureMesh key={fixture.id} plan={plan} fixture={fixture} selected={selected} hovered={hovered} dim={dimFixtures} />
       ))}
-      <Services3D plan={plan} selected={selected} hovered={hovered} />
+      <Services3D plan={plan} selected={selected} hovered={hovered} activeSystems={activeSystems} />
       <CursorMode drawMode={drawMode} />
       {drawMode && cursor && <FloorCursor point={cursor} ppm={cursorPpm} kind={snapKind} />}
       {drawMode && placeGhost && cursor && (

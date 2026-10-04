@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { COVER_TYPES } from '@/lib/covers'
 import { GROUND_TOOLS } from '@/lib/groundworks'
 import { PLACEABLES, SERVICE_SYSTEMS, airflowBalance, ensureServices, layerVisible } from '@/lib/services'
+import { WORKSPACES, workspaceSystems } from '@/lib/workspaces'
 import { BUILDINGS, OBJECTS, PLANTS, ensureYard } from '@/lib/yard'
 import { LanguageSwitch } from '@/components/i18n/Locale'
 import { zoomPercent } from '@/lib/zoom'
@@ -113,6 +114,7 @@ export function PlanChrome({
   onClearances, onWallMode, onRoofMode, onSceneStyle, onSystem, onKind, onSvcTool, onFloorHeating,
   onFinish, onRoute, onRewire, onSchedule, onDiagram, onRewireWater, onRewireHeat, onHeatTable,
   onHeatSchematic,   onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup,
+  workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
 }) {
   const [open, setOpen] = useState(null)
   const close = () => setOpen(null)
@@ -221,6 +223,13 @@ export function PlanChrome({
         </div>
         <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
       </header>
+      <div data-testid="workspace-tabs" style={{ display: 'flex', alignItems: 'center', gap: 4, height: 36, padding: '0 8px', background: '#14181f' }}>
+        {WORKSPACES.map((item) => (
+          <button key={item.id} type="button" data-testid={`workspace-${item.id}`} aria-pressed={workspace === item.id} style={workspaceTab(workspace === item.id)} onClick={() => onWorkspace?.(item.id)}>
+            {item.name}
+          </button>
+        ))}
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 32, padding: '0 6px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
         <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="plan-new" style={menuItem(false)} onClick={() => { close(); onNew() }}>{t('file.new')}</button>
@@ -304,13 +313,28 @@ export function PlanChrome({
       {mode !== 'facade' && (
         <div data-testid="tool-ribbon" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '4px 8px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto' }}>
-            {(onPlan || mode === '3d') && <Group>{drawTools(toolStyle)}</Group>}
-            {onSite && <Group>{yardTools(toolStyle)}</Group>}
-            {mode !== 'facade' && (
+            {workspace === 'rakenne' && (onPlan || mode === '3d') && <Group>{drawTools(toolStyle)}</Group>}
+            {workspace === 'kalusteet' && (
               <Group>
-                <button type="button" data-testid="ribbon-service-node" aria-pressed={svcTool === 'node'} style={toolStyle(svcTool === 'node')} onClick={() => onSvcTool('node')}>Piste</button>
-                <button type="button" data-testid="ribbon-service-run" aria-pressed={svcTool === 'run'} style={toolStyle(svcTool === 'run')} onClick={() => onSvcTool('run')}>Linja</button>
-                <button type="button" data-testid="repeat-place" aria-pressed={repeat} title="Jätä työkalu päälle seuraavaa sijoitusta varten" style={toolStyle(repeat)} onClick={() => onRepeat?.(!repeat)}>Toista</button>
+                <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={toolStyle(selectOn)} onClick={() => onTool('select')}>{t('tool.select')}</button>
+                <button type="button" data-testid="repeat-place" aria-pressed={repeat} style={toolStyle(repeat)} onClick={() => onRepeat?.(!repeat)}>Toista</button>
+                <span style={{ fontSize: 12, color: '#57534e', flexShrink: 0 }}>Kalusteet huoneittain sivupalkissa</span>
+              </Group>
+            )}
+            {workspace === 'piha' && <Group>{yardTools(toolStyle)}</Group>}
+            {workspaceSystems(workspace).length > 0 && (
+              <Group>
+                <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={toolStyle(selectOn)} onClick={() => onTool('select')}>{t('tool.select')}</button>
+                {PLACEABLES.filter((item) => workspaceSystems(workspace).includes(item.system) && item.mode === 'node').map((item) => (
+                  <button key={item.id} type="button" data-testid={`device-${item.id}`} aria-pressed={svcTool === 'node' && svcKind === item.id} style={toolStyle(svcTool === 'node' && svcKind === item.id)} onClick={() => onPlaceDevice?.(item)}>{item.name}</button>
+                ))}
+                {PLACEABLES.filter((item) => workspaceSystems(workspace).includes(item.system) && item.mode === 'run').map((item) => (
+                  <button key={item.id} type="button" data-testid={`run-${item.id}`} aria-pressed={svcTool === 'run' && svcKind === item.id} style={toolStyle(svcTool === 'run' && svcKind === item.id)} onClick={() => onPlaceDevice?.({ ...item, drawing: true })}>{item.name}</button>
+                ))}
+                <button type="button" data-testid="repeat-place" aria-pressed={repeat} style={toolStyle(repeat)} onClick={() => onRepeat?.(!repeat)}>Toista</button>
+                <button type="button" data-testid="route-services" style={toolStyle(false)} onClick={() => { close(); onRoute() }}>Reititä automaattisesti</button>
+                <button type="button" data-testid="suggest-equipment" style={toolStyle(ghostCount > 0)} onClick={() => onSuggest?.()}>Ehdota laitteet</button>
+                {ghostCount > 0 && <button type="button" data-testid="accept-equipment" style={toolStyle(true)} onClick={() => onAccept?.()}>Hyväksy</button>}
               </Group>
             )}
             {mode === '3d' && (
@@ -337,6 +361,21 @@ export function PlanChrome({
       <CadToolbar active={command?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onCadLayer} />
     </div>
   )
+}
+
+function workspaceTab(active) {
+  return {
+    height: 28,
+    padding: '0 14px',
+    borderRadius: 7,
+    border: `1px solid ${active ? '#5eead4' : 'transparent'}`,
+    background: active ? '#0f766e' : 'transparent',
+    color: active ? '#f0fdfa' : '#d6d3d1',
+    fontSize: 13,
+    fontWeight: active ? 800 : 650,
+    cursor: 'pointer',
+    boxShadow: active ? 'inset 0 -2px 0 #99f6e4' : 'none',
+  }
 }
 
 function modeTab(active) {

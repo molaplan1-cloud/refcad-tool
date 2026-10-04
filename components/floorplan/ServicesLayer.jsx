@@ -529,7 +529,7 @@ function siteRun(plan, run) {
   return (run.points || []).some((point) => !insideHouse(plan, point.x, point.z))
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null }) {
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null }) {
   const services = ensureServices(plan)
   const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run) && (!siteMode || siteRun(plan, run)))
   const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
@@ -549,6 +549,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     .filter(({ run }) => run.kind !== 'floorheat' && run.kind !== 'efloor' && run.role !== 'loop')
     .map((item) => ({ ...item.run, points: item.points })))
   const legend = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
+  const live = (system) => !Array.isArray(activeSystems) || activeSystems.includes(system)
   const open = (event, hit) => {
     event.preventDefault()
     event.stopPropagation()
@@ -598,7 +599,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const runSelected = selected?.service?.target === 'run' && selected?.service?.id === run.id
         const showText = !quietLabels || runSelected
         return (
-          <g key={run.id}>
+          <g key={run.id} opacity={live(run.system) ? 1 : 0.22} style={{ pointerEvents: live(run.system) ? 'auto' : 'none' }}>
             <polyline
               points={pointsOf(points, X, Y)}
               fill="none"
@@ -749,7 +750,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           data-testid={`svc-node-${node.kind}`}
           data-service-id={node.id}
           transform={`translate(${X(node.x)} ${Y(node.z)})`}
-          style={{ pointerEvents: interactive ? 'auto' : 'none' }}
+          opacity={live(node.system) ? 1 : 0.22}
+          style={{ pointerEvents: interactive && live(node.system) ? 'auto' : 'none' }}
           onContextMenu={(event) => open(event, { target: 'node', id: node.id, system: node.system })}
         >
           {flashId === node.id && <circle data-testid="place-flash" r="16" fill="none" stroke="#ea580c" strokeWidth="2.4" />}
