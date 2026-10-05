@@ -1073,8 +1073,9 @@ export default function FloorPlanApp() {
     if (!node) return undefined
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0].contentRect
-      const w = Math.max(320, rect.width)
-      const h = Math.max(240, rect.height)
+      const w = Math.round(rect.width)
+      const h = Math.round(rect.height)
+      if (w < 40 || h < 40) return
       setSize((prev) => (Math.abs(prev.w - w) < 1 && Math.abs(prev.h - h) < 1 ? prev : { w, h }))
     })
     observer.observe(node)
@@ -1117,15 +1118,16 @@ export default function FloorPlanApp() {
     if (!ready || view !== '2d') return
     const node = hostRef.current
     if (!node || node.clientWidth < 80 || node.clientHeight < 80) return
-    const w = Math.max(320, Math.round(node.clientWidth))
-    const h = Math.max(240, Math.round(node.clientHeight))
+    const w = Math.round(node.clientWidth)
+    const h = Math.round(node.clientHeight)
     if (Math.abs(size.w - w) > 2 || Math.abs(size.h - h) > 2) {
       setSize({ w, h })
       return
     }
     const req = fitRequest.current
-    if (fittedToken.current != null && fittedToken.current === req.token) return
-    fittedToken.current = req.token
+    const key = `${req.token}:${w}x${h}`
+    if (fittedToken.current === key) return
+    fittedToken.current = key
     setCamera(cameraForBuilding(req.plan || plan, req.plan ? req.mode : sheetMode, { w, h }))
   }, [ready, view, fitTick, size, plan, sheetMode])
 
@@ -3260,8 +3262,8 @@ export default function FloorPlanApp() {
           )}
         </aside>
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
-          <div style={{ minHeight: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4', minWidth: 0, overflow: 'hidden' }}>
+        <div className="plan-stage" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+          <div className="plan-status" style={{ minHeight: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4', minWidth: 0, overflow: 'hidden' }}>
             {command ? (
               <CadPrompt
                 command={command}

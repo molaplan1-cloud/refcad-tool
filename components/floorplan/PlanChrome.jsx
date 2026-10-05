@@ -259,17 +259,19 @@ export function PlanChrome({
 
   if (compact) {
     return (
-      <div data-testid="plan-chrome" style={{ flexShrink: 0, background: '#14181f', paddingTop: 'env(safe-area-inset-top)' }}>
-        <header style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 48, padding: '4px 8px', paddingLeft: 'max(8px, env(safe-area-inset-left))', paddingRight: 'max(8px, env(safe-area-inset-right))' }}>
+      <div data-testid="plan-chrome" className={`plan-chrome${toolsOpen ? ' tools-open' : ''}`} style={{ flexShrink: 0, background: '#14181f', paddingTop: 'env(safe-area-inset-top)' }}>
+        <header className="plan-chrome-header" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 48, padding: '4px 8px', paddingLeft: 'max(8px, env(safe-area-inset-left))', paddingRight: 'max(8px, env(safe-area-inset-right))' }}>
           <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, flexShrink: 0 }}>RefCAD</Link>
           <input aria-label={t('app.drawingName')} value={plan.name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 16, flex: 1, minWidth: 0, width: 0 }} />
           <button type="button" data-testid="chrome-menu" aria-expanded={open === 'root'} onClick={() => setOpen(open === 'root' ? null : 'root')} style={{ ...modeTab(open === 'root'), minHeight: 44, minWidth: 44, padding: '0 12px' }}>Valikko</button>
         </header>
-        <div className="workspace-scroll" data-testid="workspace-tabs" style={{ background: '#14181f' }}>
+        <div className="workspace-scroll view-tabs" data-testid="view-tabs" style={{ background: '#14181f' }}>
           <button type="button" data-testid="view-floor-2d" style={{ ...modeTab(mode === 'plan'), minHeight: 44 }} onClick={() => onMode('plan')}>{t('mode.plan')}</button>
           <button type="button" data-testid="view-site" disabled={access && !access.workspaces.includes('piha')} style={{ ...modeTab(mode === 'site'), minHeight: 44 }} onClick={() => { if (!access || access.workspaces.includes('piha')) onMode('site') }}>{t('view.site')}</button>
           <button type="button" data-testid="view-floor-3d" style={{ ...modeTab(mode === '3d'), minHeight: 44 }} onClick={() => onMode('3d')}>3D</button>
           <button type="button" data-testid="view-facade" style={{ ...modeTab(mode === 'facade'), minHeight: 44 }} onClick={() => onMode('facade')}>{t('view.facade')}</button>
+        </div>
+        <div className="workspace-scroll" data-testid="workspace-tabs" style={{ background: '#1c212b' }}>
           {WORKSPACES.map((item) => {
             const allowed = !access || access.workspaces.includes(item.id)
             return (
