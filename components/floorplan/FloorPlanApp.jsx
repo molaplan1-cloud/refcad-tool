@@ -44,6 +44,7 @@ import {
   doorSchedule,
   openingTags,
   planBounds,
+  extensionWitnesses,
   planDimensions,
   dedupeDimensions,
   straightenWalls,
@@ -597,7 +598,7 @@ function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
   )
 }
 
-function DimLine({ dim, X, Y, zoom, onEdit }) {
+function DimLine({ dim, X, Y, zoom, onEdit, witnesses = [] }) {
   const view = Math.max(0.2, zoom || 1)
   const fontSize = dimensionFont(view)
   const stroke = 1 / view
@@ -660,19 +661,6 @@ function DimLine({ dim, X, Y, zoom, onEdit }) {
   const rot = vertical ? `rotate(${dimensionRotation(true)} ${labelX} ${labelY})` : null
   const haloW = place.textW + fontSize * 0.7
   const haloH = fontSize * 1.45
-  const ax1 = X(dim.ax ?? dim.x1)
-  const ay1 = Y(dim.az ?? dim.z1)
-  const ax2 = X(dim.bx ?? dim.x2)
-  const ay2 = Y(dim.bz ?? dim.z2)
-  const gapLine = (sx, sy, ex, ey) => {
-    const dx = ex - sx
-    const dy = ey - sy
-    const span = Math.hypot(dx, dy) || 1
-    const inset = Math.min(fontSize * 0.55, span * 0.35)
-    return { x1: sx + (dx / span) * inset, y1: sy + (dy / span) * inset, x2: ex, y2: ey }
-  }
-  const ext1 = gapLine(ax1, ay1, x1, y1)
-  const ext2 = gapLine(ax2, ay2, x2, y2)
   const breakX = x1 + (x2 - x1) * 0.5
   const breakY = y1 + (y2 - y1) * 0.5
   const editDim = (event) => {
@@ -683,8 +671,18 @@ function DimLine({ dim, X, Y, zoom, onEdit }) {
   }
   return (
     <g data-testid={`dim-${dim.kind || 'dim'}`} data-label={dim.label} data-place={place.mode} data-wall={dim.wallId || ''} fill="#292524" style={{ pointerEvents: 'none' }}>
-      {Math.hypot(ax1 - x1, ay1 - y1) > 4 / view && <line x1={ext1.x1} y1={ext1.y1} x2={ext1.x2} y2={ext1.y2} stroke="#a8a29e" strokeWidth={thin} />}
-      {Math.hypot(ax2 - x2, ay2 - y2) > 4 / view && <line x1={ext2.x1} y1={ext2.y1} x2={ext2.x2} y2={ext2.y2} stroke="#a8a29e" strokeWidth={thin} />}
+      {(witnesses || []).map((line, index) => (
+        <line
+          key={`ext-${index}`}
+          data-testid="dim-extension"
+          x1={X(line.x1)}
+          y1={Y(line.z1)}
+          x2={X(line.x2)}
+          y2={Y(line.z2)}
+          stroke="#a8a29e"
+          strokeWidth={thin}
+        />
+      ))}
       <line x1={x1} y1={y1} x2={breakX - ux * gap / 2} y2={breakY - uy * gap / 2} stroke="#44403c" strokeWidth={stroke} />
       <line x1={breakX + ux * gap / 2} y1={breakY + uy * gap / 2} x2={x2} y2={y2} stroke="#44403c" strokeWidth={stroke} />
       <line x1={x1 - tx} y1={y1 - ty} x2={x1 + tx} y2={y1 + ty} stroke="#44403c" strokeWidth={stroke} />
@@ -776,20 +774,13 @@ function worldPath(points, X, Y) {
   return `${points.map((point, index) => `${index ? 'L' : 'M'}${X(point.x)} ${Y(point.z)}`).join(' ')} Z`
 }
 
-function faceInk(color) {
-  const hex = String(color || '').replace('#', '')
-  if (hex.length < 6) return color || '#44403c'
-  return `#${hex.slice(0, 6)}`
-}
-
-function FaceLines({ plan, X, Y, selected, onSelect }) {
+function FaceLines({ plan, X, Y, selected, onSelect, interactive = true }) {
   return (
     <g data-testid="face-lines">
       {visibleRooms(plan).map((room) => (room.walls || []).map((edge, index) => {
         const wall = (plan.walls || []).find((item) => item.id === edge.wallId)
         const side = wall ? faceSide(wall, edge.a, edge.b) : 'left'
         const material = wall ? resolveFaceMaterial(plan, wall, side) : (room.interiorId || 'paint')
-        const color = materialOf('interior', material).color
         const a0 = room.polygon?.[index]
         const b0 = room.polygon?.[(index + 1) % (room.polygon?.length || 1)]
         if (!a0 || !b0) return null
@@ -818,10 +809,11 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
             y1={Y(a.z)}
             x2={X(b.x)}
             y2={Y(b.z)}
-            stroke={active ? '#0f766e' : faceInk(color)}
-            strokeWidth={active ? 1.8 : 0.55}
+            stroke={active ? '#0f766e' : 'transparent'}
+            strokeWidth={active ? 1.8 : 6}
             strokeDasharray={hatch}
             strokeLinecap="butt"
+            style={{ pointerEvents: interactive ? 'stroke' : 'none' }}
             onPointerDown={(event) => {
               if (event.pointerType === 'touch') return
               event.stopPropagation()
@@ -3713,7 +3705,7 @@ export default function FloorPlanApp() {
               }}
               style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative', ...placeFrame(engaged) }}
             >
-              {drawingWalls && (
+              {drawingWalls && draft && (
                 <DrawCursor
                   x={pointerPx?.x ?? Math.min(120, Math.max(24, (size.w || 800) * 0.28))}
                   y={pointerPx?.y ?? Math.min(96, Math.max(24, (size.h || 600) * 0.22))}
@@ -3997,7 +3989,7 @@ export default function FloorPlanApp() {
                 })}
                 </g>
                 <g opacity={workspace === 'rakenne' ? 1 : 0.32} style={{ pointerEvents: workspace === 'rakenne' ? 'auto' : 'none' }}>
-                {sheetMode !== 'site' && <FaceLines plan={plan} X={X} Y={Y} selected={pick?.kind === 'room' ? pick : null} onSelect={(face) => {
+                {sheetMode !== 'site' && <FaceLines plan={plan} X={X} Y={Y} interactive={tool === 'select'} selected={pick?.kind === 'room' ? pick : null} onSelect={(face) => {
                   setPick(face)
                   setSelectedRoom(face.id)
                   setPanel('object')
@@ -4013,6 +4005,7 @@ export default function FloorPlanApp() {
                         <DimLine
                           key={`dim-${index}-${next.wallId || 'x'}-${next.label}-${next.x1}-${next.z1}`}
                           dim={next}
+                          witnesses={extensionWitnesses(next, plan)}
                           X={X}
                           Y={Y}
                           zoom={camera.zoom || 1}
