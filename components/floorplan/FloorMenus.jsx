@@ -210,6 +210,92 @@ function HeatingSettings({ plan, onApply }) {
   )
 }
 
+const refBtn = (on) => ({
+  height: 28,
+  padding: '0 8px',
+  borderRadius: 6,
+  border: '1px solid #d6d3d1',
+  background: on ? '#134e4a' : '#fff',
+  color: on ? '#ecfdf5' : '#1c1917',
+  fontSize: 12,
+  fontWeight: 650,
+  cursor: 'pointer',
+})
+
+export function WallToolSettings({ plan, tool, onApply, wallRefMode, onRefMode, onFlip, partitions, onPartitions }) {
+  const { t, locale, num } = usePlanLocale(plan)
+  const interior = tool === 'interior'
+  const exterior = tool === 'exterior'
+  const roomish = tool === 'room' || tool === 'detect'
+  const category = interior ? 'interior' : 'exterior'
+  const role = interior ? 'interiorWall' : 'exteriorWall'
+  const structureId = interior
+    ? (plan.structures?.interiorWall || '')
+    : (plan.exteriorStructureId || plan.structures?.exteriorWall || '')
+  const partitionMm = Math.round((Number.isFinite(plan.interiorThickness) ? plan.interiorThickness : 0.12) * 1000)
+  const setStructure = (id) => {
+    const patch = assignHouseStructure(plan, role, id || null)
+    if (interior) patch.interiorThicknessCustom = false
+    onApply(refreshHeat(updateHouse(plan, patch)))
+  }
+  const setInteriorThick = (raw) => onApply(updateHouse(plan, {
+    interiorThickness: Math.max(0.04, (Number(raw) || 120) / 1000),
+    interiorThicknessCustom: true,
+  }))
+  return (
+    <div data-testid="wall-tool-settings">
+      {(exterior || interior) && (
+        <Field label={t(interior ? 'struct.defaultInterior' : 'struct.defaultExterior')}>
+          <select data-testid="tool-wall-structure" style={inputStyle} value={structureId} onChange={(event) => setStructure(event.target.value)}>
+            <option value="">{t('struct.none')}</option>
+            {structuresFor(plan, category).map((item) => (
+              <option key={item.id} value={item.id}>{text(locale, `struct.${item.id}`, item.name)} · {item.thicknessMm} mm · U {num(item.u, 2)}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {exterior && (
+        <Field label={t('house.wallThickness')}>
+          <input data-testid="tool-wall-thickness" style={inputStyle} type="number" min="80" max="600" value={Math.round((plan.exteriorThickness || 0.24) * 1000)} onChange={(event) => onApply(updateHouse(plan, { exteriorThickness: Math.max(0.05, (Number(event.target.value) || 0) / 1000) }))} />
+        </Field>
+      )}
+      {interior && (
+        <Field label={t('partition.thickness')}>
+          <input data-testid="tool-wall-thickness" style={inputStyle} type="number" min="40" max="400" value={partitionMm} onChange={(event) => setInteriorThick(event.target.value)} />
+        </Field>
+      )}
+      {(exterior || interior) && (
+        <Field label={t('wall.height')}>
+          <input data-testid="tool-wall-height" style={inputStyle} type="number" min="2200" max="8000" value={Math.round((plan.floorHeight || 2.6) * 1000)} onChange={(event) => onApply(updateHouse(plan, { floorHeight: Math.max(2.2, (Number(event.target.value) || 2600) / 1000) }))} />
+        </Field>
+      )}
+      {(exterior || interior) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+          {[
+            ['outer', t('draw.outer'), 'wall-ref-outer'],
+            ['center', t('draw.center'), 'wall-ref-center'],
+            ['inner', t('draw.inner'), 'wall-ref-inner'],
+          ].map(([id, label, testid]) => (
+            <button key={id} type="button" data-testid={testid} aria-pressed={wallRefMode === id} style={refBtn(wallRefMode === id)} onClick={() => onRefMode(id)}>{label}</button>
+          ))}
+          <button type="button" data-testid="wall-ref-flip" style={refBtn(false)} onClick={onFlip}>{t('draw.flip')}</button>
+        </div>
+      )}
+      {(exterior || roomish) && (
+        <>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 650, marginBottom: 8 }}>
+            <input data-testid="room-partitions" type="checkbox" checked={partitions} onChange={(event) => onPartitions(event.target.checked)} />
+            {t('partition.create')}
+          </label>
+          <Field label={t('partition.thickness')}>
+            <input data-testid="tool-partition-thickness" style={inputStyle} type="number" min="40" max="400" value={partitionMm} onChange={(event) => setInteriorThick(event.target.value)} />
+          </Field>
+        </>
+      )}
+    </div>
+  )
+}
+
 export function HouseSettings({ plan, onApply }) {
   const { t, num, locale } = usePlanLocale(plan)
   const scale = STANDARD_SCALES.includes(plan.drawingScale) ? plan.drawingScale : null

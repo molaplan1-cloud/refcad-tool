@@ -102,8 +102,8 @@ import { stampDemoWatermark } from '@/lib/watermark'
 import { applyDisplay, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { blockHeightForLines, dimensionFont, fitLines, LINE_LEADING, paperFont, placeDimensionText } from '@/lib/annotations'
 import { DisplayPanel } from './DisplayPanel'
-import { DoorPlaceControls, FloorMenu, HouseSettings, SelectionPanel, selectionLabel } from './FloorMenus'
-import { LibraryDialog, ProjectInfoDialog, ShellDialog, StartDialog } from './ProjectDialogs'
+import { DoorPlaceControls, FloorMenu, HouseSettings, SelectionPanel, WallToolSettings, selectionLabel } from './FloorMenus'
+import { LibraryDialog, ProjectInfoDialog, ProjectSettingsDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
 import { ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import { ModeChip, PlaceToast, modeChipText, placeFrame } from '@/components/mode/PlaceMode'
@@ -1007,6 +1007,7 @@ export default function FloorPlanApp() {
   const [poly, setPoly] = useState([])
   const [partitions, setPartitions] = useState(true)
   const [infoOpen, setInfoOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [view, setView] = useState('2d')
   const [typeAsk, setTypeAsk] = useState(false)
   const [facadeSideId, setFacadeSideId] = useState('north')
@@ -1435,10 +1436,7 @@ export default function FloorPlanApp() {
     }
     if (hit.kind === 'house') {
       remember([])
-      setPick({ kind: 'house', id: 'house' })
-      setSelectedRoom(null)
-      setSelectedFixture(null)
-      setPanel('house')
+      setSettingsOpen(true)
       return
     }
     const item = hit.kind === 'service'
@@ -2719,7 +2717,8 @@ export default function FloorPlanApp() {
     setSheetMode('plan')
     setYardTool(null)
     setYardPoints([])
-    setPanel(panel || (room ? 'object' : 'house'))
+    setPanel('object')
+    if (panel === 'house') setSettingsOpen(true)
     setReady(true)
     setStartOpen(false)
     setNewOpen(false)
@@ -2912,7 +2911,8 @@ export default function FloorPlanApp() {
       return
     }
     if (action === 'house' || action === 'focus' || action === 'properties') {
-      setPanel(action === 'house' ? 'house' : 'object')
+      if (action === 'house') setSettingsOpen(true)
+      else setPanel('object')
       setMenu(null)
       if (action === 'properties') {
         requestAnimationFrame(() => document.querySelector('[data-testid="selection-title"]')?.scrollIntoView({ block: 'nearest' }))
@@ -3213,6 +3213,11 @@ export default function FloorPlanApp() {
           onConfirm={(id) => { setInfoOpen(false); onProjectType(id) }}
         />
       )}
+      {settingsOpen && (
+        <ProjectSettingsDialog title={t('file.projectSettings')} onClose={() => setSettingsOpen(false)}>
+          <HouseSettings plan={plan} onApply={setPlan} />
+        </ProjectSettingsDialog>
+      )}
       {typeAsk && (
         <div data-testid="house-hide-ask" role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(28,25,23,0.45)', display: 'grid', placeItems: 'center', padding: 24 }}>
           <div style={{ width: 440, maxWidth: '100%', background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 16px 40px rgba(0,0,0,0.2)' }}>
@@ -3248,7 +3253,7 @@ export default function FloorPlanApp() {
         angleStep={angleStep}
         camera={camera}
         display={display}
-        panel={panel}
+        panel={settingsOpen ? 'house' : panel}
         command={command}
         svcSystem={svcSystem}
         svcKind={svcKind}
@@ -3309,7 +3314,7 @@ export default function FloorPlanApp() {
         onRedo={redoChange}
         onNew={() => { setMenu(null); setNewOpen(true) }}
         onOpen={() => { setMenu(null); setLibraryOpen(true) }}
-        onHouse={() => { setPanel('house'); setMenu(null); setDrawer('info') }}
+        onHouse={() => { setSettingsOpen(true); setMenu(null) }}
         onDisplay={() => setDisplayOpen((open) => !open)}
         onExample={loadExample}
         onFamily={loadFamily}
@@ -4539,50 +4544,32 @@ export default function FloorPlanApp() {
           style={compact ? undefined : { width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}
         >
           {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
-          {(tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || (tool === 'door' && pick?.kind !== 'door')) && panel !== 'house' && (
+          {(tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || (tool === 'door' && pick?.kind !== 'door')) && (
             <div data-testid="tool-properties" style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid #e7e5e4' }}>
               <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 8 }}>{t('panel.tool')}</div>
-              {(tool === 'room' || tool === 'detect') && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 650 }}>
-                  <input data-testid="room-partitions" type="checkbox" checked={partitions} onChange={(event) => setPartitions(event.target.checked)} />
-                  {t('partition.create')}
-                </label>
-              )}
-              {(tool === 'exterior' || tool === 'interior') && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {[
-                    ['outer', t('draw.outer'), 'wall-ref-outer'],
-                    ['center', t('draw.center'), 'wall-ref-center'],
-                    ['inner', t('draw.inner'), 'wall-ref-inner'],
-                  ].map(([id, label, testid]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      data-testid={testid}
-                      aria-pressed={wallRefMode === id}
-                      style={{ ...statusBtn, background: wallRefMode === id ? '#134e4a' : '#fff', color: wallRefMode === id ? '#ecfdf5' : '#1c1917' }}
-                      onClick={() => setWallRefMode(id)}
-                    >{label}</button>
-                  ))}
-                  <button type="button" data-testid="wall-ref-flip" style={statusBtn} onClick={() => setRefSide((side) => (side === 'left' ? 'right' : 'left'))}>{t('draw.flip')}</button>
-                </div>
+              {(tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior') && (
+                <WallToolSettings
+                  plan={plan}
+                  tool={tool}
+                  onApply={setPlan}
+                  wallRefMode={wallRefMode}
+                  onRefMode={setWallRefMode}
+                  onFlip={() => setRefSide((side) => (side === 'left' ? 'right' : 'left'))}
+                  partitions={partitions}
+                  onPartitions={setPartitions}
+                />
               )}
               {tool === 'door' && pick?.kind !== 'door' && (
                 <DoorPlaceControls t={t} value={doorHand} onChange={setDoorHand} />
               )}
             </div>
           )}
-          {pick && panel !== 'house' ? (
+          {pick && (
             <div data-testid="panel-heading" style={{ marginBottom: 10 }}>
-              <button type="button" data-testid="panel-back-house" onClick={() => setPanel('house')} style={{ display: 'block', padding: 0, border: 'none', background: 'transparent', color: '#0f766e', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 4 }}>{t('select.back')}</button>
               <div data-testid="selection-title" style={{ fontSize: 15, fontWeight: 750 }}>{picks.length > 1 ? t('select.many', { count: picks.length }) : selectionLabel(plan, pick)}</div>
             </div>
-          ) : (
-            <button type="button" data-testid="open-house-panel" style={{ ...sideBtn(panel === 'house'), marginBottom: 10 }} onClick={() => setPanel(panel === 'house' ? 'object' : 'house')}>{t('file.projectSettings')}</button>
           )}
-          {panel === 'house' ? (
-            <HouseSettings plan={plan} onApply={setPlan} />
-          ) : (
+          {pick && (
             <SelectionPanel plan={plan} selection={pick} picks={picks} onApply={setPlan} onCommit={commit} onPatchMany={(patch) => commit(patchShared(plan, picks, patch))} onClear={() => { remember([]); setMenu(null) }} onRedrawRoute={beginRedraw} />
           )}
           {pick?.kind === 'room' && room && (

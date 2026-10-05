@@ -90,6 +90,17 @@ function workspaceTab(active) {
   }
 }
 
+function GearButton({ label, onClick, compact = false }) {
+  return (
+    <button type="button" data-testid="open-project-settings" aria-label={label} title={label} onClick={onClick} style={{ width: compact ? 44 : 28, height: compact ? 44 : 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: '1px solid #57534e', background: 'transparent', color: '#e7e5e4', cursor: 'pointer', flexShrink: 0, padding: 0 }}>
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4">
+        <circle cx="8" cy="8" r="2.1" />
+        <path d="M8 1.5v1.7M8 12.8v1.7M1.5 8h1.7M12.8 8h1.7M3.3 3.3l1.2 1.2M11.5 11.5l1.2 1.2M12.7 3.3l-1.2 1.2M4.5 11.5l-1.2 1.2" />
+      </svg>
+    </button>
+  )
+}
+
 function modeTab(active) {
   return {
     height: 26,
@@ -262,6 +273,7 @@ export default function ColdChrome({
           <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, flexShrink: 0 }}>RefCAD</Link>
           <input aria-label={t('designer.projectName')} value={name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 16, flex: 1, minWidth: 0, width: 0 }} />
           <span data-testid="project-type" style={{ fontSize: 12, fontWeight: 650, color: '#d6d3d1', whiteSpace: 'nowrap' }}>{t(`type.${projectType || 'kylmio'}.name`)}</span>
+          <GearButton compact label={t('file.projectSettings')} onClick={() => onProjectSettings?.()} />
           <LanguageSwitch className="compact-only" value={locale} onChange={setLocale} />
           <button type="button" data-testid="chrome-menu" aria-expanded={open === 'root'} onClick={() => setOpen(open === 'root' ? null : 'root')} style={{ ...modeTab(open === 'root'), minHeight: 44, minWidth: 44, padding: '0 12px' }}>{t('chrome.menu')}</button>
         </header>
@@ -294,6 +306,7 @@ export default function ColdChrome({
         <input aria-label={t('designer.projectName')} value={name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 13, width: 160 }} />
         <span data-testid="project-type" style={{ fontSize: 12, fontWeight: 650, color: '#d6d3d1', whiteSpace: 'nowrap' }}>{t(`type.${projectType || 'kylmio'}.name`)}</span>
         <span style={{ flex: 1 }} />
+        <GearButton label={t('file.projectSettings')} onClick={() => onProjectSettings?.()} />
         <div data-testid="view-tabs" style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 8, background: '#1c212b' }}>
           {views(modeTab)}
         </div>

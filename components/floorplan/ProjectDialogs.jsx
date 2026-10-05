@@ -31,7 +31,7 @@ const choiceBtn = {
   marginBottom: 8,
 }
 
-function Overlay({ testid, title, children, onClose }) {
+function Overlay({ testid, title, children, onClose, wide = false }) {
   const { t } = useLocale()
   return (
     <div
@@ -39,7 +39,7 @@ function Overlay({ testid, title, children, onClose }) {
       style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(20,24,31,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div style={{ width: 'min(440px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: '#fff', color: '#1c1917', borderRadius: 16, padding: 16, boxShadow: '0 24px 60px rgba(0,0,0,0.28)' }}>
+      <div style={{ width: wide ? 'min(560px, 100%)' : 'min(440px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: '#fff', color: '#1c1917', borderRadius: 16, padding: 16, boxShadow: '0 24px 60px rgba(0,0,0,0.28)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <div style={{ fontSize: 16, fontWeight: 800, flex: 1 }}>{title}</div>
           {onClose && (
@@ -156,6 +156,14 @@ export function ProjectInfoDialog({ projectType, onCancel, onConfirm }) {
         <button type="button" data-testid="project-type-confirm" style={{ ...choiceBtn, width: 'auto', margin: 0, background: '#0f766e', color: '#fff', border: 'none' }} onClick={() => onConfirm(next)}>{t('project.change')}</button>
         <button type="button" data-testid="project-type-cancel" style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={onCancel}>{t('projects.cancel')}</button>
       </div>
+    </Overlay>
+  )
+}
+
+export function ProjectSettingsDialog({ title, children, onClose }) {
+  return (
+    <Overlay testid="project-settings-dialog" title={title} onClose={onClose} wide>
+      {children}
     </Overlay>
   )
 }

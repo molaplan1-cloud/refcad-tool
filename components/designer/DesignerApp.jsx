@@ -8,7 +8,7 @@ import { LanguageSwitch, useLocale } from '@/components/i18n/Locale'
 import PlanView from './PlanView'
 import HeatLoadPanel from './HeatLoadPanel'
 import { ROOM_TYPES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
-import { ProjectInfoDialog } from '@/components/floorplan/ProjectDialogs'
+import { ProjectInfoDialog, ProjectSettingsDialog } from '@/components/floorplan/ProjectDialogs'
 import ColdChrome from './ColdChrome'
 import { applyProjectType } from '@/lib/projectMode'
 import { CURRENT_KEY } from '@/lib/projects'
@@ -1151,6 +1151,20 @@ export default function DesignerApp({
           onConfirm={(id) => { setInfoOpen(false); chooseProjectType(id) }}
         />
       )}
+      {settingsOpen && (
+        <ProjectSettingsDialog title={t('file.projectSettings')} onClose={() => setSettingsOpen(false)}>
+          <div data-testid="project-settings">
+            <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 6 }}>{t('designer.units')}</div>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              <button type="button" data-testid="unit-si" aria-pressed={unitSystem === 'SI'} onClick={() => setUnitSystem('SI')} style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid #d6d3d1', background: unitSystem === 'SI' ? '#134e4a' : '#fff', color: unitSystem === 'SI' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>SI</button>
+              <button type="button" data-testid="unit-ip" aria-pressed={unitSystem === 'IP'} onClick={() => setUnitSystem('IP')} style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid #d6d3d1', background: unitSystem === 'IP' ? '#134e4a' : '#fff', color: unitSystem === 'IP' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>IP</button>
+            </div>
+            <button type="button" data-testid="grid-size" onClick={() => setGridSize((g) => (g === 0.1 ? 0.25 : g === 0.25 ? 0.5 : 0.1))} style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff', color: '#44403c', fontSize: 12, cursor: 'pointer' }}>
+              {t('designer.grid', { size: snapOn ? `${gridSize} m` : t('designer.gridOff') })}
+            </button>
+          </div>
+        </ProjectSettingsDialog>
+      )}
       <ColdChrome
         t={t}
         locale={locale}
@@ -1188,7 +1202,7 @@ export default function DesignerApp({
         onJson={exportJson}
         onImport={() => fileRef.current?.click()}
         onProjectInfo={() => setInfoOpen(true)}
-        onProjectSettings={() => { setSettingsOpen(true); setDrawer('info') }}
+        onProjectSettings={() => setSettingsOpen(true)}
         settingsOpen={settingsOpen}
         user={user}
         cad={cad}
@@ -1305,11 +1319,30 @@ export default function DesignerApp({
                   </button>
                 </div>
               )}
+              {coldTab === 'structure' && (
+                <div data-testid="panel-library" style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, color: '#a8a29e', margin: '2px 4px 4px', fontWeight: 700, letterSpacing: 0.4 }}>{t('cold.panels')}</div>
+                  <div style={{ fontSize: 11, color: '#44403c', margin: '0 4px', lineHeight: 1.45 }}>
+                    <div>{t('cold.panelLine', { count: panels.count, net: panels.net.toFixed(1) })}</div>
+                    <div>{t('cold.sharedLine', { count: panels.shared })}</div>
+                  </div>
+                  {panels.count === 0 && <div data-testid="panel-library-empty" style={{ fontSize: 11, color: '#78716c', margin: '4px', lineHeight: 1.4 }}>{t('cold.panelsEmpty')}</div>}
+                  {panels.panels.map((panel) => (
+                    <div key={panel.id} data-testid="panel-library-row" style={{ fontSize: 11, color: '#44403c', margin: '2px 4px' }}>
+                      {t('cold.panelItem', {
+                        length: Math.round((panel.b - panel.a) * 1000),
+                        height: Math.round((panel.y1 - panel.y0) * 1000),
+                        thick: Math.round((panel.thickness || 0) * 1000),
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
               {TEMPLATE_GROUPS.filter((group) => ({ structure: ['column', 'rack'], doors: ['door'], cooling: ['evaporator', 'condenser', 'combo', 'compressor'], electric: ['sensor'] }[coldTab] || []).includes(group.id)).map((group) => {
                 const items = templatesForGroup(group.id, roomResult ? roomResult.total / 1000 : null, { showAll: showAllSizes || !roomResult, room: selectedRoom, rooms })
                 if (!items.length) return null
                 return (
-                <div key={group.id} style={{ marginBottom: 8 }}>
+                <div key={group.id} data-testid={`library-${group.id}`} style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 10, color: '#a8a29e', margin: '2px 4px 4px', fontWeight: 700, letterSpacing: 0.4 }}>{t(`cold.group.${group.id}`)}</div>
                   {items.map((item) => (
                     <button
@@ -1420,18 +1453,6 @@ export default function DesignerApp({
           style={compact ? undefined : { width: 340, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #e7e5e4' }}
         >
           {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
-          <button type="button" data-testid="open-project-settings" onClick={() => setSettingsOpen((open) => !open)} style={{ display: 'block', width: '100%', textAlign: 'left', margin: '8px 8px 0', padding: '8px 10px', borderRadius: 8, border: '1px solid #e7e5e4', background: settingsOpen ? '#f0fdfa' : '#fff', fontWeight: 700, cursor: 'pointer' }}>{t('file.projectSettings')}</button>
-          {settingsOpen && (
-            <div data-testid="project-settings" style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                <button type="button" data-testid="unit-si" aria-pressed={unitSystem === 'SI'} onClick={() => setUnitSystem('SI')} style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid #d6d3d1', background: unitSystem === 'SI' ? '#134e4a' : '#fff', color: unitSystem === 'SI' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>SI</button>
-                <button type="button" data-testid="unit-ip" aria-pressed={unitSystem === 'IP'} onClick={() => setUnitSystem('IP')} style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid #d6d3d1', background: unitSystem === 'IP' ? '#134e4a' : '#fff', color: unitSystem === 'IP' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>IP</button>
-              </div>
-              <button type="button" data-testid="grid-size" onClick={() => setGridSize((g) => (g === 0.1 ? 0.25 : g === 0.25 ? 0.5 : 0.1))} style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff', color: '#44403c', fontSize: 12, cursor: 'pointer' }}>
-                {t('designer.grid', { size: snapOn ? `${gridSize} m` : t('designer.gridOff') })}
-              </button>
-            </div>
-          )}
           {(tool === 'draw' || tool === 'polygon' || tool === 'pipe' || tool === 'cable') && (
             <div data-testid="tool-properties" style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
               <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 8 }}>{t('panel.tool')}</div>
