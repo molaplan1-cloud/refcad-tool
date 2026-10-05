@@ -1396,7 +1396,7 @@ export default function FloorPlanApp() {
       setCommand(null)
       return
     }
-    const next = runCommand(originPlan.current, picks, active, point)
+    const next = runCommand(originPlan.current, picks, { ...active, ortho: angleStep === 90 && !shiftRef.current }, point)
     history.current = [...history.current, originPlan.current].slice(-40)
     redo.current = []
     originPlan.current = null
@@ -1579,7 +1579,7 @@ export default function FloorPlanApp() {
     }
     const active = commandRef.current
     if (active?.step === 'to' && originPlan.current && active.name !== 'measure') {
-      setPlan(runCommand(originPlan.current, picks, active, snappedPoint(world)))
+      setPlan(runCommand(originPlan.current, picks, { ...active, ortho: angleStep === 90 && !shiftRef.current }, snappedPoint(world)))
     } else if (active?.name === 'measure' && active.step === 'to') {
       setCommand((current) => (current ? { ...current, readout: measureReadout(current, world) } : current))
     }
@@ -1592,13 +1592,16 @@ export default function FloorPlanApp() {
     if (dragCorner.current) {
       const snap = altRef.current
         ? { point: world }
-        : snapPoint(world, { walls: plan.walls, grid: gridStep, radius: snapRadius(ppm2d, 14), enabled: true, ignore: dragCorner.current.from })
+        : snapPoint(world, { walls: (dragBefore.current || plan).walls, grid: gridStep, radius: snapRadius(ppm2d, 14), enabled: true, ignore: dragCorner.current.origin })
       const to = snap.point
-      if (Math.hypot(to.x - dragCorner.current.from.x, to.z - dragCorner.current.from.z) > 0.001) {
+      const origin = dragCorner.current.origin
+      if (Math.hypot(to.x - origin.x, to.z - origin.z) > 0.001) {
         dragCorner.current.moved = true
-        const from = dragCorner.current.from
-        dragCorner.current.from = { x: to.x, z: to.z }
-        setPlan((current) => moveCorner(current, from, to))
+        const base = dragBefore.current || plan
+        setPlan(moveCorner(base, origin, to, { free: shiftRef.current || angleStep === 0 }))
+      } else if (dragCorner.current.moved && dragBefore.current) {
+        dragCorner.current.moved = false
+        setPlan(dragBefore.current)
       }
     }
     if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z, radius))
@@ -2123,7 +2126,7 @@ export default function FloorPlanApp() {
     const yardHit = workspace === 'piha' && sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
     const corner = workspace === 'rakenne' ? nearestEndpoint(plan.walls, world, snapRadius(ppm2d, 14)) : null
     if (corner && !yardHit) {
-      dragCorner.current = { from: { x: corner.x, z: corner.z }, moved: false }
+      dragCorner.current = { origin: { x: corner.x, z: corner.z }, moved: false }
       dragBefore.current = plan
       choose({ kind: 'corner', id: 'corner', at: { x: corner.x, z: corner.z } })
       return
@@ -3273,7 +3276,7 @@ export default function FloorPlanApp() {
                     const next = { ...current, ...patch }
                     commandRef.current = next
                     if (next.step === 'to' && originPlan.current && cursor && next.name !== 'measure') {
-                      setPlan(runCommand(originPlan.current, picks, next, snappedPoint(cursor)))
+                      setPlan(runCommand(originPlan.current, picks, { ...next, ortho: angleStep === 90 && !shiftRef.current }, snappedPoint(cursor)))
                     }
                     return next
                   })
