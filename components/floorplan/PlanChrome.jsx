@@ -67,13 +67,24 @@ const selectStyle = {
   flexShrink: 0,
 }
 
-function Menu({ id, label, open, setOpen, children }) {
+function Menu({ id, label, open, setOpen, children, dock = false }) {
   const shown = open === id
+  const button = (
+    <button type="button" aria-expanded={shown} onClick={() => setOpen(shown ? null : id)} style={{ height: dock ? 44 : 28, minHeight: dock ? 44 : undefined, width: dock ? '100%' : undefined, textAlign: dock ? 'left' : undefined, padding: '0 10px', border: 'none', borderRadius: 6, background: shown ? '#e7e5e4' : 'transparent', color: '#1c1917', fontSize: 13, fontWeight: 650, cursor: 'pointer' }}>
+      {label}
+    </button>
+  )
+  if (dock) {
+    return (
+      <div>
+        {button}
+        <div style={{ display: shown ? 'flex' : 'none', flexDirection: 'column', gap: 2, padding: '0 0 8px 8px' }}>{children}</div>
+      </div>
+    )
+  }
   return (
     <div style={{ position: 'relative', flexShrink: 0 }} onMouseEnter={() => setOpen(id)} onMouseLeave={() => setOpen((current) => (current === id ? null : current))}>
-      <button type="button" aria-expanded={shown} onClick={() => setOpen(shown ? null : id)} style={{ height: 28, padding: '0 10px', border: 'none', borderRadius: 6, background: shown ? '#e7e5e4' : 'transparent', color: '#1c1917', fontSize: 13, fontWeight: 650, cursor: 'pointer' }}>
-        {label}
-      </button>
+      {button}
       <div style={{ display: shown ? 'flex' : 'none', position: 'absolute', top: '100%', left: 0, zIndex: 50, minWidth: 220, maxHeight: 420, overflowY: 'auto', flexDirection: 'column', gap: 2, padding: 6, background: '#fff', border: '1px solid #d6d3d1', borderRadius: 8, boxShadow: '0 12px 28px rgba(28,25,23,0.16)' }}>
         {children}
       </div>
@@ -118,6 +129,9 @@ export function PlanChrome({
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
   doorHand = { swing: 1, inward: false, doorStyle: 'hinged', slideMount: 'pocket', panels: 1 }, onDoorHand,
   access = null,
+  compact = false,
+  toolsOpen = false,
+  onToggleTools,
 }) {
   const [open, setOpen] = useState(null)
   const close = () => setOpen(null)
@@ -208,6 +222,112 @@ export function PlanChrome({
       <button type="button" data-testid="zoom-fit" title={t('snap.fitTitle')} style={rib(false)} onClick={onZoomFit}>{t('snap.fit')}</button>
     </>
   )
+
+  const hit = (active) => ({ ...toolStyle(active), height: 44, minHeight: 44, minWidth: 44 })
+  const menus = (dock) => (
+    <>
+      <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen} dock={dock}>
+        <button type="button" data-testid="plan-new" style={menuItem(false)} onClick={() => { close(); onNew() }}>{t('file.new')}</button>
+        <button type="button" data-testid="plan-open" style={menuItem(false)} onClick={() => { close(); onOpen() }}>{t('file.open')}</button>
+        <button type="button" data-testid="house-settings" style={menuItem(panel === 'house')} onClick={() => { close(); onHouse() }}>{t('file.house')}</button>
+        <button type="button" data-testid="example-house" style={menuItem(false)} onClick={() => { close(); onExample() }}>{t('file.example')}</button>
+        <button type="button" data-testid="family-house" style={menuItem(false)} onClick={() => { close(); onFamily() }}>{t('file.apartment')}</button>
+      </Menu>
+      <Menu id="edit" label={t('menu.edit')} open={open} setOpen={setOpen} dock={dock}>
+        <button type="button" data-testid="undo" title={t('edit.undo')} style={menuItem(false)} onClick={() => { close(); onUndo() }}>{t('edit.undo')}</button>
+        <button type="button" data-testid="redo" title={t('edit.redo')} style={menuItem(false)} onClick={() => { close(); onRedo() }}>{t('edit.redo')}</button>
+        <button type="button" data-testid="cleanup-duplicates" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>Siivoa päällekkäiset</button>
+        <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>Poista automaattisesti lisätyt</button>
+        <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>Suorista seinät</button>
+      </Menu>
+      <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen} dock={dock}>
+        <button type="button" data-testid="open-display" style={menuItem(false)} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
+        <button type="button" data-testid="toolbar-preset-plain" title={`${t('preset.plain')} (Alt+1)`} style={menuItem(display.preset === 'plain')} onClick={() => { close(); onPreset('plain') }}>{t('preset.plain')}</button>
+        <button type="button" data-testid="toolbar-preset-measure" title={`${t('preset.measure')} (Alt+2)`} style={menuItem(display.preset === 'measure')} onClick={() => { close(); onPreset('measure') }}>{t('preset.measure')}</button>
+        <button type="button" data-testid="toolbar-preset-all" title={`${t('preset.all')} (Alt+3)`} style={menuItem(display.preset === 'all')} onClick={() => { close(); onPreset('all') }}>{t('preset.all')}</button>
+      </Menu>
+      <Menu id="print" label={t('menu.print')} open={open} setOpen={setOpen} dock={dock}>
+        <button type="button" data-testid="export-floor-pdf" style={menuItem(false)} onClick={() => { close(); onPdf() }}>PDF</button>
+        <button type="button" data-testid="export-site-pdf" style={menuItem(false)} onClick={() => { close(); onServicePdf('site') }}>{t('file.sitePdf')}</button>
+        <button type="button" data-testid="export-floor-png" style={menuItem(false)} onClick={() => { close(); onServicePdf('png') }}>PNG</button>
+        {SERVICE_SYSTEMS.map((item) => (
+          <button key={`pdf-${item.id}`} type="button" data-testid={`service-pdf-${item.id}`} style={menuItem(false)} onClick={() => { close(); onServicePdf(item.id) }}>{item.name} PDF</button>
+        ))}
+      </Menu>
+    </>
+  )
+
+  if (compact) {
+    return (
+      <div data-testid="plan-chrome" className={`plan-chrome${toolsOpen ? ' tools-open' : ''}`} style={{ flexShrink: 0, background: '#14181f', paddingTop: 'env(safe-area-inset-top)' }}>
+        <header className="plan-chrome-header" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 48, padding: '4px 8px', paddingLeft: 'max(8px, env(safe-area-inset-left))', paddingRight: 'max(8px, env(safe-area-inset-right))' }}>
+          <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, flexShrink: 0 }}>RefCAD</Link>
+          <input aria-label={t('app.drawingName')} value={plan.name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 16, flex: 1, minWidth: 0, width: 0 }} />
+          <button type="button" data-testid="chrome-menu" aria-expanded={open === 'root'} onClick={() => setOpen(open === 'root' ? null : 'root')} style={{ ...modeTab(open === 'root'), minHeight: 44, minWidth: 44, padding: '0 12px' }}>Valikko</button>
+        </header>
+        <div className="workspace-scroll view-tabs" data-testid="view-tabs" style={{ background: '#14181f' }}>
+          <button type="button" data-testid="view-floor-2d" style={{ ...modeTab(mode === 'plan'), minHeight: 44 }} onClick={() => onMode('plan')}>{t('mode.plan')}</button>
+          <button type="button" data-testid="view-site" disabled={access && !access.workspaces.includes('piha')} style={{ ...modeTab(mode === 'site'), minHeight: 44 }} onClick={() => { if (!access || access.workspaces.includes('piha')) onMode('site') }}>{t('view.site')}</button>
+          <button type="button" data-testid="view-floor-3d" style={{ ...modeTab(mode === '3d'), minHeight: 44 }} onClick={() => onMode('3d')}>3D</button>
+          <button type="button" data-testid="view-facade" style={{ ...modeTab(mode === 'facade'), minHeight: 44 }} onClick={() => onMode('facade')}>{t('view.facade')}</button>
+        </div>
+        <div className="workspace-scroll" data-testid="workspace-tabs" style={{ background: '#1c212b' }}>
+          {WORKSPACES.map((item) => {
+            const allowed = !access || access.workspaces.includes(item.id)
+            return (
+              <button key={item.id} type="button" data-testid={`workspace-${item.id}`} aria-pressed={workspace === item.id} disabled={!allowed} style={{ ...workspaceTab(workspace === item.id), minHeight: 44, opacity: allowed ? 1 : 0.4 }} onClick={() => { if (allowed) onWorkspace?.(item.id) }}>
+                {item.name}
+              </button>
+            )
+          })}
+          {access?.workspaces.includes('kylma') && (
+            <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), minHeight: 44, display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}>Kylmätekniikka</a>
+          )}
+        </div>
+        {open === 'root' && (
+          <div className="compact-menu" data-testid="chrome-menu-panel" style={{ background: '#fff', color: '#1c1917', maxHeight: '46vh', overflow: 'auto', padding: 8 }}>
+            {menus(true)}
+            <div style={{ display: 'flex', gap: 8, padding: '8px 0' }}>
+              <button type="button" style={hit(plan.paper !== 'a4')} onClick={() => onPaper('a3')}>A3</button>
+              <button type="button" style={hit(plan.paper === 'a4')} onClick={() => onPaper('a4')}>A4</button>
+            </div>
+            <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
+          </div>
+        )}
+        {toolsOpen && mode !== 'facade' && (
+          <div className="tool-sheet" data-testid="tool-sheet">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              {workspace === 'rakenne' && (onPlan || mode === '3d') && drawTools(hit)}
+              {workspace === 'kalusteet' && (
+                <>
+                  <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={hit(selectOn)} onClick={() => onTool('select')}>{t('tool.select')}</button>
+                  <button type="button" data-testid="repeat-place" aria-pressed={repeat} style={hit(repeat)} onClick={() => onRepeat?.(!repeat)}>Toista</button>
+                </>
+              )}
+              {workspace === 'piha' && yardTools(hit)}
+              {workspaceSystems(workspace).length > 0 && (
+                <>
+                  <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={hit(selectOn)} onClick={() => onTool('select')}>{t('tool.select')}</button>
+                  {PLACEABLES.filter((item) => workspaceSystems(workspace).includes(item.system) && item.mode === 'node').map((item) => (
+                    <button key={item.id} type="button" data-testid={`device-${item.id}`} style={hit(svcTool === 'node' && svcKind === item.id)} onClick={() => onPlaceDevice?.(item)}>{item.name}</button>
+                  ))}
+                  <button type="button" data-testid="route-services" style={hit(false)} onClick={() => onRoute()}>Reititä automaattisesti</button>
+                  <button type="button" data-testid="suggest-equipment" style={hit(ghostCount > 0)} onClick={() => onSuggest?.()}>Ehdota laitteet</button>
+                </>
+              )}
+              {tool === 'door' && <DoorPlaceControls compact t={t} value={doorHand} onChange={(next) => onDoorHand?.(next)} />}
+              {snapTools}
+              {zoomTools}
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <CadToolbar active={command?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onCadLayer} />
+            </div>
+            <button type="button" data-testid="close-tools" onClick={() => onToggleTools?.()} style={{ ...hit(false), marginTop: 8 }}>Sulje työkalut</button>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div data-testid="plan-chrome" style={{ flexShrink: 0 }}>

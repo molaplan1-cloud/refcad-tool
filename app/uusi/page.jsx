@@ -36,13 +36,13 @@ export default function TypePage() {
 
   return (
     <div data-testid="type-picker" style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 28px' }}>
+      <header className="picker-header safe-page" style={{ paddingTop: 'calc(18px + env(safe-area-inset-top))' }}>
         <Link href="/" style={{ fontWeight: 800, color: '#0f172a', textDecoration: 'none' }}>RefCAD</Link>
         <Link href={access.admin ? '/admin' : '/login'} style={{ color: '#0369a1', textDecoration: 'none' }}>{access.admin ? 'Ylläpito' : user ? user.email : 'Kirjaudu'}</Link>
       </header>
       <main style={{ maxWidth: 1080, margin: '0 auto', padding: '12px 24px 64px' }}>
         <p style={{ letterSpacing: '0.14em', textTransform: 'uppercase', fontSize: 12, color: '#0369a1', fontWeight: 700 }}>Uusi hanke</p>
-        <h1 style={{ fontSize: 40, lineHeight: 1.1, margin: '8px 0 12px' }}>Valitse, mitä suunnittelet</h1>
+        <h1 className="picker-title" style={{ fontSize: 40, lineHeight: 1.1, margin: '8px 0 12px' }}>Valitse, mitä suunnittelet</h1>
         <p style={{ maxWidth: 640, color: '#475569', fontSize: 17, lineHeight: 1.5 }}>
           Tyyppi asettaa oletukset, avoimet työtilat ja kirjastot. Ilmainen versio piirtää pohjakuvan. Sähkö, LVI, IV, piha ja kylmätekniikka avautuvat, kun maksu on kuitattu.
         </p>
@@ -54,7 +54,7 @@ export default function TypePage() {
         {access.admin && (
           <p data-testid="admin-no-draw" style={{ marginTop: 16 }}>Ylläpitäjä ei piirrä. Käyttäjät ja maksut ovat ylläpitonäkymässä.</p>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginTop: 28 }}>
+        <div className="picker-grid" style={{ marginTop: 28 }}>
           {PROJECT_TYPES.map((type) => {
             const allowed = loaded && canStartType(accessFor(user, type.id), type)
             return (

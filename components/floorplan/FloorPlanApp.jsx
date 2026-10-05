@@ -193,7 +193,9 @@ import {
   wallShiftMetres,
 } from '@/lib/tracking'
 import { WORKSPACES, applyWorkspaceSwitch, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
-import { FIT_CAMERA, fitRect, panBy, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
+import { FIT_CAMERA, fitRect, panBy, pinchZoom, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
+import { touchAction } from '@/lib/touch'
+import { useViewport } from '@/components/useViewport'
 import { LanguageSwitch, usePlanLocale } from '@/components/i18n/Locale'
 import { wallBearing } from '@/lib/orientation'
 import { text } from '@/lib/i18n'
@@ -407,6 +409,7 @@ function TempDim({ dim, X, Y, zoom, editing, onEdit, onChange, onCommit, onCance
             data-testid="temp-dim-label"
             style={{ cursor: 'text' }}
             onPointerDown={(event) => {
+              if (event.pointerType === 'touch') return
               event.stopPropagation()
               event.preventDefault()
               onEdit(dim)
@@ -717,6 +720,7 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
             strokeDasharray={hatch}
             strokeLinecap="butt"
             onPointerDown={(event) => {
+              if (event.pointerType === 'touch') return
               event.stopPropagation()
               event.preventDefault()
               onSelect({ kind: 'room', id: room.id, wallId: edge.wallId, side })
@@ -937,6 +941,10 @@ export default function FloorPlanApp() {
   const [fitToken, setFitToken] = useState(1)
   const [size, setSize] = useState({ w: 960, h: 680 })
   const [camera, setCamera] = useState(FIT_CAMERA)
+  const { compact } = useViewport()
+  const [hand, setHand] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [drawer, setDrawer] = useState(null)
   const [gridStep, setGridStep] = useState(0.1)
   const [angleStep, setAngleStep] = useState(90)
   const [drawGuide, setDrawGuide] = useState(null)
@@ -968,6 +976,13 @@ export default function FloorPlanApp() {
   const hostRef = useRef(null)
   const svgRef = useRef(null)
   const panRef = useRef(null)
+  const pointers = useRef(new Map())
+  const pinchRef = useRef(null)
+  const armTouch = useRef(null)
+  const handRef = useRef(false)
+  const drawingTouchRef = useRef(false)
+  const cameraRef = useRef(camera)
+  cameraRef.current = camera
   const dragGrab = useRef(null)
   const spaceRef = useRef(false)
   const lastPlace = useRef(null)
@@ -1058,8 +1073,9 @@ export default function FloorPlanApp() {
     if (!node) return undefined
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0].contentRect
-      const w = Math.max(320, rect.width)
-      const h = Math.max(240, rect.height)
+      const w = Math.round(rect.width)
+      const h = Math.round(rect.height)
+      if (w < 40 || h < 40) return
       setSize((prev) => (Math.abs(prev.w - w) < 1 && Math.abs(prev.h - h) < 1 ? prev : { w, h }))
     })
     observer.observe(node)
@@ -1102,15 +1118,16 @@ export default function FloorPlanApp() {
     if (!ready || view !== '2d') return
     const node = hostRef.current
     if (!node || node.clientWidth < 80 || node.clientHeight < 80) return
-    const w = Math.max(320, Math.round(node.clientWidth))
-    const h = Math.max(240, Math.round(node.clientHeight))
+    const w = Math.round(node.clientWidth)
+    const h = Math.round(node.clientHeight)
     if (Math.abs(size.w - w) > 2 || Math.abs(size.h - h) > 2) {
       setSize({ w, h })
       return
     }
     const req = fitRequest.current
-    if (fittedToken.current != null && fittedToken.current === req.token) return
-    fittedToken.current = req.token
+    const key = `${req.token}:${w}x${h}`
+    if (fittedToken.current === key) return
+    fittedToken.current = key
     setCamera(cameraForBuilding(req.plan || plan, req.plan ? req.mode : sheetMode, { w, h }))
   }, [ready, view, fitTick, size, plan, sheetMode])
 
@@ -1446,8 +1463,82 @@ export default function FloorPlanApp() {
     if (point.kind !== 'canvas') choose(point)
   }
 
+  handRef.current = hand
+  drawingTouchRef.current = Boolean(placing || svcTool || yardTool || (tool && tool !== 'select'))
+
+  const beginTouch = (event) => {
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    try { event.currentTarget?.setPointerCapture?.(event.pointerId) } catch { /* synthetic pointers have no capture */ }
+    if (pointers.current.size >= 2) {
+      const rect = event.currentTarget.getBoundingClientRect()
+      const pts = [...pointers.current.values()].map((point) => ({ x: point.x - rect.left, y: point.y - rect.top }))
+      pinchRef.current = { a: pts[0], b: pts[1], camera: cameraRef.current }
+      panRef.current = null
+      if (armTouch.current?.timer) window.clearTimeout(armTouch.current.timer)
+      armTouch.current = null
+      return
+    }
+    const drawing = drawingTouchRef.current
+    const arm = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, long: false, drawing, timer: 0 }
+    armTouch.current = arm
+    if (drawing && !handRef.current) {
+      arm.timer = window.setTimeout(() => {
+        if (!armTouch.current || armTouch.current !== arm || arm.moved) return
+        arm.long = true
+        panRef.current = { x: arm.x, y: arm.y, moved: false, button: 0 }
+      }, 480)
+    }
+  }
+
+  const endTouch = (event) => {
+    pointers.current.delete(event.pointerId)
+    const fingersLeft = pointers.current.size
+    if (fingersLeft < 1) pinchRef.current = null
+    const arm = armTouch.current
+    if (arm?.timer) window.clearTimeout(arm.timer)
+    const tap = arm && arm.id === event.pointerId && fingersLeft === 0 && touchAction({
+      pointerType: 'touch',
+      hand: handRef.current,
+      drawing: arm.drawing,
+      moved: arm.moved,
+      longPress: arm.long,
+    }) === 'tap'
+    if (arm?.id === event.pointerId) armTouch.current = null
+    panRef.current = null
+    return tap
+  }
+
   const onPointerMove = (event) => {
     if (view !== '2d' || !svgRef.current) return
+    if (event.pointerType === 'touch') {
+      if (event.nativeEvent?.__refcadMove && event.eventPhase !== 1) return
+      if (event.nativeEvent) event.nativeEvent.__refcadMove = true
+      if (pointers.current.has(event.pointerId)) {
+        pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+      }
+      if (pointers.current.size >= 2 && pinchRef.current) {
+        const rect = event.currentTarget.getBoundingClientRect()
+        const pts = [...pointers.current.values()].map((point) => ({ x: point.x - rect.left, y: point.y - rect.top }))
+        setCamera(pinchZoom(pinchRef.current.camera, pinchRef.current, { a: pts[0], b: pts[1] }))
+        return
+      }
+      const arm = armTouch.current
+      if (arm && arm.id === event.pointerId) {
+        if (Math.hypot(event.clientX - arm.x, event.clientY - arm.y) > 8) {
+          arm.moved = true
+          if (arm.timer) {
+            window.clearTimeout(arm.timer)
+            arm.timer = 0
+          }
+          const action = touchAction({ pointerType: 'touch', hand: handRef.current, drawing: arm.drawing, moved: true, longPress: arm.long })
+          if (action === 'pan' && !panRef.current) {
+            panRef.current = { x: arm.x, y: arm.y, moved: false, button: 0 }
+          }
+        }
+        const action = touchAction({ pointerType: 'touch', hand: handRef.current, drawing: arm.drawing, moved: arm.moved, longPress: arm.long })
+        if (action !== 'pan') return
+      }
+    }
     if (panRef.current) {
       const dx = event.clientX - panRef.current.x
       const dy = event.clientY - panRef.current.y
@@ -1526,7 +1617,25 @@ export default function FloorPlanApp() {
     }
   }
 
-  const onPointerUp = () => {
+  const onPointerUp = (event) => {
+    if (event?.pointerType === 'touch') {
+      if (event.nativeEvent?.__refcadUp && event.eventPhase !== 1) return
+      if (event.nativeEvent) event.nativeEvent.__refcadUp = true
+      const tap = endTouch(event)
+      if (!tap) return
+      onPointerDown({
+        pointerType: 'mouse',
+        button: 0,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        detail: 1,
+        preventDefault() {},
+        currentTarget: event.currentTarget,
+      })
+    }
     if (pending.current?.stretch && pending.current.box) {
       const box = pending.current.box
       const hits = targetsInBox(plan, box)
@@ -1914,6 +2023,12 @@ export default function FloorPlanApp() {
 
   const onPointerDown = (event) => {
     if (view !== '2d') return
+    if (event.pointerType === 'touch') {
+      if (event.nativeEvent?.__refcadTouch && event.eventPhase !== 1) return
+      if (event.nativeEvent) event.nativeEvent.__refcadTouch = true
+      beginTouch(event)
+      return
+    }
     if (event.button === 1 || (event.button === 0 && spaceRef.current)) {
       beginPan(event)
       return
@@ -2719,7 +2834,7 @@ export default function FloorPlanApp() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
+    <div className="plan-app" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
       {access.pending && (
         <div data-testid="payment-pending" style={{ background: '#fff7ed', color: '#9a3412', textAlign: 'center', padding: '8px 12px', fontWeight: 700 }}>
           Odottaa maksun vahvistusta
@@ -2773,6 +2888,7 @@ export default function FloorPlanApp() {
             exitToSelect()
             return
           }
+          setHand(false)
           setTool(next)
           setPlacing(null)
           setSvcTool(null)
@@ -2782,17 +2898,19 @@ export default function FloorPlanApp() {
         }}
         onRoomRect={() => {
           if (tool === 'room' && roomShape === 'rect') { exitToSelect(); return }
+          setHand(false)
           setTool('room'); setRoomShape('rect'); setPlacing(null); setSvcTool(null); setYardTool(null); setPoly([])
         }}
         onRoomPoly={() => {
           if (tool === 'room' && roomShape === 'poly') { exitToSelect(); return }
+          setHand(false)
           setTool('room'); setRoomShape('poly'); setPlacing(null); setSvcTool(null); setYardTool(null); setDraft(null)
         }}
         onUndo={undo}
         onRedo={redoChange}
         onNew={() => { setMenu(null); setNewOpen(true) }}
         onOpen={() => { setMenu(null); setLibraryOpen(true) }}
-        onHouse={() => { setPanel('house'); setMenu(null) }}
+        onHouse={() => { setPanel('house'); setMenu(null); setDrawer('info') }}
         onDisplay={() => setDisplayOpen((open) => !open)}
         onPreset={(preset) => setDisplay({ preset })}
         onExample={loadExample}
@@ -2802,6 +2920,7 @@ export default function FloorPlanApp() {
         onCloseRoom={() => closeRoom(poly)}
         onYardTool={(id) => {
           if (!id || id === yardTool) { exitToSelect(); return }
+          setHand(false)
           setYardTool(id); setTool('select'); setPlacing(null); setSvcTool(null); setYardPoints([])
         }}
         onNorth={(north) => commit(updateYardItem(plan, 'north', 'north', { north }))}
@@ -2828,6 +2947,7 @@ export default function FloorPlanApp() {
         onKind={setSvcKind}
         onSvcTool={(next) => {
           if (!next || next === svcTool) { exitToSelect(); return }
+          setHand(false)
           setSvcTool(next)
           setTool('select')
           setPlacing(null)
@@ -2890,6 +3010,7 @@ export default function FloorPlanApp() {
         }}
         onPlaceDevice={(item) => {
           if (!item) return
+          setHand(false)
           const mode = item.drawing || item.mode === 'run' ? 'run' : 'node'
           if (svcTool === mode && svcKind === item.id) { exitToSelect(); return }
           setSvcSystem(item.system)
@@ -2962,6 +3083,9 @@ export default function FloorPlanApp() {
           const doc = id === 'electric' ? buildElectricPdf(plan) : id === 'heat' || id === 'water' ? buildHydronicPdf(plan) : buildServicePdf(plan, id)
           savePdf(doc, `${(plan.name || 'talotekniikka').replace(/\s+/g, '-')}-${id}.pdf`)
         }}
+        compact={compact}
+        toolsOpen={toolsOpen}
+        onToggleTools={() => setToolsOpen((open) => !open)}
         onCommand={beginCommand}
         onSelectType={(type) => remember(targetsByType(plan, type))}
         onCadLayer={(layer) => beginCommand('layer', layer)}
@@ -2989,8 +3113,17 @@ export default function FloorPlanApp() {
         }}
       />
 
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <aside style={{ width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}>
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
+        {compact && drawer && (
+          <button type="button" className="drawer-backdrop" data-testid="drawer-backdrop" aria-label="Sulje tiedot" onClick={() => setDrawer(null)} />
+        )}
+        <aside
+          className="plan-drawer"
+          data-testid="plan-side"
+          data-open={compact && drawer === 'library' ? 'true' : 'false'}
+          style={compact ? undefined : { width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}
+        >
+          {compact && <button type="button" data-testid="close-drawer" onClick={() => setDrawer(null)}>Sulje</button>}
           <div data-testid="workspace-side-title" style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.4, color: '#0f766e', margin: '0 4px 8px' }}>{workspaceName}</div>
           {workspace === 'rakenne' && (
             <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Seinät, huoneet, ovet, ikkunat, katto ja rakenteet. Muut tasot ovat himmennettyjä ja lukittuja.</p>
@@ -3024,6 +3157,7 @@ export default function FloorPlanApp() {
                   if (svcTool === 'node' && svcKind === item.id) { exitToSelect(); return }
                   setSvcSystem(item.system)
                   setSvcKind(item.id)
+                  setHand(false)
                   setSvcTool('node')
                   setTool('select')
                   setPlacing(null)
@@ -3069,6 +3203,7 @@ export default function FloorPlanApp() {
                   }}
                   onClick={() => {
                     if (placing === item.id) { exitToSelect(); return }
+                    setHand(false)
                     setPlacing(item.id); setTool('select'); setSvcTool(null); setYardTool(null); setDraft(null)
                   }}
                 >
@@ -3095,6 +3230,7 @@ export default function FloorPlanApp() {
                   }}
                   onClick={() => {
                     if (placing === item.id) { exitToSelect(); return }
+                    setHand(false)
                     setPlacing(item.id); setTool('select'); setSvcTool(null); setYardTool(null); setDraft(null)
                   }}
                 >
@@ -3126,8 +3262,8 @@ export default function FloorPlanApp() {
           )}
         </aside>
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
-          <div style={{ minHeight: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
+        <div className="plan-stage" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+          <div className="plan-status" style={{ minHeight: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4', minWidth: 0, overflow: 'hidden' }}>
             {command ? (
               <CadPrompt
                 command={command}
@@ -3215,9 +3351,12 @@ export default function FloorPlanApp() {
                 xmlns="http://www.w3.org/2000/svg"
                 width="100%"
                 height="100%"
-                onPointerMove={onPointerMove}
-                onPointerDown={onPointerDown}
-                onPointerUp={onPointerUp}
+                onPointerDownCapture={(event) => { if (event.pointerType === 'touch') onPointerDown(event) }}
+                onPointerMoveCapture={(event) => { if (event.pointerType === 'touch') onPointerMove(event) }}
+                onPointerUpCapture={(event) => { if (event.pointerType === 'touch') onPointerUp(event) }}
+                onPointerMove={(event) => { if (event.pointerType !== 'touch') onPointerMove(event) }}
+                onPointerDown={(event) => { if (event.pointerType !== 'touch') onPointerDown(event) }}
+                onPointerUp={(event) => { if (event.pointerType !== 'touch') onPointerUp(event) }}
                 onContextMenu={onContextMenu}
                 style={{ display: 'block', cursor: engaged ? 'crosshair' : 'default', touchAction: 'none' }}
               >
@@ -3344,6 +3483,7 @@ export default function FloorPlanApp() {
                       transform={`translate(${X(fixture.x)} ${Y(fixture.z)}) rotate(${fixture.rotation || 0})${fixture.mirror ? ' scale(-1 1)' : ''}`}
                       style={{ pointerEvents: workspace === 'kalusteet' && tool === 'select' && !placing && !svcTool ? 'auto' : 'none' }}
                       onPointerDown={(event) => {
+                        if (event.pointerType === 'touch') return
                         if (event.button !== 0) return
                         if (commandRef.current) return
                         event.stopPropagation()
@@ -3518,6 +3658,7 @@ export default function FloorPlanApp() {
                   data-north={ensureYard(plan).north || 0}
                   style={{ cursor: 'grab' }}
                   onPointerDown={(event) => {
+                    if (event.pointerType === 'touch') return
                     event.stopPropagation()
                     event.currentTarget.setPointerCapture(event.pointerId)
                     northDrag.current = { x: event.clientX, north: ensureYard(plan).north || 0, plan }
@@ -3679,6 +3820,7 @@ export default function FloorPlanApp() {
                     }}
                     style={{ pointerEvents: workspace === 'rakenne' && tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
                     onPointerDown={(event) => {
+                      if (event.pointerType === 'touch') return
                       if (event.button !== 0) return
                       if (commandRef.current) return
                       event.stopPropagation()
@@ -3850,9 +3992,23 @@ export default function FloorPlanApp() {
               onPrint={() => savePdf(buildHydronicPdf(plan), `${(plan.name || 'lammitys').replace(/\s+/g, '-')}-lammitys.pdf`)}
             />
           )}
+          {compact && (
+            <div className="hand-bar" data-testid="hand-bar">
+              <button type="button" data-testid="toggle-tools" aria-expanded={toolsOpen} onClick={() => setToolsOpen((open) => !open)}>Työkalut</button>
+              <button type="button" data-testid="toggle-hand" aria-pressed={hand} onClick={() => setHand((value) => !value)}>{hand ? 'Piirrä' : 'Siirrä'}</button>
+              <button type="button" data-testid="toggle-library" aria-pressed={drawer === 'library'} onClick={() => setDrawer((current) => current === 'library' ? null : 'library')}>Kirjasto</button>
+              <button type="button" data-testid="toggle-drawer" aria-pressed={drawer === 'info'} onClick={() => setDrawer((current) => current === 'info' ? null : 'info')}>Tiedot</button>
+            </div>
+          )}
         </div>
 
-        <aside data-testid="materials-panel" style={{ width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}>
+        <aside
+          data-testid="materials-panel"
+          className="plan-info"
+          data-open={compact && drawer === 'info' ? 'true' : 'false'}
+          style={compact ? undefined : { width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}
+        >
+          {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>Sulje</button>}
           {pick && panel !== 'house' ? (
             <div data-testid="panel-heading" style={{ marginBottom: 10 }}>
               <button type="button" data-testid="panel-back-house" onClick={() => setPanel('house')} style={{ display: 'block', padding: 0, border: 'none', background: 'transparent', color: '#0f766e', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 4 }}>{t('select.back')}</button>

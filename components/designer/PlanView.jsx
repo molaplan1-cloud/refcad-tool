@@ -35,6 +35,8 @@ import {
   translateOutline,
 } from '@/lib/cadDraw'
 import { panelPolygon, sharedWallPanels } from '@/lib/sharedWalls'
+import { pinchScale } from '@/lib/zoom'
+import { touchAction } from '@/lib/touch'
 
 const PAPER = '#f4f1ea'
 const INK = '#292524'
@@ -394,6 +396,7 @@ export default function PlanView({
   finishRef = null,
   onExitPlace,
   onToolMenu,
+  hand = false,
 }) {
   const hostRef = useRef(null)
   const viewRef = useRef({ scale: 36, offsetX: 480, offsetY: 320 })
@@ -407,6 +410,12 @@ export default function PlanView({
   const [spaceDown, setSpaceDown] = useState(false)
   const gesture = useRef(null)
   const autoFit = useRef(true)
+  const pointers = useRef(new Map())
+  const pinchRef = useRef(null)
+  const armRef = useRef(null)
+  const touching = useRef(false)
+  const touchMoveRef = useRef(() => {})
+  const touchUpRef = useRef(() => {})
   const typed = useRef({ field: 'w', w: '', d: '' })
   const polyTyped = useRef('')
   const polyRef = useRef([])
@@ -415,7 +424,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
-    onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu,
+    onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu, hand,
   }
 
   const setCamera = (next) => {
@@ -605,6 +614,7 @@ export default function PlanView({
 
   useEffect(() => {
     const move = (event) => {
+      if (touching.current && event.pointerType !== 'touch') return
       const host = hostRef.current
       if (!host) return
       const current = viewRef.current
@@ -798,6 +808,7 @@ export default function PlanView({
       }
     }
     const up = (event) => {
+      if (touching.current && event.pointerType !== 'touch') return
       const g = gesture.current
       gesture.current = null
       if (!g) return
@@ -852,15 +863,20 @@ export default function PlanView({
         p.onGestureEnd()
       }
     }
+    touchMoveRef.current = move
+    touchUpRef.current = up
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
     return () => {
+      touchMoveRef.current = () => {}
+      touchUpRef.current = () => {}
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
     }
   }, [])
 
   const onMouseDown = (event) => {
+    if (touching.current && !event.fromTouch) return
     const host = hostRef.current
     const world = {
       x: (event.clientX - host.getBoundingClientRect().left - view.offsetX) / view.scale,
@@ -895,6 +911,7 @@ export default function PlanView({
     }
     if (event.button !== 0) return
     const p = propsRef.current
+    const touchHand = Boolean(event.fromTouch && p.hand)
     if (p.cad && p.tool === 'select' && !p.placing) {
       if (p.cad.step === 'window' || p.cad.name === 'stretch' && p.cad.step === 'window') {
         gesture.current = { kind: 'marquee', x1: world.x, z1: world.z, stretch: true, shift: false, ctrl: false }
@@ -905,7 +922,7 @@ export default function PlanView({
     }
     const handle = event.target?.dataset?.handle
     const handleRoom = event.target?.dataset?.room
-    if (isRouteTool(p.tool)) {
+    if (!touchHand && isRouteTool(p.tool)) {
       const route = p.tool === 'pipe' || p.tool === 'cable'
       if (event.detail >= 2 && polyRef.current.length >= (route ? 2 : 4)) {
         if (route) p.onCreateRoute?.(polyRef.current)
@@ -945,7 +962,7 @@ export default function PlanView({
       setPoly([...polyRef.current, { x: point.x, z: point.z }])
       return
     }
-    if (p.tool === 'draw' || p.tool === 'partition') {
+    if (!touchHand && (p.tool === 'draw' || p.tool === 'partition')) {
       const point = snapWorld(world.x, world.z, {
         scale: view.scale,
         grid: p.snapOn ? p.gridSize : 0,
@@ -957,7 +974,7 @@ export default function PlanView({
       setDraft({ kind: 'rect', x1: point.x, z1: point.z, x2: point.x, z2: point.z })
       return
     }
-    if (p.placing) {
+    if (!touchHand && p.placing) {
       let room = hitRoom(p.rooms, world.x, world.z)
       const outdoor = ['condenser', 'unit', 'combo', 'compressor'].includes(p.placing.category)
       if (!room && outdoor) {
@@ -1084,6 +1101,133 @@ export default function PlanView({
     }
   }
 
+  const releaseTouch = (event) => {
+    if (event.pointerType !== 'touch') return
+    pointers.current.delete(event.pointerId)
+    if (pointers.current.size < 2) pinchRef.current = null
+    const arm = armRef.current
+    if (arm?.timer) window.clearTimeout(arm.timer)
+    const drawing = Boolean(arm?.drawing)
+    const tap = arm && arm.id === event.pointerId && pointers.current.size === 0 && touchAction({
+      pointerType: 'touch',
+      hand: propsRef.current.hand,
+      drawing,
+      moved: arm.moved,
+      longPress: arm.long,
+    }) === 'tap'
+    if (arm?.id === event.pointerId) armRef.current = null
+    if (tap && gesture.current?.kind !== 'draw') {
+      onMouseDown({
+        fromTouch: true,
+        button: 0,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        detail: 1,
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        preventDefault() {},
+        target: event.target,
+      })
+    }
+    touchUpRef.current(event)
+    window.setTimeout(() => {
+      if (pointers.current.size === 0) touching.current = false
+    }, 0)
+  }
+
+  const onPointerDown = (event) => {
+    if (event.pointerType !== 'touch') return
+    touching.current = true
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    try { event.currentTarget.setPointerCapture?.(event.pointerId) } catch { /* synthetic pointers have no capture */ }
+    if (pointers.current.size >= 2) {
+      const rect = event.currentTarget.getBoundingClientRect()
+      const pts = [...pointers.current.values()].map((point) => ({ x: point.x - rect.left, y: point.y - rect.top }))
+      pinchRef.current = { a: pts[0], b: pts[1], view: { ...viewRef.current } }
+      if (armRef.current?.timer) window.clearTimeout(armRef.current.timer)
+      armRef.current = null
+      gesture.current = null
+      setDraft(null)
+      return
+    }
+    const p = propsRef.current
+    const drawing = Boolean(p.placing || (p.tool && p.tool !== 'select'))
+    const dragDraw = p.tool === 'draw' || p.tool === 'partition'
+    const arm = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, long: false, drawing, timer: 0 }
+    armRef.current = arm
+    if (drawing && !p.hand) {
+      arm.timer = window.setTimeout(() => {
+        if (armRef.current !== arm || arm.moved) return
+        arm.long = true
+        gesture.current = {
+          kind: 'pan',
+          sx: arm.x,
+          sy: arm.y,
+          offsetX: viewRef.current.offsetX,
+          offsetY: viewRef.current.offsetY,
+        }
+        setDraft(null)
+      }, 480)
+    }
+    if (dragDraw && !p.hand) {
+      onMouseDown({
+        fromTouch: true,
+        button: 0,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        detail: 1,
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        preventDefault() {},
+        target: event.target,
+      })
+    }
+  }
+
+  const onPointerMove = (event) => {
+    if (event.pointerType !== 'touch') return
+    if (pointers.current.has(event.pointerId)) {
+      pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    }
+    if (pointers.current.size >= 2 && pinchRef.current) {
+      const rect = hostRef.current?.getBoundingClientRect() || { left: 0, top: 0 }
+      const pts = [...pointers.current.values()].map((point) => ({ x: point.x - rect.left, y: point.y - rect.top }))
+      autoFit.current = false
+      setCamera(pinchScale(pinchRef.current.view, pinchRef.current, { a: pts[0], b: pts[1] }))
+      gesture.current = null
+      return
+    }
+    const arm = armRef.current
+    if (arm && arm.id === event.pointerId && Math.hypot(event.clientX - arm.x, event.clientY - arm.y) > 8) {
+      arm.moved = true
+      if (arm.timer) {
+        window.clearTimeout(arm.timer)
+        arm.timer = 0
+      }
+      const p = propsRef.current
+      const action = touchAction({
+        pointerType: 'touch',
+        hand: p.hand,
+        drawing: arm.drawing,
+        moved: true,
+        longPress: arm.long,
+      })
+      if (action === 'pan' && gesture.current?.kind !== 'pan') {
+        if (gesture.current?.kind === 'draw') setDraft(null)
+        gesture.current = {
+          kind: 'pan',
+          sx: arm.x,
+          sy: arm.y,
+          offsetX: viewRef.current.offsetX,
+          offsetY: viewRef.current.offsetY,
+        }
+      }
+    }
+    touchMoveRef.current(event)
+  }
+
   const { minor, major } = gridSpec(view.scale)
   const left = -view.offsetX / view.scale
   const top = -view.offsetY / view.scale
@@ -1125,6 +1269,10 @@ export default function PlanView({
       ref={hostRef}
       data-testid="plan-canvas"
       onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={releaseTouch}
+      onPointerCancel={releaseTouch}
       onContextMenu={(event) => event.preventDefault()}
       onMouseLeave={() => { if (!gesture.current) setCursor(null) }}
       style={{
@@ -1133,7 +1281,8 @@ export default function PlanView({
         height: '100%',
         background: PAPER,
         overflow: 'hidden',
-        cursor: spaceDown ? 'grab' : drawing || placing ? 'crosshair' : hoverId ? 'move' : 'default',
+        touchAction: 'none',
+        cursor: spaceDown || hand ? 'grab' : drawing || placing ? 'crosshair' : hoverId ? 'move' : 'default',
         userSelect: 'none',
       }}
     >
