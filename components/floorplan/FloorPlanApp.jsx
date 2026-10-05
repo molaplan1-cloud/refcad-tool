@@ -409,6 +409,7 @@ function TempDim({ dim, X, Y, zoom, editing, onEdit, onChange, onCommit, onCance
             data-testid="temp-dim-label"
             style={{ cursor: 'text' }}
             onPointerDown={(event) => {
+              if (event.pointerType === 'touch') return
               event.stopPropagation()
               event.preventDefault()
               onEdit(dim)
@@ -719,6 +720,7 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
             strokeDasharray={hatch}
             strokeLinecap="butt"
             onPointerDown={(event) => {
+              if (event.pointerType === 'touch') return
               event.stopPropagation()
               event.preventDefault()
               onSelect({ kind: 'room', id: room.id, wallId: edge.wallId, side })
@@ -1464,7 +1466,7 @@ export default function FloorPlanApp() {
 
   const beginTouch = (event) => {
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
-    event.currentTarget?.setPointerCapture?.(event.pointerId)
+    try { event.currentTarget?.setPointerCapture?.(event.pointerId) } catch { /* synthetic pointers have no capture */ }
     if (pointers.current.size >= 2) {
       const rect = event.currentTarget.getBoundingClientRect()
       const pts = [...pointers.current.values()].map((point) => ({ x: point.x - rect.left, y: point.y - rect.top }))
@@ -1507,6 +1509,8 @@ export default function FloorPlanApp() {
   const onPointerMove = (event) => {
     if (view !== '2d' || !svgRef.current) return
     if (event.pointerType === 'touch') {
+      if (event.nativeEvent?.__refcadMove && event.eventPhase !== 1) return
+      if (event.nativeEvent) event.nativeEvent.__refcadMove = true
       if (pointers.current.has(event.pointerId)) {
         pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
       }
@@ -1526,7 +1530,7 @@ export default function FloorPlanApp() {
           }
           const action = touchAction({ pointerType: 'touch', hand: handRef.current, drawing: arm.drawing, moved: true, longPress: arm.long })
           if (action === 'pan' && !panRef.current) {
-            panRef.current = { x: event.clientX, y: event.clientY, moved: false, button: 0 }
+            panRef.current = { x: arm.x, y: arm.y, moved: false, button: 0 }
           }
         }
         const action = touchAction({ pointerType: 'touch', hand: handRef.current, drawing: arm.drawing, moved: arm.moved, longPress: arm.long })
@@ -1613,6 +1617,8 @@ export default function FloorPlanApp() {
 
   const onPointerUp = (event) => {
     if (event?.pointerType === 'touch') {
+      if (event.nativeEvent?.__refcadUp && event.eventPhase !== 1) return
+      if (event.nativeEvent) event.nativeEvent.__refcadUp = true
       const tap = endTouch(event)
       if (!tap) return
       onPointerDown({
@@ -2016,6 +2022,8 @@ export default function FloorPlanApp() {
   const onPointerDown = (event) => {
     if (view !== '2d') return
     if (event.pointerType === 'touch') {
+      if (event.nativeEvent?.__refcadTouch && event.eventPhase !== 1) return
+      if (event.nativeEvent) event.nativeEvent.__refcadTouch = true
       beginTouch(event)
       return
     }
@@ -3341,9 +3349,12 @@ export default function FloorPlanApp() {
                 xmlns="http://www.w3.org/2000/svg"
                 width="100%"
                 height="100%"
-                onPointerMove={onPointerMove}
-                onPointerDown={onPointerDown}
-                onPointerUp={onPointerUp}
+                onPointerDownCapture={(event) => { if (event.pointerType === 'touch') onPointerDown(event) }}
+                onPointerMoveCapture={(event) => { if (event.pointerType === 'touch') onPointerMove(event) }}
+                onPointerUpCapture={(event) => { if (event.pointerType === 'touch') onPointerUp(event) }}
+                onPointerMove={(event) => { if (event.pointerType !== 'touch') onPointerMove(event) }}
+                onPointerDown={(event) => { if (event.pointerType !== 'touch') onPointerDown(event) }}
+                onPointerUp={(event) => { if (event.pointerType !== 'touch') onPointerUp(event) }}
                 onContextMenu={onContextMenu}
                 style={{ display: 'block', cursor: engaged ? 'crosshair' : 'default', touchAction: 'none' }}
               >
@@ -3470,6 +3481,7 @@ export default function FloorPlanApp() {
                       transform={`translate(${X(fixture.x)} ${Y(fixture.z)}) rotate(${fixture.rotation || 0})${fixture.mirror ? ' scale(-1 1)' : ''}`}
                       style={{ pointerEvents: workspace === 'kalusteet' && tool === 'select' && !placing && !svcTool ? 'auto' : 'none' }}
                       onPointerDown={(event) => {
+                        if (event.pointerType === 'touch') return
                         if (event.button !== 0) return
                         if (commandRef.current) return
                         event.stopPropagation()
@@ -3644,6 +3656,7 @@ export default function FloorPlanApp() {
                   data-north={ensureYard(plan).north || 0}
                   style={{ cursor: 'grab' }}
                   onPointerDown={(event) => {
+                    if (event.pointerType === 'touch') return
                     event.stopPropagation()
                     event.currentTarget.setPointerCapture(event.pointerId)
                     northDrag.current = { x: event.clientX, north: ensureYard(plan).north || 0, plan }
@@ -3805,6 +3818,7 @@ export default function FloorPlanApp() {
                     }}
                     style={{ pointerEvents: workspace === 'rakenne' && tool === 'select' && !placing && !svcTool ? 'auto' : 'none', cursor: 'move' }}
                     onPointerDown={(event) => {
+                      if (event.pointerType === 'touch') return
                       if (event.button !== 0) return
                       if (commandRef.current) return
                       event.stopPropagation()

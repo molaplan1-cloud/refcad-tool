@@ -1140,7 +1140,7 @@ export default function PlanView({
     if (event.pointerType !== 'touch') return
     touching.current = true
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
-    event.currentTarget.setPointerCapture?.(event.pointerId)
+    try { event.currentTarget.setPointerCapture?.(event.pointerId) } catch { /* synthetic pointers have no capture */ }
     if (pointers.current.size >= 2) {
       const rect = event.currentTarget.getBoundingClientRect()
       const pts = [...pointers.current.values()].map((point) => ({ x: point.x - rect.left, y: point.y - rect.top }))
@@ -1218,8 +1218,8 @@ export default function PlanView({
         if (gesture.current?.kind === 'draw') setDraft(null)
         gesture.current = {
           kind: 'pan',
-          sx: event.clientX,
-          sy: event.clientY,
+          sx: arm.x,
+          sy: arm.y,
           offsetX: viewRef.current.offsetX,
           offsetY: viewRef.current.offsetY,
         }
