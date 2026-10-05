@@ -236,9 +236,9 @@ export function PlanChrome({
       <Menu id="edit" label={t('menu.edit')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="undo" title={t('edit.undo')} style={menuItem(false)} onClick={() => { close(); onUndo() }}>{t('edit.undo')}</button>
         <button type="button" data-testid="redo" title={t('edit.redo')} style={menuItem(false)} onClick={() => { close(); onRedo() }}>{t('edit.redo')}</button>
-        <button type="button" data-testid="cleanup-duplicates" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>Siivoa päällekkäiset</button>
-        <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>Poista automaattisesti lisätyt</button>
-        <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>Suorista seinät</button>
+        <button type="button" data-testid="cleanup-duplicates" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>{t('edit.cleanup')}</button>
+        <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>{t('edit.removeAuto')}</button>
+        <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
       </Menu>
       <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="open-display" style={menuItem(false)} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
@@ -263,7 +263,8 @@ export function PlanChrome({
         <header className="plan-chrome-header" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 48, padding: '4px 8px', paddingLeft: 'max(8px, env(safe-area-inset-left))', paddingRight: 'max(8px, env(safe-area-inset-right))' }}>
           <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, flexShrink: 0 }}>RefCAD</Link>
           <input aria-label={t('app.drawingName')} value={plan.name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 16, flex: 1, minWidth: 0, width: 0 }} />
-          <button type="button" data-testid="chrome-menu" aria-expanded={open === 'root'} onClick={() => setOpen(open === 'root' ? null : 'root')} style={{ ...modeTab(open === 'root'), minHeight: 44, minWidth: 44, padding: '0 12px' }}>Valikko</button>
+          <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
+          <button type="button" data-testid="chrome-menu" aria-expanded={open === 'root'} onClick={() => setOpen(open === 'root' ? null : 'root')} style={{ ...modeTab(open === 'root'), minHeight: 44, minWidth: 44, padding: '0 12px' }}>{t('chrome.menu')}</button>
         </header>
         <div className="workspace-scroll view-tabs" data-testid="view-tabs" style={{ background: '#14181f' }}>
           <button type="button" data-testid="view-floor-2d" style={{ ...modeTab(mode === 'plan'), minHeight: 44 }} onClick={() => onMode('plan')}>{t('mode.plan')}</button>
@@ -276,12 +277,12 @@ export function PlanChrome({
             const allowed = !access || access.workspaces.includes(item.id)
             return (
               <button key={item.id} type="button" data-testid={`workspace-${item.id}`} aria-pressed={workspace === item.id} disabled={!allowed} style={{ ...workspaceTab(workspace === item.id), minHeight: 44, opacity: allowed ? 1 : 0.4 }} onClick={() => { if (allowed) onWorkspace?.(item.id) }}>
-                {item.name}
+                {t(`workspace.${item.id}`)}
               </button>
             )
           })}
           {access?.workspaces.includes('kylma') && (
-            <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), minHeight: 44, display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}>Kylmätekniikka</a>
+            <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), minHeight: 44, display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}>{t('workspace.cold')}</a>
           )}
         </div>
         {open === 'root' && (
@@ -301,7 +302,7 @@ export function PlanChrome({
               {workspace === 'kalusteet' && (
                 <>
                   <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={hit(selectOn)} onClick={() => onTool('select')}>{t('tool.select')}</button>
-                  <button type="button" data-testid="repeat-place" aria-pressed={repeat} style={hit(repeat)} onClick={() => onRepeat?.(!repeat)}>Toista</button>
+                  <button type="button" data-testid="repeat-place" aria-pressed={repeat} style={hit(repeat)} onClick={() => onRepeat?.(!repeat)}>{t('designer.repeat')}</button>
                 </>
               )}
               {workspace === 'piha' && yardTools(hit)}
@@ -311,8 +312,8 @@ export function PlanChrome({
                   {PLACEABLES.filter((item) => workspaceSystems(workspace).includes(item.system) && item.mode === 'node').map((item) => (
                     <button key={item.id} type="button" data-testid={`device-${item.id}`} style={hit(svcTool === 'node' && svcKind === item.id)} onClick={() => onPlaceDevice?.(item)}>{item.name}</button>
                   ))}
-                  <button type="button" data-testid="route-services" style={hit(false)} onClick={() => onRoute()}>Reititä automaattisesti</button>
-                  <button type="button" data-testid="suggest-equipment" style={hit(ghostCount > 0)} onClick={() => onSuggest?.()}>Ehdota laitteet</button>
+                  <button type="button" data-testid="route-services" style={hit(false)} onClick={() => onRoute()}>{t('route.auto')}</button>
+                  <button type="button" data-testid="suggest-equipment" style={hit(ghostCount > 0)} onClick={() => onSuggest?.()}>{t('service.suggest')}</button>
                 </>
               )}
               {tool === 'door' && <DoorPlaceControls compact t={t} value={doorHand} onChange={(next) => onDoorHand?.(next)} />}
@@ -322,7 +323,7 @@ export function PlanChrome({
             <div style={{ marginTop: 8 }}>
               <CadToolbar active={command?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onCadLayer} />
             </div>
-            <button type="button" data-testid="close-tools" onClick={() => onToggleTools?.()} style={{ ...hit(false), marginTop: 8 }}>Sulje työkalut</button>
+            <button type="button" data-testid="close-tools" onClick={() => onToggleTools?.()} style={{ ...hit(false), marginTop: 8 }}>{t('edit.closeTools')}</button>
           </div>
         )}
       </div>
@@ -352,12 +353,12 @@ export function PlanChrome({
           const allowed = !access || access.workspaces.includes(item.id)
           return (
             <button key={item.id} type="button" data-testid={`workspace-${item.id}`} aria-pressed={workspace === item.id} disabled={!allowed} style={{ ...workspaceTab(workspace === item.id), opacity: allowed ? 1 : 0.4 }} onClick={() => { if (allowed) onWorkspace?.(item.id) }}>
-              {item.name}
+              {t(`workspace.${item.id}`)}
             </button>
           )
         })}
         {access?.workspaces.includes('kylma') && (
-          <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), textDecoration: 'none' }}>Kylmätekniikka</a>
+          <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), textDecoration: 'none' }}>{t('workspace.cold')}</a>
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 32, padding: '0 6px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
@@ -371,9 +372,9 @@ export function PlanChrome({
         <Menu id="edit" label={t('menu.edit')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="undo" title={t('edit.undo')} style={menuItem(false)} onClick={() => { close(); onUndo() }}>{t('edit.undo')}</button>
           <button type="button" data-testid="redo" title={t('edit.redo')} style={menuItem(false)} onClick={() => { close(); onRedo() }}>{t('edit.redo')}</button>
-          <button type="button" data-testid="cleanup-duplicates" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>Siivoa päällekkäiset</button>
-          <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>Poista automaattisesti lisätyt</button>
-          <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>Suorista seinät</button>
+          <button type="button" data-testid="cleanup-duplicates" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>{t('edit.cleanup')}</button>
+          <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>{t('edit.removeAuto')}</button>
+          <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
         </Menu>
         <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="open-display" style={menuItem(false)} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
@@ -391,42 +392,42 @@ export function PlanChrome({
         </Menu>
         <Menu id="services" label={t('menu.services')} open={open} setOpen={setOpen}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '2px 4px' }}>
-            Järjestelmä
+            {t('menu.system')}
             <select data-testid="service-system" value={svcSystem} onChange={(event) => onSystem(event.target.value)} style={selectStyle}>
-              {SERVICE_SYSTEMS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              {SERVICE_SYSTEMS.map((item) => <option key={item.id} value={item.id}>{t(`system.${item.id}`)}</option>)}
             </select>
           </label>
-          <button type="button" data-testid="service-tool-node" style={menuItem(svcTool === 'node')} onClick={() => { close(); onSvcTool('node') }}>Piste</button>
-          <button type="button" data-testid="service-tool-run" style={menuItem(svcTool === 'run')} onClick={() => { close(); onSvcTool('run') }}>Linja</button>
+          <button type="button" data-testid="service-tool-node" style={menuItem(svcTool === 'node')} onClick={() => { close(); onSvcTool('node') }}>{t('service.point')}</button>
+          <button type="button" data-testid="service-tool-run" style={menuItem(svcTool === 'run')} onClick={() => { close(); onSvcTool('run') }}>{t('service.line')}</button>
           <select data-testid="service-kind" value={placeables.some((item) => item.id === svcKind) ? svcKind : (placeables[0]?.id || '')} onChange={(event) => onKind(event.target.value)} style={{ ...selectStyle, margin: '2px 4px' }}>
             {placeables.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          {drawing && <button type="button" data-testid="service-finish" style={menuItem(false)} onClick={() => { close(); onFinish() }}>Valmis</button>}
+          {drawing && <button type="button" data-testid="service-finish" style={menuItem(false)} onClick={() => { close(); onFinish() }}>{t('cad.done')}</button>}
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 8px' }}>
             <input data-testid="floor-heating" type="checkbox" checked={floorHeating} onChange={(event) => onFloorHeating(event.target.checked)} />
-            Lattialämmitys
+            {t('heat.floorOn')}
           </label>
-          <button type="button" data-testid="route-services" style={menuItem(false)} onClick={() => { close(); onRoute() }}>Reititä automaattisesti</button>
+          <button type="button" data-testid="route-services" style={menuItem(false)} onClick={() => { close(); onRoute() }}>{t('route.auto')}</button>
           {svcSystem === 'electric' && (
             <>
-              <button type="button" data-testid="rewire-electric" style={menuItem(false)} onClick={() => { close(); onRewire() }}>Johdota</button>
-              <button type="button" data-testid="open-schedule" style={menuItem(false)} onClick={() => { close(); onSchedule() }}>Ryhmäluettelo</button>
-              <button type="button" data-testid="open-diagram" style={menuItem(false)} onClick={() => { close(); onDiagram() }}>Pääkaavio</button>
+              <button type="button" data-testid="rewire-electric" style={menuItem(false)} onClick={() => { close(); onRewire() }}>{t('service.rewire')}</button>
+              <button type="button" data-testid="open-schedule" style={menuItem(false)} onClick={() => { close(); onSchedule() }}>{t('schedule.groups')}</button>
+              <button type="button" data-testid="open-diagram" style={menuItem(false)} onClick={() => { close(); onDiagram() }}>{t('schedule.main')}</button>
             </>
           )}
           {svcSystem === 'water' && (
-            <button type="button" data-testid="rewire-water" style={menuItem(false)} onClick={() => { close(); onRewireWater() }}>Johdota käyttövesi</button>
+            <button type="button" data-testid="rewire-water" style={menuItem(false)} onClick={() => { close(); onRewireWater() }}>{t('water.rewire')}</button>
           )}
           {svcSystem === 'heat' && (
             <>
-              <button type="button" data-testid="rewire-heat" style={menuItem(false)} onClick={() => { close(); onRewireHeat() }}>Johdota lämmitys</button>
-              <button type="button" data-testid="open-heat-table" style={menuItem(false)} onClick={() => { close(); onHeatTable() }}>Piiritaulukko</button>
-              <button type="button" data-testid="open-heat-schematic" style={menuItem(false)} onClick={() => { close(); onHeatSchematic() }}>Periaatekaavio</button>
+              <button type="button" data-testid="rewire-heat" style={menuItem(false)} onClick={() => { close(); onRewireHeat() }}>{t('heat.rewire')}</button>
+              <button type="button" data-testid="open-heat-table" style={menuItem(false)} onClick={() => { close(); onHeatTable() }}>{t('heat.circuits')}</button>
+              <button type="button" data-testid="open-heat-schematic" style={menuItem(false)} onClick={() => { close(); onHeatSchematic() }}>{t('designer.schematicTitle')}</button>
             </>
           )}
           {hasAir && (
             <span data-testid="service-balance" style={{ fontSize: 12, fontWeight: 700, padding: '4px 8px' }}>
-              Tulo {balance.supply} l/s · Poisto {balance.extract} l/s
+              {t('service.balance', { supply: balance.supply, extract: balance.extract })}
             </span>
           )}
         </Menu>
@@ -461,8 +462,8 @@ export function PlanChrome({
             {workspace === 'kalusteet' && (
               <Group>
                 <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={toolStyle(selectOn)} onClick={() => onTool('select')}>{t('tool.select')}</button>
-                <button type="button" data-testid="repeat-place" aria-pressed={repeat} style={toolStyle(repeat)} onClick={() => onRepeat?.(!repeat)}>Toista</button>
-                <span style={{ fontSize: 12, color: '#57534e', flexShrink: 0 }}>Kalusteet huoneittain sivupalkissa</span>
+                <button type="button" data-testid="repeat-place" aria-pressed={repeat} style={toolStyle(repeat)} onClick={() => onRepeat?.(!repeat)}>{t('designer.repeat')}</button>
+                <span style={{ fontSize: 12, color: '#57534e', flexShrink: 0 }}>{t('furniture.byRoom')}</span>
               </Group>
             )}
             {workspace === 'piha' && <Group>{yardTools(toolStyle)}</Group>}
@@ -475,10 +476,10 @@ export function PlanChrome({
                 {PLACEABLES.filter((item) => workspaceSystems(workspace).includes(item.system) && item.mode === 'run').map((item) => (
                   <button key={item.id} type="button" data-testid={`run-${item.id}`} aria-pressed={svcTool === 'run' && svcKind === item.id} style={toolStyle(svcTool === 'run' && svcKind === item.id)} onClick={() => onPlaceDevice?.({ ...item, drawing: true })}>{item.name}</button>
                 ))}
-                <button type="button" data-testid="repeat-place" aria-pressed={repeat} style={toolStyle(repeat)} onClick={() => onRepeat?.(!repeat)}>Toista</button>
-                <button type="button" data-testid="route-services" style={toolStyle(false)} onClick={() => { close(); onRoute() }}>Reititä automaattisesti</button>
-                <button type="button" data-testid="suggest-equipment" style={toolStyle(ghostCount > 0)} onClick={() => onSuggest?.()}>Ehdota laitteet</button>
-                {ghostCount > 0 && <button type="button" data-testid="accept-equipment" style={toolStyle(true)} onClick={() => onAccept?.()}>Hyväksy</button>}
+                <button type="button" data-testid="repeat-place" aria-pressed={repeat} style={toolStyle(repeat)} onClick={() => onRepeat?.(!repeat)}>{t('designer.repeat')}</button>
+                <button type="button" data-testid="route-services" style={toolStyle(false)} onClick={() => { close(); onRoute() }}>{t('route.auto')}</button>
+                <button type="button" data-testid="suggest-equipment" style={toolStyle(ghostCount > 0)} onClick={() => onSuggest?.()}>{t('service.suggest')}</button>
+                {ghostCount > 0 && <button type="button" data-testid="accept-equipment" style={toolStyle(true)} onClick={() => onAccept?.()}>{t('route.accept')}</button>}
               </Group>
             )}
             {mode === '3d' && (

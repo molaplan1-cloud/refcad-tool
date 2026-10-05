@@ -1,11 +1,14 @@
+'use client'
+
+import Link from 'next/link'
+import { useLocale } from '@/components/i18n/Locale'
+
 // Custom 404 page that opts into Edge runtime explicitly.
 // Cloudflare's @cloudflare/next-on-pages 1.13.15 requires every non-static
 // route — including the auto-generated /_not-found — to declare edge runtime.
-// Without this file, the build fails with:
-//   The following routes were not configured to run with the Edge Runtime:
-//     - /_not-found
 
 export default function NotFound() {
+  const { t } = useLocale()
   return (
     <div
       style={{
@@ -25,9 +28,9 @@ export default function NotFound() {
         404
       </h1>
       <p style={{ fontSize: '1.25rem', marginTop: '1rem', color: '#94a3b8' }}>
-        Sivua ei löytynyt
+        {t('error.missing')}
       </p>
-      <a
+      <Link
         href="/"
         style={{
           marginTop: '2rem',
@@ -39,8 +42,8 @@ export default function NotFound() {
           fontWeight: 600,
         }}
       >
-        Takaisin etusivulle
-      </a>
+        {t('error.back')}
+      </Link>
     </div>
   )
 }

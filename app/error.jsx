@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import StaleDeployNotice from '@/components/StaleDeployNotice'
+import { useLocale } from '@/components/i18n/Locale'
 import { isStaleChunkError, recoverStaleDeploy } from '@/lib/staleDeploy'
 
 // Custom error page that opts into Edge runtime explicitly.
@@ -11,6 +12,7 @@ import { isStaleChunkError, recoverStaleDeploy } from '@/lib/staleDeploy'
 //     - /_error
 
 export default function GlobalError({ error, reset }) {
+  const { locale, t } = useLocale()
   const stale = isStaleChunkError(error)
   useEffect(() => {
     if (stale) recoverStaleDeploy()
@@ -18,7 +20,7 @@ export default function GlobalError({ error, reset }) {
 
   if (stale) {
     return (
-      <html lang="fi">
+      <html lang={locale}>
         <body style={{ margin: 0 }}>
           <StaleDeployNotice />
         </body>
@@ -27,7 +29,7 @@ export default function GlobalError({ error, reset }) {
   }
 
   return (
-    <html lang="fi">
+    <html lang={locale}>
       <body
         style={{
           margin: 0,
@@ -47,7 +49,7 @@ export default function GlobalError({ error, reset }) {
           500
         </h1>
         <p style={{ fontSize: '1.25rem', marginTop: '1rem', color: '#94a3b8' }}>
-          Tapahtui odottamaton virhe
+          {t('error.unexpected')}
         </p>
         {error?.message && (
           <pre
@@ -79,7 +81,7 @@ export default function GlobalError({ error, reset }) {
             cursor: 'pointer',
           }}
         >
-          Yritä uudelleen
+          {t('error.retry')}
         </button>
       </body>
     </html>

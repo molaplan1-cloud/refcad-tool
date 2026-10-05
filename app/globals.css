@@ -220,7 +220,10 @@ img, svg, video { max-width: 100%; }
   .plan-stage { min-height: 0; }
 }
 
+.language-switch { flex-shrink: 0; }
+
 @media (max-width: 800px) {
+  .language-switch { min-height: 44px; font-size: 16px; }
   .admin-create { grid-template-columns: 1fr; }
   .landing-hero { padding: 36px 16px 28px !important; }
   .picker-title { font-size: 32px !important; }

@@ -4,7 +4,7 @@ import { LocaleProvider } from '@/components/i18n/Locale'
 
 export const metadata = {
   title: 'RefCAD',
-  description: 'Piirrä kylmiö, talo tai halli. Pohjakuva on ilmainen, talotekniikka ja kylmätekniikka avautuvat kuitatun maksun jälkeen.',
+  description: 'Draw a cold room, house or hall. The floor plan is free; services and refrigeration open after payment is confirmed.',
   manifest: '/manifest.json'
 }
 

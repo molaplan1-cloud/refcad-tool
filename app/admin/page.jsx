@@ -3,27 +3,21 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { paymentActive } from '@/lib/access'
+import { ShellLanguage, useLocale } from '@/components/i18n/Locale'
 
-const PLANS = [
-  ['free', 'Ilmainen'],
-  ['basic', 'Perus'],
-  ['pro', 'Pro'],
-  ['company', 'Yritys'],
-]
-
-function planName(id) {
-  return PLANS.find((item) => item[0] === id)?.[1] || 'Ilmainen'
-}
+const PLAN_IDS = ['free', 'basic', 'pro', 'company']
 
 function statusOf(user) {
-  if (user.disabled) return 'Pois käytöstä'
-  if (user.payment === 'pending') return 'Odottaa maksun vahvistusta'
-  if (user.payment === 'received' && !paymentActive(user)) return 'Vanhentunut'
-  if (paymentActive(user)) return 'Voimassa'
-  return 'Ei maksua'
+  if (user.disabled) return 'disabled'
+  if (user.payment === 'pending') return 'pending'
+  if (user.payment === 'received' && !paymentActive(user)) return 'expired'
+  if (paymentActive(user)) return 'active'
+  return 'none'
 }
 
 export default function AdminPage() {
+  const { t } = useLocale()
+  const planName = (id) => t(`plan.${id || 'free'}.name`)
   const [users, setUsers] = useState([])
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(null)
@@ -33,7 +27,7 @@ export default function AdminPage() {
     const res = await fetch('/api/admin/users')
     const data = await res.json()
     if (!res.ok) {
-      setError(data.error || 'Ei oikeutta')
+      setError(data.error || t('admin.forbidden'))
       setUsers([])
       return
     }
@@ -51,7 +45,7 @@ export default function AdminPage() {
     })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
-      setError(data.error || 'Tallennus epäonnistui')
+      setError(data.error || t('admin.saveFailed'))
       return
     }
     await load()
@@ -66,7 +60,7 @@ export default function AdminPage() {
     })
     const data = await res.json()
     if (!res.ok) {
-      setError(data.error || 'Käyttäjää ei luotu')
+      setError(data.error || t('admin.createFailed'))
       return
     }
     setForm({ email: '', name: '', password: '', plan: 'basic' })
@@ -76,20 +70,23 @@ export default function AdminPage() {
   return (
     <div data-testid="admin-panel" className="safe-page" style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a', padding: '24px 20px 48px', paddingTop: 'calc(24px + env(safe-area-inset-top))' }}>
       <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-        <header className="admin-header" style={{ marginBottom: 8 }}>
+        <header className="admin-header" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#0369a1', fontWeight: 700 }}>Ylläpito</div>
-            <h1 style={{ margin: '4px 0 0', fontSize: 28 }}>Käyttäjät ja maksut</h1>
+            <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#0369a1', fontWeight: 700 }}>{t('admin.kicker')}</div>
+            <h1 style={{ margin: '4px 0 0', fontSize: 28 }}>{t('admin.title')}</h1>
           </div>
-          <Link href="/" style={{ color: '#0369a1' }}>Etusivu</Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <ShellLanguage tone="light" />
+            <Link href="/" style={{ color: '#0369a1' }}>{t('shell.home')}</Link>
+          </div>
         </header>
-        <p style={{ color: '#475569', marginTop: 0 }}>Ylläpitäjä ei piirrä. Maksulliset työtilat avautuvat, kun maksu on kuitattu ja voimassaolo on käynnissä.</p>
+        <p style={{ color: '#475569', marginTop: 0 }}>{t('admin.lead')}</p>
         {error && <p data-testid="admin-error" style={{ color: '#9f1239' }}>{error}</p>}
         <div data-testid="admin-users" className="admin-users">
           <table>
             <thead>
               <tr style={{ textAlign: 'left', background: '#f1f5f9' }}>
-                {['Käyttäjä', 'Tilaus', 'Tila', 'Voimassa alkaen', 'Voimassa asti', 'Toiminnot'].map((label) => (
+                {[t('admin.user'), t('admin.plan'), t('admin.status'), t('admin.from'), t('admin.until'), t('admin.actions')].map((label) => (
                   <th key={label} style={{ padding: '10px 12px', fontWeight: 700, borderBottom: '1px solid #e2e8f0' }}>{label}</th>
                 ))}
               </tr>
@@ -103,27 +100,27 @@ export default function AdminPage() {
                     <td style={{ padding: '12px' }}>
                       <strong>{user.name || user.email}</strong>
                       <div style={{ color: '#64748b', fontSize: 12 }}>{user.email}</div>
-                      {user.requestedPlan && <div style={{ fontSize: 12 }}>Pyyntö: {planName(user.requestedPlan)}</div>}
+                      {user.requestedPlan && <div style={{ fontSize: 12 }}>{t('admin.request')}: {planName(user.requestedPlan)}</div>}
                     </td>
                     <td style={{ padding: '12px' }} data-testid="admin-plan">{open ? (
-                      <select aria-label="Tilaus" value={user.plan || 'free'} onChange={(event) => patch(user.id, { plan: event.target.value })} style={field}>
-                        {PLANS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                      <select aria-label={t('admin.plan')} value={user.plan || 'free'} onChange={(event) => patch(user.id, { plan: event.target.value })} style={field}>
+                        {PLAN_IDS.map((id) => <option key={id} value={id}>{planName(id)}</option>)}
                       </select>
                     ) : planName(user.plan)}</td>
-                    <td style={{ padding: '12px', fontWeight: 700 }} data-testid="admin-status">{status}</td>
+                    <td style={{ padding: '12px', fontWeight: 700 }} data-testid="admin-status">{t(`admin.status.${status}`)}</td>
                     <td style={{ padding: '12px' }}>{open ? (
-                      <input aria-label="Voimassa alkaen" type="date" value={(user.validFrom || '').slice(0, 10)} onChange={(event) => patch(user.id, { validFrom: event.target.value })} style={field} />
+                      <input aria-label={t('admin.from')} type="date" value={(user.validFrom || '').slice(0, 10)} onChange={(event) => patch(user.id, { validFrom: event.target.value })} style={field} />
                     ) : (user.validFrom || '—')}</td>
                     <td style={{ padding: '12px' }}>{open ? (
-                      <input aria-label="Voimassa asti" type="date" value={(user.validUntil || '').slice(0, 10)} onChange={(event) => patch(user.id, { validUntil: event.target.value })} style={field} />
+                      <input aria-label={t('admin.until')} type="date" value={(user.validUntil || '').slice(0, 10)} onChange={(event) => patch(user.id, { validUntil: event.target.value })} style={field} />
                     ) : (user.validUntil || '—')}</td>
                     <td style={{ padding: '12px' }}>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {(status === 'Odottaa maksun vahvistusta' || status === 'Vanhentunut') && user.role !== 'admin' && user.role !== 'demo' && (
-                          <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>Uusi / kuittaa</button>
+                        {(status === 'pending' || status === 'expired') && user.role !== 'admin' && user.role !== 'demo' && (
+                          <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>{t('admin.confirm')}</button>
                         )}
-                        <button type="button" data-testid="admin-edit" style={quiet} onClick={() => setEditing(open ? null : user.id)}>{open ? 'Sulje' : 'Muokkaa'}</button>
-                        <button type="button" data-testid="admin-disable" style={quiet} onClick={() => patch(user.id, { disabled: !user.disabled })}>{user.disabled ? 'Ota käyttöön' : 'Poista käytöstä'}</button>
+                        <button type="button" data-testid="admin-edit" style={quiet} onClick={() => setEditing(open ? null : user.id)}>{open ? t('admin.close') : t('admin.edit')}</button>
+                        <button type="button" data-testid="admin-disable" style={quiet} onClick={() => patch(user.id, { disabled: !user.disabled })}>{user.disabled ? t('admin.enable') : t('admin.disable')}</button>
                       </div>
                     </td>
                   </tr>
@@ -133,11 +130,11 @@ export default function AdminPage() {
           </table>
         </div>
         <form data-testid="admin-create" className="admin-create" onSubmit={create}>
-          <label>Sähköposti<input data-testid="admin-email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required style={field} /></label>
-          <label>Nimi<input data-testid="admin-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} style={field} /></label>
-          <label>Salasana<input data-testid="admin-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required style={field} /></label>
-          <label>Tilaus<select value={form.plan} onChange={(event) => setForm({ ...form, plan: event.target.value })} style={field}>{PLANS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
-          <button type="submit" style={button}>Luo käyttäjä</button>
+          <label>{t('auth.email')}<input data-testid="admin-email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required style={field} /></label>
+          <label>{t('auth.name')}<input data-testid="admin-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} style={field} /></label>
+          <label>{t('auth.password')}<input data-testid="admin-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required style={field} /></label>
+          <label>{t('admin.plan')}<select aria-label={t('admin.plan')} value={form.plan} onChange={(event) => setForm({ ...form, plan: event.target.value })} style={field}>{PLAN_IDS.map((id) => <option key={id} value={id}>{planName(id)}</option>)}</select></label>
+          <button type="submit" style={button}>{t('admin.createUser')}</button>
         </form>
       </div>
     </div>

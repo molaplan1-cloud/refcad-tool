@@ -49,16 +49,32 @@ export function usePlanLocale(plan) {
   }
 }
 
-export function LanguageSwitch({ value, onChange }) {
+export function LanguageSwitch({ value, onChange, tone = 'dark', className = '' }) {
+  const light = tone === 'light'
   return (
     <select
       data-testid="language-switch"
+      className={`language-switch${className ? ` ${className}` : ''}`}
       aria-label="Language"
       value={value || 'fi'}
       onChange={(event) => onChange(event.target.value)}
-      style={{ height: 28, borderRadius: 8, border: '1px solid #44403c', background: '#111827', color: '#fff', fontSize: 12, padding: '0 6px' }}
+      style={{
+        height: 36,
+        borderRadius: 8,
+        border: light ? '1px solid #cbd5e1' : '1px solid #44403c',
+        background: light ? '#fff' : '#111827',
+        color: light ? '#0f172a' : '#fff',
+        fontSize: 13,
+        fontWeight: 650,
+        padding: '0 8px',
+      }}
     >
       {LOCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
     </select>
   )
+}
+
+export function ShellLanguage({ tone = 'light', className = '' }) {
+  const { locale, setLocale } = useLocale()
+  return <LanguageSwitch value={locale} onChange={setLocale} tone={tone} className={className} />
 }

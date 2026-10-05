@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { usePlanLocale } from '@/components/i18n/Locale'
 import { FUSE_SERIES } from '@/lib/electric'
 import { HEAT_SOURCES, pexSize } from '@/lib/hydronic'
 import {
@@ -531,6 +532,7 @@ function siteRun(plan, run) {
 }
 
 export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null, legendSystems = null, zoom = 1, camera = null, viewport = null, roomLabels = [], dimensions = [] }) {
+  const { t } = usePlanLocale(plan)
   const services = ensureServices(plan)
   const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run) && (!siteMode || siteRun(plan, run)))
   const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
@@ -871,13 +873,14 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
       {legendH > 0 && (
         <g data-testid="service-legend" transform={`translate(${legendX} ${legendY}) scale(${legendScale})`} style={{ pointerEvents: 'none' }}>
           <rect width={legendW} height={legendH} fill="#ffffff" stroke="#1c1917" strokeWidth={1 / legendScale} />
-          <text x={8} y={legendTitle} fontSize={legendFont} fontWeight="700" fill="#1c1917">Selite</text>
+          <text x={8} y={legendTitle} fontSize={legendFont} fontWeight="700" fill="#1c1917">{t('legend.title')}</text>
           {legend.map((item, index) => {
             const y = legendTitle + legendStep * (index + 1)
+            const label = item.key && t(item.key) !== item.key ? t(item.key) : item.name
             return (
-              <g key={`${item.system}-${item.name}`}>
+              <g key={`${item.system}-${item.key || item.name}`}>
                 <rect x={8} y={y - legendFont * 0.72} width="12" height={legendFont * 0.7} fill={item.color} stroke="#44403c" strokeWidth="0.5" />
-                <text x={26} y={y} fontSize={legendFont} fill="#1c1917">{item.name}</text>
+                <text x={26} y={y} fontSize={legendFont} fill="#1c1917">{label}</text>
               </g>
             )
           })}

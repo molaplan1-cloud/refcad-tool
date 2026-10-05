@@ -270,7 +270,7 @@ function cardClearsSegment(left, top, cardW, cardH, ax, ay, bx, by, pad) {
   return true
 }
 
-function DrawCursor({ x, y, frameW, frameH, ax, ay, bx, by, clearance, step, field, showInput, lengthValue, angleValue, lengthRef, angleRef, onLength, onAngle, onCommit, onSwitch, onCancel, onUndo }) {
+function DrawCursor({ x, y, frameW, frameH, ax, ay, bx, by, clearance, step, field, showInput, lengthValue, angleValue, lengthLabel = 'Length', angleLabel = 'Angle', lengthRef, angleRef, onLength, onAngle, onCommit, onSwitch, onCancel, onUndo }) {
   const cardW = 268
   const lines = Math.max(1, Math.ceil(String(step || '').length / 34))
   const cardH = 14 + lines * 17 + (showInput ? 54 : 0)
@@ -355,10 +355,10 @@ function DrawCursor({ x, y, frameW, frameH, ax, ay, bx, by, clearance, step, fie
       <div data-testid="draw-step" style={{ fontSize: 12, fontWeight: 700, lineHeight: '17px', color: '#134e4a' }}>{step}</div>
       {showInput && (
         <div data-testid="wall-draw-input" style={{ display: 'flex', gap: 8, marginTop: 6, pointerEvents: 'auto' }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a', lineHeight: '14px' }}>Pituus
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a', lineHeight: '14px' }}>{lengthLabel}
             <input ref={lengthRef} data-testid="draw-cursor-length" inputMode="decimal" value={lengthValue} style={{ ...box, display: 'block', marginTop: 2, borderColor: field === 'length' ? '#0f766e' : '#d6d3d1' }} onChange={(event) => onLength(event.target.value)} onFocus={(event) => { event.target.select(); onLength(event.target.value) }} onKeyDown={onKey} onPointerDown={(event) => event.stopPropagation()} />
           </label>
-          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a', lineHeight: '14px' }}>Kulma
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a', lineHeight: '14px' }}>{angleLabel}
             <input ref={angleRef} data-testid="draw-cursor-angle" inputMode="decimal" value={angleValue} style={{ ...box, display: 'block', marginTop: 2, width: 72, borderColor: field === 'angle' ? '#0f766e' : '#d6d3d1' }} onChange={(event) => onAngle(event.target.value)} onFocus={(event) => { event.target.select(); onAngle(event.target.value) }} onKeyDown={onKey} onPointerDown={(event) => event.stopPropagation()} />
           </label>
         </div>
@@ -512,16 +512,6 @@ function yardPlacesOne(id) {
   if (id.startsWith('plant:') || id.startsWith('object:') || id.startsWith('building:')) return true
   if (id.startsWith('ground:')) return GROUND_TOOLS.find((item) => item.id === id.slice(7))?.mode === 'point'
   return false
-}
-
-const TOOL_LABELS = {
-  exterior: 'Ulkoseinä',
-  interior: 'Väliseinä',
-  door: 'Ovi',
-  passage: 'Oviaukko',
-  window: 'Ikkuna',
-  room: 'Huone',
-  detect: 'Tunnista huone',
 }
 
 function sheetPixels(size, plan, site = false) {
@@ -1990,7 +1980,7 @@ export default function FloorPlanApp() {
       if (verdict.action === 'ignore') return true
       if (verdict.action === 'duplicate') {
         lastPlace.current = stamp
-        showToast(`${candidate.name || 'Kohde'} on jo tässä`)
+        showToast(t('toast.already', { name: candidate.name || t('toast.target') }))
         flashItem(verdict.existing?.id)
         onHit?.(verdict.existing)
         return true
@@ -2054,7 +2044,7 @@ export default function FloorPlanApp() {
         if (!result.placed) {
           if (result.verdict.action === 'duplicate') {
             lastPlace.current = stamp
-            showToast(`${spec.name || 'Kohde'} on jo tässä`)
+            showToast(t('toast.already', { name: spec.name || t('toast.target') }))
             flashItem(result.verdict.existing?.id)
             if (result.verdict.existing) choose({ kind: 'service', service: { target: 'node', id: result.verdict.existing.id, system: result.verdict.existing.system } })
           }
@@ -2120,12 +2110,12 @@ export default function FloorPlanApp() {
     if (tool === 'door' || tool === 'window' || tool === 'passage') {
       const along = visual?.wall ? visual : snapAlongWall(world, plan.walls, Math.max(12 / Math.max(ppm, 0.001), 0.35), !altRef.current)
       if (!along?.wall) return
-      const openingName = tool === 'door' ? 'Ovi' : tool === 'passage' ? 'Oviaukko' : 'Ikkuna'
+      const openingName = tool === 'door' ? t('tool.door') : tool === 'passage' ? t('tool.passage') : t('tool.window')
       if (blocked([], { name: openingName, x: 0, z: 0 }, () => 'opening')) return
       const before = (plan.openings || []).length
       const next = refreshHeat(addOpening(plan, along.wall.id, along.point || point, tool, tool === 'door' ? doorHand : {}))
       if ((next.openings || []).length === before) {
-        showToast(`${openingName} on jo tässä`)
+        showToast(t('toast.already', { name: openingName }))
         return
       }
       commit(next)
@@ -2969,7 +2959,7 @@ export default function FloorPlanApp() {
     if (access.workspaces.length && !access.workspaces.includes(workspace)) setWorkspace('rakenne')
   }, [account, plan.projectType, workspace, access.workspaces])
   const savePdf = (doc, name) => {
-    if (access.watermark) stampDemoWatermark(doc)
+    if (access.watermark) stampDemoWatermark(doc, t('watermark.demo'))
     doc.save(name)
   }
 
@@ -3036,7 +3026,7 @@ export default function FloorPlanApp() {
   liveRef.current = liveEnd
   angleStepRef.current = angleStep
   const drawingWalls = tool === 'exterior' || tool === 'interior'
-  const stepText = drawingWalls ? drawStepText(draft, chainCount) : ''
+  const stepText = drawingWalls ? drawStepText(draft, chainCount, locale) : ''
   const drawAlign = alignForReference(wallRefMode, refSide)
   const liveMm = draft && liveEnd ? Math.max(0, Math.round(segmentLength(draft, liveEnd) * 1000)) : 0
   const liveDeg = draft && liveEnd ? wallDirection({ a: draft, b: liveEnd }) : 0
@@ -3154,14 +3144,16 @@ export default function FloorPlanApp() {
   const spec = PLACEABLES.find((item) => item.id === svcKind)
   const placingOne = Boolean(placing || svcTool === 'node' || tool === 'door' || tool === 'window' || tool === 'passage' || yardPlacesOne(yardTool))
   const drawingTool = Boolean(!placingOne && (tool === 'exterior' || tool === 'interior' || tool === 'room' || tool === 'detect' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool))))
+  const toolLabel = tool === 'detect' ? t('tool.detectRoom') : (t(`tool.${tool}`) === `tool.${tool}` ? null : t(`tool.${tool}`))
   const activeName = placing
-    ? (FIXTURES.find((item) => item.id === placing)?.name || 'Kaluste')
+    ? (FIXTURES.find((item) => item.id === placing)?.name || t('furniture.item'))
     : svcTool
-      ? (spec?.name || 'Talotekniikka')
+      ? (spec?.name || t('service.device'))
       : yardTool
         ? yardToolLabel(yardTool)
-        : (TOOL_LABELS[tool] || null)
-  const workspaceName = WORKSPACES.find((item) => item.id === workspace)?.name || ''
+        : (tool === 'select' ? null : toolLabel)
+  const workspaceItem = WORKSPACES.find((item) => item.id === workspace)
+  const workspaceName = workspaceItem ? t(`workspace.${workspaceItem.id}`) : ''
   const modeLabel = modeChipText({ workspace: workspaceName, name: activeName, repeat: repeatPlace && placingOne, drawing: drawingTool })
   const engaged = Boolean(activeName)
   const status = engaged
@@ -3174,8 +3166,8 @@ export default function FloorPlanApp() {
     return (
       <div data-testid="draw-blocked" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', color: '#0f172a' }}>
         <div style={{ textAlign: 'center', maxWidth: 460 }}>
-          <h1>{access.admin ? 'Ylläpitäjä ei piirrä' : 'Tili ei ole käytössä'}</h1>
-          <a href={access.admin ? '/admin' : '/'}>{access.admin ? 'Ylläpito' : 'Etusivu'}</a>
+          <h1>{access.admin ? t('gate.admin') : t('gate.accountOff')}</h1>
+          <a href={access.admin ? '/admin' : '/'}>{access.admin ? t('shell.admin') : t('shell.home')}</a>
         </div>
       </div>
     )
@@ -3185,7 +3177,7 @@ export default function FloorPlanApp() {
     <div className="plan-app" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
       {access.pending && (
         <div data-testid="payment-pending" style={{ background: '#fff7ed', color: '#9a3412', textAlign: 'center', padding: '8px 12px', fontWeight: 700 }}>
-          Odottaa maksun vahvistusta
+          {t('shell.pending')}
         </div>
       )}
       <PlanChrome
@@ -3323,22 +3315,22 @@ export default function FloorPlanApp() {
         onRoute={() => {
           const systems = workspaceSystems(workspace)
           if (!systems.length) {
-            showToast('Reititys on Sähkö-, IV- ja LVI-työtiloissa')
+            showToast(t('toast.routeWorkspace'))
             return
           }
           let next = plan
           const notes = []
           systems.forEach((system) => {
             const routed = autoRoute(next, system, { floorHeating: workspace === 'lvi' && floorHeating })
-            if (routed.routeNotice) notes.push(`${system === 'electric' ? 'Sähkö' : system === 'iv' ? 'IV' : system === 'water' ? 'Vesi' : system === 'drain' ? 'Viemäri' : 'Lämmitys'}: ${routed.routeNotice}`)
+            if (routed.routeNotice) notes.push(`${t(`system.${system}`)}: ${routed.routeNotice}`)
             next = routed
           })
           const clean = { ...next }
           delete clean.routeNotice
           const changed = JSON.stringify(clean.services?.runs || []) !== JSON.stringify(plan.services?.runs || [])
           if (notes.length) showToast(notes.join(' · '))
-          else if (changed) showToast('Reitit päivitetty')
-          else showToast('Reitit olivat jo ajan tasalla')
+          else if (changed) showToast(t('toast.routesUpdated'))
+          else showToast(t('service.upToDate'))
           if (changed) commit(syncYardServices(clean))
           setSvcPoints([])
         }}
@@ -3385,11 +3377,11 @@ export default function FloorPlanApp() {
           const proposals = systems.flatMap((system) => suggestEquipment(plan, system, { floorHeating }).proposals)
           if (!proposals.length) {
             setGhosts([])
-            showToast('Ei uusia laite-ehdotuksia')
+            showToast(t('service.noSuggest'))
             return
           }
           setGhosts(proposals)
-          showToast('Ehdotukset näkyvät katkoviivalla. Hyväksy tai paina Esc.')
+          showToast(t('toast.suggest'))
         }}
         onAccept={() => {
           const systems = workspaceSystems(workspace)
@@ -3398,7 +3390,7 @@ export default function FloorPlanApp() {
           if (next === plan) { setGhosts([]); return }
           commit(next)
           setGhosts([])
-          showToast('Ehdotetut laitteet lisätty')
+          showToast(t('toast.suggested'))
         }}
         ghostCount={ghosts.length}
         onRewire={() => {
@@ -3451,29 +3443,29 @@ export default function FloorPlanApp() {
         onRepeat={setRepeatPlace}
         onCleanup={() => {
           const result = removeStacked(plan)
-          if (!result.removed) { showToast('Päällekkäisiä ei löytynyt'); return }
+          if (!result.removed) { showToast(t('toast.noneStacked')); return }
           commit(result.plan)
-          showToast(`Poistettiin ${result.removed} päällekkäistä`)
+          showToast(t('toast.removedStacked', { count: result.removed }))
         }}
         onRemoveAuto={() => {
           const next = removeAutoAdded(plan)
           const before = (plan.services?.nodes?.length || 0) + (plan.services?.runs?.length || 0)
           const after = (next.services?.nodes?.length || 0) + (next.services?.runs?.length || 0)
-          if (before === after) { showToast('Automaattisesti lisättyjä ei löytynyt'); return }
+          if (before === after) { showToast(t('toast.noneAuto')); return }
           commit(next)
-          showToast('Automaattisesti lisätyt poistettiin')
+          showToast(t('toast.removedAuto'))
         }}
         onStraighten={() => {
           const next = straightenWalls(plan, 2)
-          if (next === plan) { showToast('Seinät ovat jo suorassa'); return }
+          if (next === plan) { showToast(t('toast.alreadyStraight')); return }
           commit(next)
-          showToast('Seinät suoristettiin')
+          showToast(t('toast.straightened'))
         }}
       />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
         {compact && drawer && (
-          <button type="button" className="drawer-backdrop" data-testid="drawer-backdrop" aria-label="Sulje tiedot" onClick={() => setDrawer(null)} />
+          <button type="button" className="drawer-backdrop" data-testid="drawer-backdrop" aria-label={t('panel.closeInfo')} onClick={() => setDrawer(null)} />
         )}
         <aside
           className="plan-drawer"
@@ -3481,10 +3473,10 @@ export default function FloorPlanApp() {
           data-open={compact && drawer === 'library' ? 'true' : 'false'}
           style={compact ? undefined : { width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}
         >
-          {compact && <button type="button" data-testid="close-drawer" onClick={() => setDrawer(null)}>Sulje</button>}
+          {compact && <button type="button" data-testid="close-drawer" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
           <div data-testid="workspace-side-title" style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.4, color: '#0f766e', margin: '0 4px 8px' }}>{workspaceName}</div>
           {workspace === 'rakenne' && (
-            <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Seinät, huoneet, ovet, ikkunat, katto ja rakenteet. Muut tasot ovat himmennettyjä ja lukittuja.</p>
+            <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>{t('panel.structure')}</p>
           )}
           {workspace === 'rakenne' && doorSchedule(plan).length > 0 && (
             <div data-testid="door-schedule" style={{ margin: '4px 4px 12px' }}>
@@ -3503,13 +3495,13 @@ export default function FloorPlanApp() {
           )}
           {workspace === 'piha' && (
             <>
-              <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Asemapiirros ja piha. Työkalut ovat nauhassa. Talo ja talotekniikka ovat lukittuja.</p>
+              <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>{t('panel.site')}</p>
               <PihaTerraceLevels plan={plan} selection={pick} onCommit={commit} />
             </>
           )}
           {(workspace === 'sahko' || workspace === 'iv' || workspace === 'lvi') && (
             <div data-testid="device-library">
-              <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>Vain tämän järjestelmän laitteet ja reitit. Muut tasot ovat himmennettyjä.</p>
+              <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>{t('panel.service')}</p>
               {PLACEABLES.filter((item) => workspaceSystems(workspace).includes(item.system) && item.mode === 'node').map((item) => (
                 <button key={item.id} type="button" data-testid={`side-device-${item.id}`} style={sideBtn(svcTool === 'node' && svcKind === item.id)} onClick={() => {
                   if (svcTool === 'node' && svcKind === item.id) { exitToSelect(); return }
@@ -3607,7 +3599,7 @@ export default function FloorPlanApp() {
           )}
           {schedule.length > 0 && (
             <div data-testid="furniture-schedule" style={{ marginTop: 12, borderTop: '1px solid #e7e5e4', paddingTop: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '0 4px 6px' }}>KALUSTELUETTELO</div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '0 4px 6px' }}>{t('furniture.schedule')}</div>
               {schedule.map((row) => (
                 <div key={row.key} style={{ fontSize: 11, padding: '3px 4px', borderBottom: '1px solid #f5f5f4' }}>
                   <div style={{ fontWeight: 700 }}>{row.count} × {row.name}{row.variant ? ` ${row.variant}` : ''}</div>
@@ -3643,11 +3635,11 @@ export default function FloorPlanApp() {
             ) : drawingWalls ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%', overflow: 'hidden' }}>
                 <span data-testid="draw-status" style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{activeName} · {stepText}</span>
-                <span data-testid="draw-ortho" style={{ flex: 'none' }}>{angleStep === 0 ? 'Vapaa' : angleStep === 90 ? 'Orto' : `${angleStep}°`}</span>
+                <span data-testid="draw-ortho" style={{ flex: 'none' }}>{angleStep === 0 ? t('draw.free') : angleStep === 90 ? t('draw.ortho') : `${angleStep}°`}</span>
                 {[
-                  ['outer', 'Ulkopinta', 'wall-ref-outer'],
-                  ['center', 'Keskiviiva', 'wall-ref-center'],
-                  ['inner', 'Sisäpinta', 'wall-ref-inner'],
+                  ['outer', t('draw.outer'), 'wall-ref-outer'],
+                  ['center', t('draw.center'), 'wall-ref-center'],
+                  ['inner', t('draw.inner'), 'wall-ref-inner'],
                 ].map(([id, label, testid]) => (
                   <button
                     key={id}
@@ -3658,11 +3650,11 @@ export default function FloorPlanApp() {
                     onClick={() => setWallRefMode(id)}
                   >{label}</button>
                 ))}
-                <button type="button" data-testid="wall-ref-flip" style={{ ...statusBtn, flex: 'none' }} onClick={() => setRefSide((side) => (side === 'left' ? 'right' : 'left'))}>Vaihda puoli</button>
+                <button type="button" data-testid="wall-ref-flip" style={{ ...statusBtn, flex: 'none' }} onClick={() => setRefSide((side) => (side === 'left' ? 'right' : 'left'))}>{t('draw.flip')}</button>
               </span>
             ) : (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <span data-testid="status-tool">{track?.armed === 'pick' ? 'Mistä: napsauta peruspiste' : status}</span>
+                <span data-testid="status-tool">{track?.armed === 'pick' ? t('draw.fromPoint') : status}</span>
                 {trackLive && <span data-testid="track-status" data-label={trackLive.label}>{trackLive.label}</span>}
                 {trackingActive && (
                   <button
@@ -3674,10 +3666,10 @@ export default function FloorPlanApp() {
                       trackRef.current = next
                       setTrack(next)
                     }}
-                  >Mistä</button>
+                  >{t('draw.from')}</button>
                 )}
                 {tool === 'select' && !command && picks.some((item) => item.kind === 'wall') && (
-                  <button type="button" data-testid="shift-wall" style={statusBtn} onClick={() => beginCommand('shift-wall')}>Siirrä seinä</button>
+                  <button type="button" data-testid="shift-wall" style={statusBtn} onClick={() => beginCommand('shift-wall')}>{t('draw.shiftWall')}</button>
                 )}
               </span>
             )}
@@ -3726,6 +3718,8 @@ export default function FloorPlanApp() {
                   clearance={14 + (0.28 * ppm2d) / 2}
                   field={drawField}
                   step={stepText}
+                  lengthLabel={t('draw.length')}
+                  angleLabel={t('draw.angle')}
                   showInput={Boolean(draft)}
                   lengthValue={drawEdited ? typedLen : (draft ? String(liveMm) : '')}
                   angleValue={drawAngle !== '' ? drawAngle : (draft ? String(liveDeg) : '')}
@@ -4498,10 +4492,10 @@ export default function FloorPlanApp() {
           )}
           {compact && (
             <div className="hand-bar" data-testid="hand-bar">
-              <button type="button" data-testid="toggle-tools" aria-expanded={toolsOpen} onClick={() => setToolsOpen((open) => !open)}>Työkalut</button>
-              <button type="button" data-testid="toggle-hand" aria-pressed={hand} onClick={() => setHand((value) => !value)}>{hand ? 'Piirrä' : 'Siirrä'}</button>
-              <button type="button" data-testid="toggle-library" aria-pressed={drawer === 'library'} onClick={() => setDrawer((current) => current === 'library' ? null : 'library')}>Kirjasto</button>
-              <button type="button" data-testid="toggle-drawer" aria-pressed={drawer === 'info'} onClick={() => setDrawer((current) => current === 'info' ? null : 'info')}>Tiedot</button>
+              <button type="button" data-testid="toggle-tools" aria-expanded={toolsOpen} onClick={() => setToolsOpen((open) => !open)}>{t('edit.tools')}</button>
+              <button type="button" data-testid="toggle-hand" aria-pressed={hand} onClick={() => setHand((value) => !value)}>{hand ? t('edit.draw') : t('edit.pan')}</button>
+              <button type="button" data-testid="toggle-library" aria-pressed={drawer === 'library'} onClick={() => setDrawer((current) => current === 'library' ? null : 'library')}>{t('panel.library')}</button>
+              <button type="button" data-testid="toggle-drawer" aria-pressed={drawer === 'info'} onClick={() => setDrawer((current) => current === 'info' ? null : 'info')}>{t('panel.info')}</button>
             </div>
           )}
         </div>
@@ -4512,7 +4506,7 @@ export default function FloorPlanApp() {
           data-open={compact && drawer === 'info' ? 'true' : 'false'}
           style={compact ? undefined : { width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}
         >
-          {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>Sulje</button>}
+          {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
           {pick && panel !== 'house' ? (
             <div data-testid="panel-heading" style={{ marginBottom: 10 }}>
               <button type="button" data-testid="panel-back-house" onClick={() => setPanel('house')} style={{ display: 'block', padding: 0, border: 'none', background: 'transparent', color: '#0f766e', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 4 }}>{t('select.back')}</button>
