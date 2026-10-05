@@ -271,10 +271,16 @@ export function HouseSettings({ plan, onApply }) {
         </select>
       </Field>
       <Field label={t('house.pitch')}>
-        <input style={inputStyle} type="number" min="0" max="60" value={plan.roofPitch ?? 25} onChange={(event) => onApply(updateHouse(plan, { roofPitch: parseFloat(event.target.value) || 0 }))} />
+        <input data-testid="roof-pitch" style={inputStyle} type="number" min="0" max="60" value={plan.roofPitch ?? 25} onChange={(event) => onApply(updateHouse(plan, { roofPitch: parseFloat(event.target.value) || 0 }))} />
       </Field>
       <Field label={t('house.eave')}>
-        <input style={inputStyle} type="number" min="0" max="1500" value={mm(plan.eaveOverhang ?? 0.5)} onChange={(event) => onApply(updateHouse(plan, { eaveOverhang: fromMm(event.target.value) }))} />
+        <input data-testid="roof-overhang" style={inputStyle} type="number" min="0" max="1500" value={mm(plan.eaveOverhang ?? 0.5)} onChange={(event) => onApply(updateHouse(plan, { eaveOverhang: fromMm(event.target.value) }))} />
+      </Field>
+      <Field label={t('house.paper')}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button type="button" data-testid="paper-a3" onClick={() => onApply({ ...plan, paper: 'a3' })} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1', background: plan.paper !== 'a4' ? '#f0fdfa' : '#fff', padding: '6px 10px' }}>A3</button>
+          <button type="button" data-testid="paper-a4" onClick={() => onApply({ ...plan, paper: 'a4' })} style={{ ...menuBtn, width: 'auto', border: '1px solid #d6d3d1', background: plan.paper === 'a4' ? '#f0fdfa' : '#fff', padding: '6px 10px' }}>A4</button>
+        </div>
       </Field>
       <div style={{ fontSize: 12, fontWeight: 700, margin: '4px 0 6px' }}>{t('house.facade')}</div>
       <SwatchRow group="exterior" value={plan.exteriorId} onPick={(id) => onApply({ ...plan, exteriorId: id })} />
@@ -420,22 +426,11 @@ function SwatchRow({ group, value, onPick }) {
   )
 }
 
-export function RoofFields({ plan, onApply }) {
+export function RoofFields({ plan }) {
+  const { t } = usePlanLocale(plan)
   return (
-    <div data-testid="roof-fields">
-      <Field label="Kattomuoto">
-        <select data-testid="roof-type" style={inputStyle} value={plan.roofType || 'gable'} onChange={(event) => onApply(updateHouse(plan, { roofType: event.target.value }))}>
-          {ROOF_TYPES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-      </Field>
-      <Field label="Kattokaltevuus (°)" testid="roof-pitch-field">
-        <input data-testid="roof-pitch" style={inputStyle} type="number" min="0" max="60" value={plan.roofPitch ?? 25} onChange={(event) => onApply(updateHouse(plan, { roofPitch: parseFloat(event.target.value) || 0 }))} />
-      </Field>
-      <Field label="Räystään ylitys (mm)">
-        <input data-testid="roof-overhang" style={inputStyle} type="number" min="0" max="1500" value={mm(plan.eaveOverhang ?? 0.5)} onChange={(event) => onApply(updateHouse(plan, { eaveOverhang: fromMm(event.target.value) }))} />
-      </Field>
-      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Katemateriaali</div>
-      <SwatchRow group="roof" value={plan.roofId} onPick={(id) => onApply({ ...plan, roofId: id })} />
+    <div data-testid="roof-fields" style={{ fontSize: 12, color: '#57534e', lineHeight: 1.4 }}>
+      {t('project.roofInSettings')}
     </div>
   )
 }

@@ -8,7 +8,8 @@ import { LanguageSwitch, useLocale } from '@/components/i18n/Locale'
 import PlanView from './PlanView'
 import HeatLoadPanel from './HeatLoadPanel'
 import { ROOM_TYPES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
-import { PROJECT_TYPES } from '@/lib/access'
+import { ProjectInfoDialog } from '@/components/floorplan/ProjectDialogs'
+import ColdChrome from './ColdChrome'
 import { applyProjectType } from '@/lib/projectMode'
 import { CURRENT_KEY } from '@/lib/projects'
 import { emptyPlan } from '@/lib/floorplan'
@@ -52,7 +53,7 @@ import {
 } from '@/lib/cadEdit'
 import { registerDrawingFlush } from '@/lib/staleDeploy'
 import { useViewport } from '@/components/useViewport'
-import { CadPrompt, CadToolbar, MultiProperties } from '../floorplan/CadTools'
+import { CadPrompt, MultiProperties } from '../floorplan/CadTools'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
 import { panelSchedule } from '@/lib/sharedWalls'
 import { doorChoices, doorEquipmentPatch, doorSchedule, doorTypeById } from '@/lib/doors'
@@ -61,56 +62,6 @@ import { buildPdf, pdfFilename } from '@/lib/pdfExport'
 import SchematicView from './SchematicView'
 
 const Scene3D = dynamic(() => import('./Scene3D'), { ssr: false })
-
-const iconBtn = (active) => ({
-  width: 32,
-  height: 32,
-  padding: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  borderRadius: 8,
-  border: '1px solid transparent',
-  background: active ? '#9a3412' : 'transparent',
-  color: active ? '#fff7ed' : '#e7e5e4',
-  boxShadow: active ? '0 0 0 2px #fdba74' : 'none',
-  cursor: 'pointer',
-  flexShrink: 0,
-  transform: 'none',
-})
-
-const textBtn = (active) => ({
-  height: 32,
-  padding: '0 10px',
-  display: 'inline-flex',
-  alignItems: 'center',
-  borderRadius: 8,
-  border: '1px solid transparent',
-  background: active ? '#134e4a' : 'transparent',
-  color: active ? '#ccfbf1' : '#e7e5e4',
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: 'pointer',
-  flexShrink: 0,
-  transform: 'none',
-  whiteSpace: 'nowrap',
-})
-
-const compactBtn = (active) => {
-  const style = textBtn(active)
-  delete style.display
-  return { ...style, minHeight: 44, minWidth: 44, height: 44, padding: '0 12px' }
-}
-
-function Icon({ children }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      {children}
-    </svg>
-  )
-}
-
-const stroke = { stroke: 'currentColor', strokeWidth: 1.45, strokeLinecap: 'round', strokeLinejoin: 'round' }
 
 const sectionHead = {
   width: '100%',
@@ -300,7 +251,9 @@ export default function DesignerApp({
   const [gridSize, setGridSize] = useState(0.1)
   const [fitToken, setFitToken] = useState(1)
   const [saveState, setSaveState] = useState('saved')
-  const [exportOpen, setExportOpen] = useState(false)
+  const [coldTab, setColdTab] = useState('structure')
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [roomsOpen, setRoomsOpen] = useState(true)
   const [templatesOpen, setTemplatesOpen] = useState(true)
   const roomsRef = useRef(rooms)
@@ -479,13 +432,6 @@ export default function DesignerApp({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
-
-  useEffect(() => {
-    if (!exportOpen) return undefined
-    const close = () => setExportOpen(false)
-    window.addEventListener('mousedown', close)
-    return () => window.removeEventListener('mousedown', close)
-  }, [exportOpen])
 
   useEffect(() => {
     if (!onPersist) return undefined
@@ -1197,158 +1143,55 @@ export default function DesignerApp({
   const designLabel = modeChipText({ name: designName, repeat: repeatPlace && Boolean(placing), drawing: designDrawing })
 
   return (
-    <div className="designer-app" data-testid="cold-workspace" data-project-type={projectType} style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
-      <header className={`designer-header${toolsOpen ? ' tools-open' : ''}`} style={{
-        display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 8,
-        height: 48, padding: '0 10px', overflow: 'hidden',
-        background: '#14181f', borderBottom: '1px solid #0c0f14', color: '#f5f5f4',
-      }}>
-        <Link href="/projects" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, letterSpacing: -0.2, flexShrink: 0 }}>RefCAD</Link>
-        <select
-          data-testid="project-type"
-          aria-label={t('chrome.projectType')}
-          value={projectType}
-          onChange={(event) => chooseProjectType(event.target.value)}
-          style={{ height: 32, maxWidth: 168, borderRadius: 8, border: '1px solid #3f3f46', background: '#1c212b', color: '#f5f5f4', fontSize: 12, fontWeight: 650, flexShrink: 0 }}
-        >
-          {PROJECT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-        </select>
-        <div className="designer-tool"><LanguageSwitch value={locale} onChange={setLocale} /></div>
-        <LanguageSwitch className="compact-only" value={locale} onChange={setLocale} />
-        {projectType !== 'kylmio' && (
-          <Link href="/pohjakuva" data-testid="open-floorplan" title={t('designer.floorplanTitle')} style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>{t('designer.floorplan')}</Link>
-        )}
-        <input
-          aria-label={t('designer.projectName')}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={{
-            background: 'transparent', border: 'none', color: '#fff',
-            fontWeight: 650, fontSize: 13, width: 148, minWidth: 72, flex: '0 1 160px',
-            padding: '4px 2px',
-          }}
+    <div className="designer-app plan-app" data-testid="cold-workspace" data-project-type={projectType} style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
+      {infoOpen && (
+        <ProjectInfoDialog
+          projectType={projectType}
+          onCancel={() => setInfoOpen(false)}
+          onConfirm={(id) => { setInfoOpen(false); chooseProjectType(id) }}
         />
-        <span title={saveText} style={{ fontSize: 11, color: saveState === 'error' ? '#fca5a5' : '#86efac', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          {saveState === 'error' ? t('designer.error') : saveState === 'saving' ? t('designer.saving') : t('designer.saved')}
-        </span>
-        <button type="button" className="compact-only" data-testid="designer-tools" aria-expanded={toolsOpen} onClick={() => setToolsOpen((open) => !open)} style={compactBtn(toolsOpen)}>{t('edit.tools')}</button>
-        <button type="button" className="compact-only" data-testid="designer-hand" aria-pressed={hand} onClick={() => setHand((value) => !value)} style={compactBtn(hand)}>{hand ? t('edit.draw') : t('edit.pan')}</button>
-        <button type="button" className="compact-only" data-testid="designer-rooms" aria-pressed={drawer === 'rooms'} onClick={() => setDrawer((current) => current === 'rooms' ? null : 'rooms')} style={compactBtn(drawer === 'rooms')}>{t('designer.rooms')}</button>
-        <button type="button" className="compact-only" data-testid="designer-info" aria-pressed={drawer === 'info'} onClick={() => setDrawer((current) => current === 'info' ? null : 'info')} style={compactBtn(drawer === 'info')}>{t('designer.info')}</button>
-        <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
-          <button type="button" data-testid="tool-select" aria-pressed={tool === 'select' && !placing} title={t('designer.selectTitle')} style={iconBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
-            <Icon><path {...stroke} d="M4 2.4 L4 13.2 L7.1 9.8 L10.4 14 L11.8 13.2 L8.5 9 L12.8 8.4 Z" /></Icon>
-          </button>
-          <button type="button" data-testid="tool-draw" aria-pressed={tool === 'draw'} title={t('designer.roomTitle')} style={iconBtn(tool === 'draw')} onClick={() => { if (tool === 'draw') { setTool('select'); return } setTool('draw'); setPlacingId(null) }}>
-            <Icon><path {...stroke} d="M3.2 3.6 H12.8 V12.4 H3.2 Z" /></Icon>
-          </button>
-          <button type="button" data-testid="tool-polygon" aria-pressed={tool === 'polygon'} title={t('designer.polygonTitle')} style={iconBtn(tool === 'polygon')} onClick={() => { if (tool === 'polygon') { setTool('select'); return } setTool('polygon'); setPlacingId(null) }}>
-            <Icon><path {...stroke} d="M3.2 11.2 L6.2 3 L13 5.2 L11 13 Z" /></Icon>
-          </button>
-          <button type="button" data-testid="tool-partition" aria-pressed={tool === 'partition'} title={t('designer.partitionTitle')} style={iconBtn(tool === 'partition')} onClick={() => { if (tool === 'partition') { setTool('select'); return } setTool('partition'); setPlacingId(null) }}>
-            <Icon><path {...stroke} d="M3 3.2 H13 V12.8 H8.2 V3.2" /></Icon>
-          </button>
-          <button type="button" data-testid="tool-pipe" aria-pressed={tool === 'pipe'} title={t('designer.pipeTitle')} style={iconBtn(tool === 'pipe')} onClick={() => { if (tool === 'pipe') { setTool('select'); return } setTool('pipe'); setPlacingId(null) }}>
-            <Icon><path {...stroke} d="M3 12.2 H7 V4.2 H13" /></Icon>
-          </button>
-          <button type="button" data-testid="auto-pipe" title={t('designer.autoPipeTitle')} style={textBtn(false)} onClick={runAutoPipe}>{t('designer.autoPipe')}</button>
-          <button type="button" data-testid="tool-cable" aria-pressed={tool === 'cable'} title={t('designer.cableTitle')} style={iconBtn(tool === 'cable')} onClick={() => { if (tool === 'cable') { setTool('select'); return } setTool('cable'); setPlacingId(null) }}>
-            <Icon><path {...stroke} d="M3 4.2 H6.2 V8 H9.8 V4.2 H13 V12.2" /></Icon>
-          </button>
-          <button type="button" data-testid="repeat-place" aria-pressed={repeatPlace} title={t('designer.repeatTitle')} style={{ ...textBtn(false), ...(repeatPlace ? { background: '#9a3412', color: '#fff7ed', boxShadow: '0 0 0 2px #fdba74' } : {}) }} onClick={() => setRepeatPlace((value) => !value)}>{t('designer.repeat')}</button>
-          <button type="button" data-testid="cleanup-duplicates" title={t('designer.cleanupTitle')} style={textBtn(false)} onClick={() => {
-            const result = removeStackedEquipment(roomsRef.current)
-            if (!result.removed) { showToast(t('toast.noneStacked')); return }
-            pushUndo()
-            setRooms(result.rooms)
-            showToast(t('toast.removedStacked', { count: result.removed }))
-          }}>{t('edit.cleanup')}</button>
-        </div>
-        <div className="designer-tool">
-          <select aria-label={t('designer.roomType')} value={drawType} onChange={(e) => setDrawType(e.target.value)} style={{ background: '#1c212b', color: '#f5f5f4', border: '1px solid transparent', borderRadius: 8, height: 44, padding: '0 8px', fontSize: 12, maxWidth: 160, flexShrink: 1 }}>
-            {ROOM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-          </select>
-        </div>
-        <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
-          <button type="button" title={t('designer.viewPlan')} style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
-          <button type="button" data-testid="view-3d" title={t('designer.view3d')} style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
-          <button type="button" data-testid="view-split" title={t('designer.splitTitle')} style={textBtn(view === 'split')} onClick={() => setView('split')}>{t('designer.split')}</button>
-          <button type="button" data-testid="view-schematic" title={t('designer.schematicTitle')} style={textBtn(view === 'schematic')} onClick={() => setView('schematic')}>{t('designer.schematic')}</button>
-        </div>
-        <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
-          <button type="button" data-testid="unit-si" title={t('designer.unitsSi')} style={textBtn(unitSystem === 'SI')} onClick={() => setUnitSystem('SI')}>SI</button>
-          <button type="button" data-testid="unit-ip" title={t('designer.unitsIp')} style={textBtn(unitSystem === 'IP')} onClick={() => setUnitSystem('IP')}>IP</button>
-        </div>
-        <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          <button type="button" title={t('designer.undoTitle')} onClick={undo} style={iconBtn(false)}>
-            <Icon><path {...stroke} d="M4 7.5 H11 A3.2 3.2 0 1 1 11 11.2" /><path {...stroke} d="M4 4.6 V7.8 H7.2" /></Icon>
-          </button>
-          <button type="button" title={t('designer.redoTitle')} onClick={redo} style={iconBtn(false)}>
-            <Icon><path {...stroke} d="M12 7.5 H5 A3.2 3.2 0 1 0 5 11.2" /><path {...stroke} d="M12 4.6 V7.8 H8.8" /></Icon>
-          </button>
-          <button type="button" title={t('designer.fitTitle')} onClick={() => setFitToken((token) => token + 1)} style={iconBtn(false)}>
-            <Icon><path {...stroke} d="M3.2 6.2 V3.2 H6.2 M9.8 3.2 H12.8 V6.2 M12.8 9.8 V12.8 H9.8 M6.2 12.8 H3.2 V9.8" /></Icon>
-          </button>
-        </div>
-        <span style={{ flex: 1, minWidth: 8 }} />
-        <button type="button" className="designer-tool" data-testid="example-enquiry" title={t('designer.exampleTitle')} onClick={loadExample} style={textBtn(false)}>{t('designer.example')}</button>
-        <div style={{ position: 'relative', flexShrink: 0 }} onMouseDown={(event) => event.stopPropagation()}>
-          <button type="button" title={t('designer.exportTitle')} aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)} style={textBtn(exportOpen)}>{t('designer.export')}</button>
-          {exportOpen && (
-            <div style={{
-              position: 'absolute', right: 0, top: 36, width: 188, zIndex: 30,
-              background: '#1c212b', border: '1px solid #3f3f46', borderRadius: 10,
-              padding: 4, boxShadow: '0 16px 40px rgba(0,0,0,0.35)',
-            }}>
-              {[
-                { id: 'pdf', test: 'export-pdf', label: t('designer.pdf'), run: exportPdf },
-                { id: 'dxf', test: 'export-dxf', label: t('designer.dxf'), run: exportDxf },
-                { id: 'json', test: undefined, label: 'JSON', run: exportJson },
-              ].map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  data-testid={item.test}
-                  onClick={() => { setExportOpen(false); item.run() }}
-                  style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
-                    background: 'transparent', color: '#f5f5f4', border: 'none', borderRadius: 7,
-                    fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none',
-                  }}
-                >
-                  {item.label}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => { setExportOpen(false); fileRef.current?.click() }}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
-                  background: 'transparent', color: '#f5f5f4', border: 'none', borderRadius: 7,
-                  fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none',
-                }}
-              >
-                {t('designer.import')}
-              </button>
-              {user && (
-                <form action="/api/auth/logout" method="POST">
-                  <button type="submit" style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
-                    background: 'transparent', color: '#fecaca', border: 'none', borderRadius: 7,
-                    fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none',
-                  }}>{t('designer.signOut')}</button>
-                </form>
-              )}
-            </div>
-          )}
-        </div>
-        <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={importJson} />
-      </header>
-
-      <div className={`designer-cad${toolsOpen ? ' tools-open' : ''}`}>
-      <CadToolbar
-        scope="cold"
-        active={cad?.name}
+      )}
+      <ColdChrome
+        t={t}
+        locale={locale}
+        setLocale={setLocale}
+        name={name}
+        onName={setName}
+        projectType={projectType}
+        view={view}
+        onView={setView}
+        tab={coldTab}
+        onTab={setColdTab}
+        tool={tool}
+        placing={Boolean(placing)}
+        onTool={(id) => {
+          if (id === 'select' || tool === id) { setTool('select'); setPlacingId(null); return }
+          setTool(id)
+          setPlacingId(null)
+        }}
+        onAutoPipe={runAutoPipe}
+        onCleanup={() => {
+          const result = removeStackedEquipment(roomsRef.current)
+          if (!result.removed) { showToast(t('toast.noneStacked')); return }
+          pushUndo()
+          setRooms(result.rooms)
+          showToast(t('toast.removedStacked', { count: result.removed }))
+        }}
+        repeat={repeatPlace}
+        onRepeat={setRepeatPlace}
+        onUndo={undo}
+        onRedo={redo}
+        onFit={() => setFitToken((token) => token + 1)}
+        onExample={loadExample}
+        onPdf={exportPdf}
+        onDxf={exportDxf}
+        onJson={exportJson}
+        onImport={() => fileRef.current?.click()}
+        onProjectInfo={() => setInfoOpen(true)}
+        onProjectSettings={() => { setSettingsOpen(true); setDrawer('info') }}
+        settingsOpen={settingsOpen}
+        user={user}
+        cad={cad}
         onCommand={beginCad}
         onSelectType={(type) => {
           const hits = designerHits(sceneNow(), selectionBox({ x: -1e6, z: -1e6 }, { x: 1e6, z: 1e6 }))
@@ -1364,8 +1207,11 @@ export default function DesignerApp({
           }).map((item) => item.id))
         }}
         onLayer={(layer) => beginCad('layer', layer)}
+        compact={compact}
+        toolsOpen={toolsOpen}
+        onToggleTools={() => setToolsOpen((open) => !open)}
       />
-      </div>
+      <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={importJson} />
       {cad && (
         <div style={{ padding: '4px 10px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
           <CadPrompt
@@ -1390,7 +1236,7 @@ export default function DesignerApp({
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
         {compact && drawer && (
-          <button type="button" className="drawer-backdrop" data-testid="drawer-backdrop" aria-label="Sulje tiedot" onClick={() => setDrawer(null)} />
+          <button type="button" className="drawer-backdrop" data-testid="drawer-backdrop" aria-label={t('panel.closeInfo')} onClick={() => setDrawer(null)} />
         )}
         <aside
           data-testid="template-library"
@@ -1398,23 +1244,23 @@ export default function DesignerApp({
           data-open={compact && drawer === 'rooms' ? 'true' : 'false'}
           style={compact ? undefined : { width: 248, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #e7e5e4' }}
         >
-          {compact && <button type="button" data-testid="close-rooms" onClick={() => setDrawer(null)}>Sulje</button>}
+          {compact && <button type="button" data-testid="close-rooms" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
           <button type="button" onClick={() => setRoomsOpen((open) => !open)} style={sectionHead}>
-            <span>Huoneet</span><span>{roomsOpen ? '−' : '+'}</span>
+            <span>{t('designer.rooms')}</span><span>{roomsOpen ? '−' : '+'}</span>
           </button>
           {roomsOpen && (
             <div style={{ padding: '4px 8px 8px' }}>
-              {rooms.length === 0 && <div style={{ fontSize: 12, color: '#78716c', margin: '4px 4px 8px', lineHeight: 1.4 }}>Piirrä huone tai avaa esimerkki.</div>}
+              {rooms.length === 0 && <div style={{ fontSize: 12, color: '#78716c', margin: '4px 4px 8px', lineHeight: 1.4 }}>{t('designer.emptyLibrary')}</div>}
               {panels.count > 0 && (
                 <div data-testid="panel-schedule" style={{ fontSize: 11, color: '#44403c', margin: '4px 4px 8px', lineHeight: 1.45 }}>
-                  <strong>Paneelit</strong>
-                  <div>{panels.count} kpl · {panels.net.toFixed(1)} m²</div>
-                  <div>{panels.shared} yhteistä seinää, laskettu kerran</div>
+                  <strong>{t('cold.panels')}</strong>
+                  <div>{t('cold.panelLine', { count: panels.count, net: panels.net.toFixed(1) })}</div>
+                  <div>{t('cold.sharedLine', { count: panels.shared })}</div>
                 </div>
               )}
               {doors.length > 0 && (
                 <div data-testid="door-schedule" style={{ fontSize: 11, color: '#44403c', margin: '4px 4px 8px', lineHeight: 1.45 }}>
-                  <strong>Ovet</strong>
+                  <strong>{t('cold.doorsHeading')}</strong>
                   {doors.map((row) => (
                     <div key={`${row.name}-${row.uValue}`}>{row.count} × {row.name} · U {row.uValue}</div>
                   ))}
@@ -1436,7 +1282,7 @@ export default function DesignerApp({
                     <span style={{ width: 8, height: 28, borderRadius: 2, background: room.color, flexShrink: 0 }} />
                     <span style={{ minWidth: 0 }}>
                       <strong style={{ fontSize: 12 }}>{room.label}</strong> <span style={{ fontSize: 12 }}>{room.name}</span>
-                      <div style={{ fontSize: 10, color: '#78716c' }}>{room.temp}°C · {room.width.toFixed(1)}×{room.depth.toFixed(1)} m{room.parentId ? ' · väliseinä' : ''}</div>
+                      <div style={{ fontSize: 10, color: '#78716c' }}>{room.temp}°C · {room.width.toFixed(1)}×{room.depth.toFixed(1)} m{room.parentId ? ` · ${t('cold.partitionTag')}` : ''}</div>
                     </span>
                   </div>
                 </button>
@@ -1445,26 +1291,26 @@ export default function DesignerApp({
           )}
 
           <button type="button" onClick={() => setTemplatesOpen((open) => !open)} style={{ ...sectionHead, borderTop: '1px solid #e7e5e4' }}>
-            <span>Mallikirjasto</span><span>{templatesOpen ? '−' : '+'}</span>
+            <span>{t('cold.library')}</span><span>{templatesOpen ? '−' : '+'}</span>
           </button>
           {templatesOpen && (
             <div style={{ padding: '2px 8px 10px' }}>
-              <div style={{ fontSize: 11, color: '#78716c', margin: '2px 4px 8px', lineHeight: 1.4 }}>Valitse malli ja klikkaa huonetta. Lauhdutin ja koneikko asettuvat ulkoseinälle.</div>
+              <div style={{ fontSize: 11, color: '#78716c', margin: '2px 4px 8px', lineHeight: 1.4 }}>{t('designer.libraryHint')}</div>
               {roomResult && (
                 <div data-testid="capacity-banner" style={{ margin: '0 4px 8px', padding: '8px 8px', borderRadius: 8, background: '#f0fdfa', border: '1px solid #99f6e4', fontSize: 11, color: '#115e59', lineHeight: 1.4 }}>
-                  <strong>Tarve {roomResult.total / 1000 < 10 ? (roomResult.total / 1000).toFixed(2) : (roomResult.total / 1000).toFixed(1)} kW</strong>
-                  <div>Näytetään koot, jotka kattavat kuorman. Lauhdutin mitoitetaan lämmönluovutukselle (noin 1,25 ×).</div>
+                  <strong>{t('cold.capacity', { kw: roomResult.total / 1000 < 10 ? (roomResult.total / 1000).toFixed(2) : (roomResult.total / 1000).toFixed(1) })}</strong>
+                  <div>{t('cold.capacityLead')}</div>
                   <button type="button" data-testid="show-all-sizes" onClick={() => setShowAllSizes((value) => !value)} style={{ marginTop: 6, border: 'none', background: 'transparent', color: '#0f766e', fontWeight: 700, cursor: 'pointer', padding: 0, transform: 'none' }}>
-                    {showAllSizes ? 'Näytä vain sopivat koot' : 'Näytä kaikki koot'}
+                    {showAllSizes ? t('cold.showFit') : t('cold.showAll')}
                   </button>
                 </div>
               )}
-              {TEMPLATE_GROUPS.map((group) => {
+              {TEMPLATE_GROUPS.filter((group) => ({ structure: ['column', 'rack'], doors: ['door'], cooling: ['evaporator', 'condenser', 'combo', 'compressor'], electric: ['sensor'] }[coldTab] || []).includes(group.id)).map((group) => {
                 const items = templatesForGroup(group.id, roomResult ? roomResult.total / 1000 : null, { showAll: showAllSizes || !roomResult, room: selectedRoom, rooms })
                 if (!items.length) return null
                 return (
                 <div key={group.id} style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 10, color: '#a8a29e', margin: '2px 4px 4px', fontWeight: 700, letterSpacing: 0.4 }}>{group.label}</div>
+                  <div style={{ fontSize: 10, color: '#a8a29e', margin: '2px 4px 4px', fontWeight: 700, letterSpacing: 0.4 }}>{t(`cold.group.${group.id}`)}</div>
                   {items.map((item) => (
                     <button
                       key={item.id}
@@ -1494,21 +1340,15 @@ export default function DesignerApp({
               )})}
             </div>
           )}
-          <div style={{ padding: '0 8px 12px' }}>
-            <button
-              type="button"
-              onClick={() => setGridSize((g) => (g === 0.1 ? 0.25 : g === 0.25 ? 0.5 : 0.1))}
-              style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff', color: '#44403c', fontSize: 12, transform: 'none' }}
-            >
-              {t('designer.grid', { size: snapOn ? `${gridSize} m` : t('designer.gridOff') })}
-            </button>
-          </div>
         </aside>
 
-        <main data-testid="designer-canvas-frame" data-active={designName ? 'place' : 'select'} style={{ flex: 1, minWidth: 0, position: 'relative', ...placeFrame(Boolean(designName)) }}>
+        <div className="plan-stage" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+        <div className="plan-status" style={{ minHeight: 28, display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
+          <span data-testid="status-tool">{designLabel}</span>
+        </div>
+        <main data-testid="designer-canvas-frame" data-active={designName ? 'place' : 'select'} style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative', ...placeFrame(Boolean(designName)) }}>
           <ModeChip name={designName} repeat={repeatPlace && Boolean(placing)} drawing={designDrawing} />
           <PlaceToast text={toast} />
-          <div data-testid="status-tool" style={{ position: 'absolute', left: 12, top: 48, zIndex: 6, pointerEvents: 'none', fontSize: 12, fontWeight: 700, color: '#44403c', background: 'rgba(255,255,255,0.92)', borderRadius: 8, padding: '4px 8px' }}>{designLabel}</div>
           {pipeOffer && (
             <div data-testid="outdoor-move-offer" style={{ position: 'absolute', top: 12, left: 12, zIndex: 6, maxWidth: 420, padding: '10px 12px', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
               <div style={{ fontSize: 13, color: '#78350f', lineHeight: 1.4 }}>{notice}</div>
@@ -1543,31 +1383,6 @@ export default function DesignerApp({
           ) : (
             <PlanView {...planProps} />
           )}
-          {(tool === 'pipe' || tool === 'cable') && view !== '3d' && view !== 'schematic' && (
-            <div data-testid="pipe-settings" style={{ position: 'absolute', top: 12, right: 12, zIndex: 4, display: 'flex', gap: 6, alignItems: 'center', background: 'rgba(255,255,255,0.96)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '6px 8px' }}>
-              {tool === 'pipe' && (
-                <select aria-label={t('designer.pipe')} value={pipeKind} onChange={(e) => setPipeKind(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
-                  <option value="suction">{t('designer.pipeSuction')}</option>
-                  <option value="liquid">{t('designer.pipeLiquid')}</option>
-                  <option value="hotgas">{t('designer.pipeHot')}</option>
-                  <option value="drain">{t('designer.pipeDrain')}</option>
-                </select>
-              )}
-              {tool === 'pipe' && pipeKind !== 'drain' && (
-                <>
-                  <select aria-label={t('designer.refrigerant')} value={refrigerant} onChange={(e) => setRefrigerant(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
-                    {REFRIGERANT_IDS.map((id) => <option key={id} value={id}>{id === 'R744' ? 'R744 / CO2' : id}</option>)}
-                  </select>
-                  <label style={{ fontSize: 11, color: '#44403c' }}>Te
-                    <input aria-label={t('designer.te')} type="number" value={teC} onChange={(e) => setTeC(parseFloat(e.target.value) || 0)} style={{ width: 52, marginLeft: 4, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
-                  </label>
-                  <label style={{ fontSize: 11, color: '#44403c' }}>Tc
-                    <input aria-label={t('designer.tc')} type="number" value={tcC} onChange={(e) => setTcC(parseFloat(e.target.value) || 0)} style={{ width: 52, marginLeft: 4, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
-                  </label>
-                </>
-              )}
-            </div>
-          )}
           {pipes.length > 0 && view !== '3d' && view !== 'schematic' && (
             <div className="pipe-legend" data-testid="pipe-legend" style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 4, background: 'rgba(255,255,255,0.94)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '8px 10px', maxWidth: 320 }}>
               {['suction', 'liquid', 'liquidReturn', 'hotgas', 'drain', 'drainHeat'].map((key) => (
@@ -1583,11 +1398,20 @@ export default function DesignerApp({
             <div style={{
               position: 'absolute', left: 0, right: 0, top: 72, textAlign: 'center', pointerEvents: 'none',
             }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: '#292524' }}>Piirrä kylmähuone pohjaan</div>
-              <div style={{ fontSize: 13, color: '#78716c', marginTop: 6 }}>Huone (R), monikulmio (P) tai esimerkki 12 m × 8 m × 6 m.</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#292524' }}>{t('cold.hint')}</div>
+              <div style={{ fontSize: 13, color: '#78716c', marginTop: 6 }}>{t('cold.hintLead')}</div>
             </div>
           )}
         </main>
+        {compact && (
+          <div className="hand-bar" data-testid="hand-bar">
+            <button type="button" className="compact-only" data-testid="designer-tools" aria-expanded={toolsOpen} onClick={() => setToolsOpen((open) => !open)}>{t('edit.tools')}</button>
+            <button type="button" data-testid="designer-hand" aria-pressed={hand} onClick={() => setHand((value) => !value)}>{hand ? t('edit.draw') : t('edit.pan')}</button>
+            <button type="button" data-testid="designer-rooms" aria-pressed={drawer === 'rooms'} onClick={() => setDrawer((current) => current === 'rooms' ? null : 'rooms')}>{t('designer.rooms')}</button>
+            <button type="button" data-testid="designer-info" aria-pressed={drawer === 'info'} onClick={() => setDrawer((current) => current === 'info' ? null : 'info')}>{t('designer.info')}</button>
+          </div>
+        )}
+        </div>
 
         {view !== 'schematic' && <aside
           data-testid="designer-props"
@@ -1595,12 +1419,62 @@ export default function DesignerApp({
           data-open={compact && drawer === 'info' ? 'true' : 'false'}
           style={compact ? undefined : { width: 340, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #e7e5e4' }}
         >
-          {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>Sulje</button>}
+          {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
+          <button type="button" data-testid="open-project-settings" onClick={() => setSettingsOpen((open) => !open)} style={{ display: 'block', width: '100%', textAlign: 'left', margin: '8px 8px 0', padding: '8px 10px', borderRadius: 8, border: '1px solid #e7e5e4', background: settingsOpen ? '#f0fdfa' : '#fff', fontWeight: 700, cursor: 'pointer' }}>{t('file.projectSettings')}</button>
+          {settingsOpen && (
+            <div data-testid="project-settings" style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <button type="button" data-testid="unit-si" aria-pressed={unitSystem === 'SI'} onClick={() => setUnitSystem('SI')} style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid #d6d3d1', background: unitSystem === 'SI' ? '#134e4a' : '#fff', color: unitSystem === 'SI' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>SI</button>
+                <button type="button" data-testid="unit-ip" aria-pressed={unitSystem === 'IP'} onClick={() => setUnitSystem('IP')} style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid #d6d3d1', background: unitSystem === 'IP' ? '#134e4a' : '#fff', color: unitSystem === 'IP' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>IP</button>
+              </div>
+              <button type="button" data-testid="grid-size" onClick={() => setGridSize((g) => (g === 0.1 ? 0.25 : g === 0.25 ? 0.5 : 0.1))} style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff', color: '#44403c', fontSize: 12, cursor: 'pointer' }}>
+                {t('designer.grid', { size: snapOn ? `${gridSize} m` : t('designer.gridOff') })}
+              </button>
+            </div>
+          )}
+          {(tool === 'draw' || tool === 'polygon' || tool === 'pipe' || tool === 'cable') && (
+            <div data-testid="tool-properties" style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
+              <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 8 }}>{t('panel.tool')}</div>
+              {(tool === 'draw' || tool === 'polygon') && (
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 650 }}>
+                  {t('designer.roomType')}
+                  <select data-testid="room-type" aria-label={t('designer.roomType')} value={drawType} onChange={(event) => setDrawType(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 4, height: 32, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                    {ROOM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {(tool === 'pipe' || tool === 'cable') && (
+                <div data-testid="pipe-settings" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {tool === 'pipe' && (
+                    <select aria-label={t('designer.pipe')} value={pipeKind} onChange={(event) => setPipeKind(event.target.value)} style={{ height: 32, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
+                      <option value="suction">{t('designer.pipeSuction')}</option>
+                      <option value="liquid">{t('designer.pipeLiquid')}</option>
+                      <option value="hotgas">{t('designer.pipeHot')}</option>
+                      <option value="drain">{t('designer.pipeDrain')}</option>
+                    </select>
+                  )}
+                  {tool === 'pipe' && pipeKind !== 'drain' && (
+                    <>
+                      <select aria-label={t('designer.refrigerant')} value={refrigerant} onChange={(event) => setRefrigerant(event.target.value)} style={{ height: 32, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
+                        {REFRIGERANT_IDS.map((id) => <option key={id} value={id}>{id === 'R744' ? 'R744 / CO2' : id}</option>)}
+                      </select>
+                      <label style={{ fontSize: 12, color: '#44403c' }}>{t('designer.te')}
+                        <input aria-label={t('designer.te')} type="number" value={teC} onChange={(event) => setTeC(parseFloat(event.target.value) || 0)} style={{ display: 'block', width: '100%', marginTop: 4, height: 28, borderRadius: 6, border: '1px solid #d6d3d1' }} />
+                      </label>
+                      <label style={{ fontSize: 12, color: '#44403c' }}>{t('designer.tc')}
+                        <input aria-label={t('designer.tc')} type="number" value={tcC} onChange={(event) => setTcC(parseFloat(event.target.value) || 0)} style={{ display: 'block', width: '100%', marginTop: 4, height: 28, borderRadius: 6, border: '1px solid #d6d3d1' }} />
+                      </label>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {selectedIds.length > 1 && (
             <div style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
               <MultiProperties count={selectedIds.length}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 650 }}>
-                  Lämpötila °C
+                  {t('cold.temp')}
                   <input
                     data-testid="multi-temp"
                     type="number"
@@ -1625,7 +1499,7 @@ export default function DesignerApp({
                       applyScene(patchDesigner(sceneNow(), classifyDesignerIds(sceneNow(), selectedIds), { cadLock: event.target.checked }))
                     }}
                   />
-                  Lukittu
+                  {t('cold.locked')}
                 </label>
               </MultiProperties>
             </div>
@@ -1694,7 +1568,7 @@ export default function DesignerApp({
       </div>
       {toolMenu && (
         <div data-testid="tool-menu" style={{ position: 'fixed', left: toolMenu.x, top: toolMenu.y, zIndex: 80, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 10, padding: 6, boxShadow: '0 12px 28px rgba(28,25,23,0.16)' }} onMouseDown={(event) => event.stopPropagation()}>
-          <button type="button" data-testid="ctx-finish" onClick={() => { finishRef.current?.(); setToolMenu(null) }} style={{ display: 'block', padding: '7px 10px', border: 'none', background: 'transparent', fontWeight: 700, cursor: 'pointer' }}>Lopeta</button>
+          <button type="button" data-testid="ctx-finish" onClick={() => { finishRef.current?.(); setToolMenu(null) }} style={{ display: 'block', padding: '7px 10px', border: 'none', background: 'transparent', fontWeight: 700, cursor: 'pointer' }}>{t('draw.finish')}</button>
         </div>
       )}
       {menu && (
@@ -1872,7 +1746,7 @@ function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAng
       )}
       <MenuBtn testid="ctx-duplicate" onClick={onDuplicate}>Kopioi  Ctrl+D</MenuBtn>
       <MenuBtn testid="ctx-delete" onClick={onDelete}>Poista  Del</MenuBtn>
-      <MenuBtn onClick={onClose}>Sulje</MenuBtn>
+      <MenuBtn onClick={onClose}>{t('panel.close')}</MenuBtn>
     </div>
   )
 }

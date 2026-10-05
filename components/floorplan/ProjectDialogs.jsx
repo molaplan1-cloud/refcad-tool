@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { ROOF_TYPES } from '@/lib/floorplan'
+import { PROJECT_TYPES } from '@/lib/access'
 import { useLocale } from '@/components/i18n/Locale'
 
 const inputStyle = {
@@ -136,6 +137,25 @@ export function ShellDialog({ title, onCancel, onCreate, onExample }) {
       >
         {t('shell.blank')}
       </button>
+    </Overlay>
+  )
+}
+
+export function ProjectInfoDialog({ projectType, onCancel, onConfirm }) {
+  const { t } = useLocale()
+  const [next, setNext] = useState(projectType || 'omakotitalo')
+  return (
+    <Overlay testid="project-info-dialog" title={t('file.projectInfo')} onClose={onCancel}>
+      <p style={{ fontSize: 13, margin: '0 0 12px', color: '#44403c', lineHeight: 1.45 }}>{t('project.changeWarn')}</p>
+      <Field label={t('project.changeType')}>
+        <select data-testid="project-type-change" style={inputStyle} value={next} onChange={(event) => setNext(event.target.value)}>
+          {PROJECT_TYPES.map((type) => <option key={type.id} value={type.id}>{t(`type.${type.id}.name`)}</option>)}
+        </select>
+      </Field>
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button type="button" data-testid="project-type-confirm" style={{ ...choiceBtn, width: 'auto', margin: 0, background: '#0f766e', color: '#fff', border: 'none' }} onClick={() => onConfirm(next)}>{t('project.change')}</button>
+        <button type="button" data-testid="project-type-cancel" style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={onCancel}>{t('projects.cancel')}</button>
+      </div>
     </Overlay>
   )
 }

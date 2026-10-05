@@ -476,7 +476,7 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
           )
         })}
         <span style={{ position: 'relative', flexShrink: 0 }}>
-          <button type="button" data-testid="facade-presets" title={t('facade.above')} style={chip(ribbon === 'preset')} onClick={() => setRibbon(ribbon === 'preset' ? null : 'preset')}>Vyöhykkeet</button>
+          <button type="button" data-testid="facade-presets" title={t('facade.zones')} style={chip(ribbon === 'preset')} onClick={() => setRibbon(ribbon === 'preset' ? null : 'preset')}>{t('facade.zones')}</button>
           {ribbon === 'preset' && (
             <div style={{ position: 'absolute', top: 32, left: 0, zIndex: 20, minWidth: 220, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 8, padding: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}>
               <button type="button" data-testid="facade-preset-plinth" style={menuBtn} onClick={() => { onCommit(applyFacadePreset(plan, side, 'plinth')); setRibbon(null) }}>{t('facade.plinth')}</button>
@@ -487,17 +487,17 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
         </span>
         <button type="button" data-testid="facade-preset-above" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'above', 'wood-horizontal'))}>{t('facade.above')}</button>
         <button type="button" data-testid="facade-preset-band" style={chip(false)} onClick={() => onCommit(applyFacadePreset(plan, side, 'band', 'brick-yellow'))}>{t('facade.band')}</button>
-        <button type="button" data-testid="facade-split-h" style={chip(tool === 'split-h')} onClick={() => setTool(tool === 'split-h' ? 'select' : 'split-h')}>Vaakajako</button>
-        <button type="button" data-testid="facade-split-v" style={chip(tool === 'split-v')} onClick={() => setTool(tool === 'split-v' ? 'select' : 'split-v')}>Pystyjako</button>
+        <button type="button" data-testid="facade-split-h" style={chip(tool === 'split-h')} onClick={() => setTool(tool === 'split-h' ? 'select' : 'split-h')}>{t('facade.splitH')}</button>
+        <button type="button" data-testid="facade-split-v" style={chip(tool === 'split-v')} onClick={() => setTool(tool === 'split-v' ? 'select' : 'split-v')}>{t('facade.splitV')}</button>
         <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
           <span>mm</span>
-          <input aria-label="Vyöhykkeen alareuna" style={{ ...inputStyle, width: 58 }} type="number" value={band.y0} onChange={(event) => setBand({ ...band, y0: Number(event.target.value) })} />
+          <input aria-label={t('facade.bandLow')} style={{ ...inputStyle, width: 58 }} type="number" value={band.y0} onChange={(event) => setBand({ ...band, y0: Number(event.target.value) })} />
           <span>–</span>
-          <input aria-label="Vyöhykkeen yläreuna" style={{ ...inputStyle, width: 58 }} type="number" value={band.y1} onChange={(event) => setBand({ ...band, y1: Number(event.target.value) })} />
-          <select aria-label="Vyöhykkeen materiaali" title={CLADDING.find((item) => item.id === band.materialId)?.name || ''} style={{ ...inputStyle, width: 128 }} value={band.materialId} onChange={(event) => setBand({ ...band, materialId: event.target.value })}>
+          <input aria-label={t('facade.bandHigh')} style={{ ...inputStyle, width: 58 }} type="number" value={band.y1} onChange={(event) => setBand({ ...band, y1: Number(event.target.value) })} />
+          <select aria-label={t('facade.bandMaterial')} title={CLADDING.find((item) => item.id === band.materialId)?.name || ''} style={{ ...inputStyle, width: 128 }} value={band.materialId} onChange={(event) => setBand({ ...band, materialId: event.target.value })}>
             {CLADDING.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <button type="button" data-testid="facade-band" title={t('facade.horizontal')} style={chip(false)} onClick={() => onCommit(addFacadeBand(plan, side, band.y0 / 1000, band.y1 / 1000, band.materialId))}>Lisää</button>
+          <button type="button" data-testid="facade-band" title={t('facade.horizontal')} style={chip(false)} onClick={() => onCommit(addFacadeBand(plan, side, band.y0 / 1000, band.y1 / 1000, band.materialId))}>{t('facade.add')}</button>
         </label>
         <span style={{ width: 1, height: 18, background: '#d6d3d1', flexShrink: 0 }} />
         <button type="button" data-testid="facade-realistic" style={chip(realistic)} onClick={() => onApply({ ...plan, sceneStyle: 'realistic' })}>{t('finish.realistic')}</button>

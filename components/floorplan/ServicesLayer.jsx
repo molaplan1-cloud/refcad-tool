@@ -119,10 +119,6 @@ export function ServiceBar({
         {placeables.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select>
       {drawing && <button type="button" data-testid="service-finish" style={barBtn(false)} onClick={onFinish}>Valmis</button>}
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-        <input data-testid="floor-heating" type="checkbox" checked={floorHeating} onChange={(event) => onFloorHeating(event.target.checked)} />
-        Lattialämmitys
-      </label>
       <button type="button" data-testid="route-services" style={barBtn(false)} onClick={onRoute}>Reititä automaattisesti</button>
       {system === 'electric' && (
         <>
