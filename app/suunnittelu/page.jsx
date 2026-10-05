@@ -4,10 +4,12 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import DesignerApp from '@/components/designer/DesignerApp'
 import { accessFor } from '@/lib/access'
+import { useLocale } from '@/components/i18n/Locale'
 
 const STORAGE_KEY = 'refcad-design-v1'
 
 export default function Page() {
+  const { t } = useLocale()
   const [ready, setReady] = useState(false)
   const [saved, setSaved] = useState(null)
   const [access, setAccess] = useState(null)
@@ -53,13 +55,13 @@ export default function Page() {
     const message = access.admin
       ? 'Ylläpitäjä ei piirrä.'
       : access.pending
-        ? 'Odottaa maksun vahvistusta'
+        ? t('price.thanks')
         : 'Kylmätekniikka kuuluu Pro-tilaukseen.'
     return (
       <div data-testid="cold-room-gate" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', color: '#0f172a', padding: 24 }}>
         <div style={{ maxWidth: 460, textAlign: 'center' }}>
-          <h1 style={{ fontSize: 28, marginBottom: 12 }}>{message}</h1>
-          <p style={{ color: '#475569', lineHeight: 1.5 }}>Höyrystin, koneikko, putkistot ja kuormalaskenta avautuvat, kun ylläpito on kuitannut maksun.</p>
+          <h1 data-testid={access.pending ? 'order-thanks' : undefined} style={{ fontSize: 28, marginBottom: 12 }}>{message}</h1>
+          <p style={{ color: '#475569', lineHeight: 1.5 }}>{t('price.cold')}</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 20 }}>
             <Link href="/#pricing" style={{ color: '#0369a1' }}>Hinnasto</Link>
             <Link href={access.admin ? '/admin' : '/uusi'} style={{ color: '#0369a1' }}>{access.admin ? 'Ylläpito' : 'Pohjakuva'}</Link>

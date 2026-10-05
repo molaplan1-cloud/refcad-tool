@@ -1,10 +1,11 @@
 import './globals.css'
 import ChunkRecovery from '@/components/ChunkRecovery'
 import { LocaleProvider } from '@/components/i18n/Locale'
+import { MESSAGES } from '@/lib/messages'
 
 export const metadata = {
   title: 'RefCAD',
-  description: 'Piirrä kylmiö, talo tai halli. Pohjakuva on ilmainen, talotekniikka ja kylmätekniikka avautuvat kuitatun maksun jälkeen.',
+  description: MESSAGES.fi['price.meta'],
   manifest: '/manifest.json'
 }
 

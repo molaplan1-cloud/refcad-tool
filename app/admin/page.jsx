@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { paymentActive } from '@/lib/access'
+import { useLocale } from '@/components/i18n/Locale'
 
 const PLANS = [
   ['free', 'Ilmainen'],
@@ -16,14 +17,15 @@ function planName(id) {
 }
 
 function statusOf(user) {
-  if (user.disabled) return 'Pois käytöstä'
-  if (user.payment === 'pending') return 'Odottaa maksun vahvistusta'
-  if (user.payment === 'received' && !paymentActive(user)) return 'Vanhentunut'
-  if (paymentActive(user)) return 'Voimassa'
-  return 'Ei maksua'
+  if (user.disabled) return 'disabled'
+  if (user.payment === 'pending') return 'pending'
+  if (user.payment === 'received' && !paymentActive(user)) return 'expired'
+  if (paymentActive(user)) return 'active'
+  return 'none'
 }
 
 export default function AdminPage() {
+  const { t } = useLocale()
   const [users, setUsers] = useState([])
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(null)
@@ -83,7 +85,7 @@ export default function AdminPage() {
           </div>
           <Link href="/" style={{ color: '#0369a1' }}>Etusivu</Link>
         </header>
-        <p style={{ color: '#475569', marginTop: 0 }}>Ylläpitäjä ei piirrä. Maksulliset työtilat avautuvat, kun maksu on kuitattu ja voimassaolo on käynnissä.</p>
+        <p style={{ color: '#475569', marginTop: 0 }}>{t('price.adminLead')}</p>
         {error && <p data-testid="admin-error" style={{ color: '#9f1239' }}>{error}</p>}
         <div data-testid="admin-users" className="admin-users">
           <table>
@@ -110,7 +112,7 @@ export default function AdminPage() {
                         {PLANS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
                       </select>
                     ) : planName(user.plan)}</td>
-                    <td style={{ padding: '12px', fontWeight: 700 }} data-testid="admin-status">{status}</td>
+                    <td style={{ padding: '12px', fontWeight: 700 }} data-testid="admin-status">{t(`price.status.${status}`)}</td>
                     <td style={{ padding: '12px' }}>{open ? (
                       <input aria-label="Voimassa alkaen" type="date" value={(user.validFrom || '').slice(0, 10)} onChange={(event) => patch(user.id, { validFrom: event.target.value })} style={field} />
                     ) : (user.validFrom || '—')}</td>
@@ -119,8 +121,8 @@ export default function AdminPage() {
                     ) : (user.validUntil || '—')}</td>
                     <td style={{ padding: '12px' }}>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {(status === 'Odottaa maksun vahvistusta' || status === 'Vanhentunut') && user.role !== 'admin' && user.role !== 'demo' && (
-                          <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>Uusi / kuittaa</button>
+                        {(status === 'pending' || status === 'expired') && user.role !== 'admin' && user.role !== 'demo' && (
+                          <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>{t('price.markPaid')}</button>
                         )}
                         <button type="button" data-testid="admin-edit" style={quiet} onClick={() => setEditing(open ? null : user.id)}>{open ? 'Sulje' : 'Muokkaa'}</button>
                         <button type="button" data-testid="admin-disable" style={quiet} onClick={() => patch(user.id, { disabled: !user.disabled })}>{user.disabled ? 'Ota käyttöön' : 'Poista käytöstä'}</button>

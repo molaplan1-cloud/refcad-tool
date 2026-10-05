@@ -3184,8 +3184,8 @@ export default function FloorPlanApp() {
   return (
     <div className="plan-app" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
       {access.pending && (
-        <div data-testid="payment-pending" style={{ background: '#fff7ed', color: '#9a3412', textAlign: 'center', padding: '8px 12px', fontWeight: 700 }}>
-          Odottaa maksun vahvistusta
+        <div data-testid="order-thanks" style={{ background: '#f0fdf4', color: '#166534', textAlign: 'center', padding: '8px 12px', fontWeight: 650 }}>
+          {t('price.thanks')}
         </div>
       )}
       <PlanChrome

@@ -4,10 +4,12 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { PROJECT_TYPES, accessFor, canStartType } from '@/lib/access'
+import { useLocale } from '@/components/i18n/Locale'
 import { emptyPlan } from '@/lib/floorplan'
 import { CURRENT_KEY } from '@/lib/projects'
 
 export default function TypePage() {
+  const { t } = useLocale()
   const router = useRouter()
   const [user, setUser] = useState(null)
   const [loaded, setLoaded] = useState(false)
@@ -44,11 +46,11 @@ export default function TypePage() {
         <p style={{ letterSpacing: '0.14em', textTransform: 'uppercase', fontSize: 12, color: '#0369a1', fontWeight: 700 }}>Uusi hanke</p>
         <h1 className="picker-title" style={{ fontSize: 40, lineHeight: 1.1, margin: '8px 0 12px' }}>Valitse, mitä suunnittelet</h1>
         <p style={{ maxWidth: 640, color: '#475569', fontSize: 17, lineHeight: 1.5 }}>
-          Tyyppi asettaa oletukset, avoimet työtilat ja kirjastot. Ilmainen versio piirtää pohjakuvan. Sähkö, LVI, IV, piha ja kylmätekniikka avautuvat, kun maksu on kuitattu.
+          {t('price.workspaces')}
         </p>
         {access.pending && (
-          <p data-testid="payment-pending" style={{ marginTop: 16, padding: '10px 14px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 10 }}>
-            Odottaa maksun vahvistusta
+          <p data-testid="order-thanks" style={{ marginTop: 16, maxWidth: 640, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 10, color: '#166534', lineHeight: 1.5 }}>
+            {t('price.thanks')}
           </p>
         )}
         {access.admin && (

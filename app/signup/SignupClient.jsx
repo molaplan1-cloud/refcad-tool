@@ -1,15 +1,23 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useLocale } from '@/components/i18n/Locale'
 
 export default function SignupClient() {
+  const { t } = useLocale()
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [orderedPlan, setOrderedPlan] = useState('')
+
+  useEffect(() => {
+    const plan = new URLSearchParams(window.location.search).get('plan') || ''
+    setOrderedPlan(plan && plan !== 'free' ? plan : '')
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -58,7 +66,7 @@ export default function SignupClient() {
             <span style={{ fontSize: '15px', fontWeight: 800, background: 'linear-gradient(135deg, #60a5fa, #06b6d4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>RefCAD Tool</span>
           </Link>
           <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>Luo tili</h1>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '13px' }}>Ilmainen, ei tilausmaksuja</p>
+          <p data-testid={orderedPlan ? 'pricing-note' : 'signup-free'} style={{ color: 'rgba(255,255,255,0.72)', fontSize: '13px', lineHeight: 1.5 }}>{orderedPlan ? t('price.note') : t('price.signupFree')}</p>
         </div>
 
         <form onSubmit={handleSubmit}>
