@@ -41,7 +41,7 @@ export default function SignupClient() {
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '20px' }}>
+    <div className="safe-page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100dvh', padding: '20px' }}>
       <div style={{ width: '100%', maxWidth: '420px', padding: '32px', background: 'rgba(30,41,59,0.6)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', backdropFilter: 'blur(12px)' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <Link href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none', color: 'inherit', marginBottom: '16px' }}>

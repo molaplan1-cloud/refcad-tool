@@ -51,9 +51,9 @@ export default function LandingClient() {
 
   return (
     <div data-testid="landing" style={{ background: '#fff', color: '#0f172a' }}>
-      <header style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 28px', background: 'rgba(255,255,255,0.92)', borderBottom: '1px solid #e2e8f0' }}>
+      <header className="landing-header">
         <Link href="/" style={{ fontWeight: 800, fontSize: 18, color: '#0f172a', textDecoration: 'none' }}>RefCAD</Link>
-        <nav style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+        <nav className="landing-nav">
           <a href="#kohteet" style={nav}>Kohteet</a>
           <a href="#pricing" style={nav}>Hinnasto</a>
           <Link href={user?.role === 'admin' ? '/admin' : '/login'} style={nav}>{user?.role === 'admin' ? 'Ylläpito' : 'Kirjaudu'}</Link>
@@ -61,21 +61,21 @@ export default function LandingClient() {
         </nav>
       </header>
 
-      <section data-testid="landing-hero" style={{ padding: '72px 24px 48px', background: 'linear-gradient(180deg, #f0f9ff 0%, #ffffff 70%)' }}>
+      <section data-testid="landing-hero" className="landing-hero" style={{ padding: '72px 24px 48px', background: 'linear-gradient(180deg, #f0f9ff 0%, #ffffff 70%)' }}>
         <div style={{ maxWidth: 980, margin: '0 auto', textAlign: 'center' }}>
           <p style={{ letterSpacing: '0.16em', textTransform: 'uppercase', fontSize: 12, fontWeight: 700, color: '#0369a1' }}>Pohjakuva, talotekniikka ja kylmä</p>
-          <h1 style={{ fontSize: 58, lineHeight: 1.02, letterSpacing: '-0.03em', margin: '12px 0 16px' }}>Piirrä kylmiö, talo tai halli yhdessä paikassa</h1>
+          <h1 className="landing-title">Piirrä kylmiö, talo tai halli yhdessä paikassa</h1>
           <p style={{ fontSize: 19, lineHeight: 1.55, color: '#475569', maxWidth: 720, margin: '0 auto 28px' }}>
             RefCAD on selaimessa toimiva suunnittelutyökalu. Ilmainen versio piirtää pohjakuvan. Maksullinen tila avaa sähkö-, LVI-, IV-, piha- ja kylmätyötilat sekä puhtaan tulosteen.
           </p>
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+          <div className="landing-actions" style={{ justifyContent: 'center' }}>
             <Link href="/uusi" style={primary}>Valitse hanketyyppi</Link>
             <a href="#pricing" style={secondary}>Katso ohjeelliset hinnat</a>
           </div>
         </div>
       </section>
 
-      <section id="kohteet" style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 24px 72px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 18 }}>
+      <section id="kohteet" className="landing-grid" style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 24px 72px' }}>
         {features.map((item) => (
           <article key={item.title} data-testid={`feature-${item.title}`} style={{ border: '1px solid #e2e8f0', borderRadius: 18, overflow: 'hidden', background: '#fff' }}>
             <img src={item.image} alt={item.alt} style={{ width: '100%', height: 210, objectFit: 'cover', display: 'block' }} />
@@ -99,7 +99,7 @@ export default function LandingClient() {
             </button>
           </div>
           {notice && <p data-testid="payment-pending" style={{ marginTop: 16 }}>{notice}</p>}
-          <div data-testid="pricing-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginTop: 24 }}>
+          <div data-testid="pricing-grid" className="pricing-grid" style={{ marginTop: 24 }}>
             {PLANS.map((plan) => (
               <article key={plan.id} data-testid={`price-${plan.id}`} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ fontWeight: 800, fontSize: 18 }}>{plan.name}</div>

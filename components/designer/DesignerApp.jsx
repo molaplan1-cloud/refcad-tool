@@ -46,6 +46,7 @@ import {
   selectionBox,
 } from '@/lib/cadEdit'
 import { registerDrawingFlush } from '@/lib/staleDeploy'
+import { useViewport } from '@/components/useViewport'
 import { CadPrompt, CadToolbar, MultiProperties } from '../floorplan/CadTools'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
 import { panelSchedule } from '@/lib/sharedWalls'
@@ -89,6 +90,12 @@ const textBtn = (active) => ({
   transform: 'none',
   whiteSpace: 'nowrap',
 })
+
+const compactBtn = (active) => {
+  const style = textBtn(active)
+  delete style.display
+  return { ...style, minHeight: 44, minWidth: 44, height: 44, padding: '0 12px' }
+}
 
 function Icon({ children }) {
   return (
@@ -236,6 +243,10 @@ export default function DesignerApp({
   persistLabel = 'selaimeen',
 }) {
   const { t, locale, setLocale } = useLocale()
+  const { compact } = useViewport()
+  const [hand, setHand] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [drawer, setDrawer] = useState(null)
   const [name, setName] = useState(initialName || 'Uusi projekti')
   const [rooms, setRooms] = useState(() => normalizeRooms(initialRooms))
   const [pipes, setPipes] = useState(initialPipes || [])
@@ -269,6 +280,9 @@ export default function DesignerApp({
   const [selectedIds, setSelectedIds] = useState([])
   const [cad, setCad] = useState(null)
   const [placingId, setPlacingId] = useState(null)
+  useEffect(() => {
+    if ((tool && tool !== 'select') || placingId) setHand(false)
+  }, [tool, placingId])
   const lastPlace = useRef(null)
   const toastTimer = useRef(0)
   const finishRef = useRef(null)
@@ -1149,6 +1163,7 @@ export default function DesignerApp({
     finishRef,
     onExitPlace: () => { setPlacingId(null); setTool('select'); setToolMenu(null) },
     onToolMenu: (x, y) => setToolMenu({ x, y }),
+    hand,
   }
 
   const designName = placing?.name || (tool === 'draw' ? 'Huone' : tool === 'polygon' ? 'Monikulmio' : tool === 'partition' ? 'Väliseinä' : tool === 'pipe' ? 'Putki' : tool === 'cable' ? 'Kaapeli' : null)
@@ -1156,14 +1171,14 @@ export default function DesignerApp({
   const designLabel = modeChipText({ name: designName, repeat: repeatPlace && Boolean(placing), drawing: designDrawing })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
-      <header style={{
+    <div className="designer-app" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
+      <header className={`designer-header${toolsOpen ? ' tools-open' : ''}`} style={{
         display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 8,
         height: 48, padding: '0 10px', overflow: 'hidden',
         background: '#14181f', borderBottom: '1px solid #0c0f14', color: '#f5f5f4',
       }}>
         <Link href="/projects" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, letterSpacing: -0.2, flexShrink: 0 }}>RefCAD</Link>
-        <LanguageSwitch value={locale} onChange={setLocale} />
+        <div className="designer-tool"><LanguageSwitch value={locale} onChange={setLocale} /></div>
         <Link href="/pohjakuva" data-testid="open-floorplan" title={t('designer.floorplanTitle')} style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>{t('designer.floorplan')}</Link>
         <input
           aria-label={t('designer.projectName')}
@@ -1178,7 +1193,11 @@ export default function DesignerApp({
         <span title={saveText} style={{ fontSize: 11, color: saveState === 'error' ? '#fca5a5' : '#86efac', flexShrink: 0, whiteSpace: 'nowrap' }}>
           {saveState === 'error' ? t('designer.error') : saveState === 'saving' ? t('designer.saving') : t('designer.saved')}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
+        <button type="button" className="compact-only" data-testid="designer-tools" aria-expanded={toolsOpen} onClick={() => setToolsOpen((open) => !open)} style={compactBtn(toolsOpen)}>Työkalut</button>
+        <button type="button" className="compact-only" data-testid="designer-hand" aria-pressed={hand} onClick={() => setHand((value) => !value)} style={compactBtn(hand)}>{hand ? 'Piirrä' : 'Siirrä'}</button>
+        <button type="button" className="compact-only" data-testid="designer-rooms" aria-pressed={drawer === 'rooms'} onClick={() => setDrawer((current) => current === 'rooms' ? null : 'rooms')} style={compactBtn(drawer === 'rooms')}>Huoneet</button>
+        <button type="button" className="compact-only" data-testid="designer-info" aria-pressed={drawer === 'info'} onClick={() => setDrawer((current) => current === 'info' ? null : 'info')} style={compactBtn(drawer === 'info')}>Tiedot</button>
+        <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
           <button type="button" data-testid="tool-select" aria-pressed={tool === 'select' && !placing} title="Valitse (V)" style={iconBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M4 2.4 L4 13.2 L7.1 9.8 L10.4 14 L11.8 13.2 L8.5 9 L12.8 8.4 Z" /></Icon>
           </button>
@@ -1207,20 +1226,22 @@ export default function DesignerApp({
             showToast(`Poistettiin ${result.removed} päällekkäistä`)
           }}>Siivoa päällekkäiset</button>
         </div>
-        <select aria-label="Huonetyyppi" value={drawType} onChange={(e) => setDrawType(e.target.value)} style={{ background: '#1c212b', color: '#f5f5f4', border: '1px solid transparent', borderRadius: 8, height: 32, padding: '0 8px', fontSize: 12, maxWidth: 132, flexShrink: 1 }}>
-          {ROOM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-        </select>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
+        <div className="designer-tool">
+          <select aria-label="Huonetyyppi" value={drawType} onChange={(e) => setDrawType(e.target.value)} style={{ background: '#1c212b', color: '#f5f5f4', border: '1px solid transparent', borderRadius: 8, height: 44, padding: '0 8px', fontSize: 12, maxWidth: 160, flexShrink: 1 }}>
+            {ROOM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+          </select>
+        </div>
+        <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
           <button type="button" title="Pohjakuva" style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
           <button type="button" data-testid="view-3d" title="Kolmiulotteinen näkymä" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
           <button type="button" data-testid="view-split" title="Pohja ja 3D rinnakkain" style={textBtn(view === 'split')} onClick={() => setView('split')}>Jaettu</button>
           <button type="button" data-testid="view-schematic" title="Periaatekaavio" style={textBtn(view === 'schematic')} onClick={() => setView('schematic')}>Kaavio</button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
+        <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
           <button type="button" data-testid="unit-si" title="SI-yksiköt" style={textBtn(unitSystem === 'SI')} onClick={() => setUnitSystem('SI')}>SI</button>
           <button type="button" data-testid="unit-ip" title="IP-yksiköt" style={textBtn(unitSystem === 'IP')} onClick={() => setUnitSystem('IP')}>IP</button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
           <button type="button" title="Kumoa (Ctrl+Z)" onClick={undo} style={iconBtn(false)}>
             <Icon><path {...stroke} d="M4 7.5 H11 A3.2 3.2 0 1 1 11 11.2" /><path {...stroke} d="M4 4.6 V7.8 H7.2" /></Icon>
           </button>
@@ -1232,7 +1253,7 @@ export default function DesignerApp({
           </button>
         </div>
         <span style={{ flex: 1, minWidth: 8 }} />
-        <button type="button" data-testid="example-enquiry" title="Esimerkki 8 × 12 × 6 m" onClick={loadExample} style={textBtn(false)}>Esimerkki</button>
+        <button type="button" className="designer-tool" data-testid="example-enquiry" title="Esimerkki 8 × 12 × 6 m" onClick={loadExample} style={textBtn(false)}>Esimerkki</button>
         <div style={{ position: 'relative', flexShrink: 0 }} onMouseDown={(event) => event.stopPropagation()}>
           <button type="button" title="Vie ja tuo" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)} style={textBtn(exportOpen)}>Vie</button>
           {exportOpen && (
@@ -1286,6 +1307,7 @@ export default function DesignerApp({
         <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={importJson} />
       </header>
 
+      <div className={`designer-cad${toolsOpen ? ' tools-open' : ''}`}>
       <CadToolbar
         active={cad?.name}
         onCommand={beginCad}
@@ -1304,6 +1326,7 @@ export default function DesignerApp({
         }}
         onLayer={(layer) => beginCad('layer', layer)}
       />
+      </div>
       {cad && (
         <div style={{ padding: '4px 10px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
           <CadPrompt
@@ -1326,8 +1349,17 @@ export default function DesignerApp({
         </div>
       )}
 
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <aside data-testid="template-library" style={{ width: 248, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #e7e5e4' }}>
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
+        {compact && drawer && (
+          <button type="button" className="drawer-backdrop" data-testid="drawer-backdrop" aria-label="Sulje tiedot" onClick={() => setDrawer(null)} />
+        )}
+        <aside
+          data-testid="template-library"
+          className="designer-library"
+          data-open={compact && drawer === 'rooms' ? 'true' : 'false'}
+          style={compact ? undefined : { width: 248, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #e7e5e4' }}
+        >
+          {compact && <button type="button" data-testid="close-rooms" onClick={() => setDrawer(null)}>Sulje</button>}
           <button type="button" onClick={() => setRoomsOpen((open) => !open)} style={sectionHead}>
             <span>Huoneet</span><span>{roomsOpen ? '−' : '+'}</span>
           </button>
@@ -1455,7 +1487,7 @@ export default function DesignerApp({
               loads={Object.fromEntries((result.rooms || []).map((room) => [room.id, room.total]))}
             />
           ) : view === 'split' ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '1fr 1fr', gridTemplateRows: compact ? '1fr 1fr' : undefined, height: '100%' }}>
               <PlanView {...planProps} />
               <div style={{ borderLeft: '1px solid #d6d3d1' }}>
                 <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} placeMode={Boolean(placing)} onPlace={(spot) => {
@@ -1498,7 +1530,7 @@ export default function DesignerApp({
             </div>
           )}
           {pipes.length > 0 && view !== '3d' && view !== 'schematic' && (
-            <div data-testid="pipe-legend" style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 4, background: 'rgba(255,255,255,0.94)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '8px 10px', maxWidth: 320 }}>
+            <div className="pipe-legend" data-testid="pipe-legend" style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 4, background: 'rgba(255,255,255,0.94)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '8px 10px', maxWidth: 320 }}>
               {['suction', 'liquid', 'liquidReturn', 'hotgas', 'drain', 'drainHeat'].map((key) => (
                 <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
                   <span style={{ width: 28, height: 0, borderTop: `3px ${key === 'liquid' || key === 'suction' ? 'solid' : 'dashed'} ${PIPE_STYLES[key].color}` }} />
@@ -1518,7 +1550,13 @@ export default function DesignerApp({
           )}
         </main>
 
-        {view !== 'schematic' && <aside style={{ width: 340, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #e7e5e4' }}>
+        {view !== 'schematic' && <aside
+          data-testid="designer-props"
+          className="designer-props"
+          data-open={compact && drawer === 'info' ? 'true' : 'false'}
+          style={compact ? undefined : { width: 340, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #e7e5e4' }}
+        >
+          {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>Sulje</button>}
           {selectedIds.length > 1 && (
             <div style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
               <MultiProperties count={selectedIds.length}>

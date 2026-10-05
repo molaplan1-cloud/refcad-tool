@@ -74,9 +74,9 @@ export default function AdminPage() {
   }
 
   return (
-    <div data-testid="admin-panel" style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a', padding: '24px 20px 48px' }}>
+    <div data-testid="admin-panel" className="safe-page" style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a', padding: '24px 20px 48px', paddingTop: 'calc(24px + env(safe-area-inset-top))' }}>
       <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <header className="admin-header" style={{ marginBottom: 8 }}>
           <div>
             <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#0369a1', fontWeight: 700 }}>Ylläpito</div>
             <h1 style={{ margin: '4px 0 0', fontSize: 28 }}>Käyttäjät ja maksut</h1>
@@ -85,8 +85,8 @@ export default function AdminPage() {
         </header>
         <p style={{ color: '#475569', marginTop: 0 }}>Ylläpitäjä ei piirrä. Maksulliset työtilat avautuvat, kun maksu on kuitattu ja voimassaolo on käynnissä.</p>
         {error && <p data-testid="admin-error" style={{ color: '#9f1239' }}>{error}</p>}
-        <div data-testid="admin-users" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+        <div data-testid="admin-users" className="admin-users">
+          <table>
             <thead>
               <tr style={{ textAlign: 'left', background: '#f1f5f9' }}>
                 {['Käyttäjä', 'Tilaus', 'Tila', 'Voimassa alkaen', 'Voimassa asti', 'Toiminnot'].map((label) => (
@@ -132,7 +132,7 @@ export default function AdminPage() {
             </tbody>
           </table>
         </div>
-        <form data-testid="admin-create" onSubmit={create} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 140px auto', gap: 8, marginTop: 20, alignItems: 'end' }}>
+        <form data-testid="admin-create" className="admin-create" onSubmit={create}>
           <label>Sähköposti<input data-testid="admin-email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required style={field} /></label>
           <label>Nimi<input data-testid="admin-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} style={field} /></label>
           <label>Salasana<input data-testid="admin-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required style={field} /></label>
