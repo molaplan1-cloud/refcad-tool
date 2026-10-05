@@ -183,6 +183,7 @@ import {
 import { registerDrawingFlush } from '@/lib/staleDeploy'
 import { shouldCloseChain, snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
 import { alignForReference, drawStepText, lockOrthoPoint, parseDrawFields, pointFromDraw } from '@/lib/drawInput'
+import { dropDegenerateWalls, guidesAllowed, visibleSnap } from '@/lib/guides'
 import {
   applyTemporaryDimension,
   defaultOpeningWidth,
@@ -1121,6 +1122,14 @@ export default function FloorPlanApp() {
   const undoSegmentRef = useRef(() => {})
   const closeChainRef = useRef(() => {})
   const trackRef = useRef(null)
+  const toolRef = useRef(tool)
+  const placingRef = useRef(placing)
+  const yardToolRef = useRef(yardTool)
+  const pointerInsideRef = useRef(true)
+  const [pointerInside, setPointerInside] = useState(true)
+  toolRef.current = tool
+  placingRef.current = placing
+  yardToolRef.current = yardTool
   const draftRef = useRef(null)
   const liveRef = useRef(null)
   const commitWallRef = useRef(() => {})
@@ -1152,12 +1161,15 @@ export default function FloorPlanApp() {
       if (raw) {
         const parsed = JSON.parse(raw)
         if (parsed && Array.isArray(parsed.walls)) {
+          const cleaned = dropDegenerateWalls(parsed)
           const loaded = {
             ...emptyPlan(),
             ...parsed,
+            walls: cleaned.walls,
+            openings: cleaned.openings,
             services: ensureServices(parsed),
             yard: ensureYard(parsed),
-            rooms: detectRooms(parsed.walls, parsed.rooms || [], parsed.openings || []),
+            rooms: detectRooms(cleaned.walls, parsed.rooms || [], cleaned.openings || []),
           }
           setPlan(straightenWalls(loaded, 0.5))
           setSelectedRoom(parsed.rooms?.[0]?.id || null)
@@ -1210,7 +1222,17 @@ export default function FloorPlanApp() {
     return () => observer.disconnect()
   }, [view])
 
+  const clearGuides = useCallback(() => {
+    setSnapVisual(null)
+    setDrawGuide(null)
+    trackRef.current = null
+    setTrack(null)
+  }, [])
+
   const exitToSelect = useCallback(() => {
+    toolRef.current = 'select'
+    placingRef.current = null
+    yardToolRef.current = null
     setTool('select')
     setPlacing(null)
     setSvcTool(null)
@@ -1234,12 +1256,10 @@ export default function FloorPlanApp() {
     lockAngleRef.current = null
     segmentUndo.current = []
     setWallLenEdit(null)
-    setSnapVisual(null)
-    trackRef.current = null
-    setTrack(null)
+    clearGuides()
     setDimEdit(null)
     setRedrawId(null)
-  }, [])
+  }, [clearGuides])
 
   const showToast = useCallback((text) => {
     setToast(text)
@@ -1277,13 +1297,14 @@ export default function FloorPlanApp() {
   }, [])
 
   const commit = useCallback((next) => {
+    clearGuides()
     setPlan((current) => {
       history.current = [...history.current, current].slice(-40)
       redo.current = []
       const bound = bindFlues(next)
       return fixtureServiceKey(current) === fixtureServiceKey(bound) ? bound : syncFixtureServices(bound)
     })
-  }, [])
+  }, [clearGuides])
 
   const undo = useCallback(() => {
     const prev = history.current.pop()
@@ -1693,7 +1714,15 @@ export default function FloorPlanApp() {
     const typingId = document.activeElement?.getAttribute('data-testid') || ''
     const typingDraw = typingId === 'draw-length' || typingId === 'draw-angle' || typingId === 'draw-cursor-length' || typingId === 'draw-cursor-angle'
     const visual = describeSnap(world, ppm2d)
-    setSnapVisual(visual)
+    pointerInsideRef.current = true
+    if (!pointerInside) setPointerInside(true)
+    const allowed = guidesAllowed({
+      tool: toolRef.current,
+      placing: placingRef.current,
+      yardTool: yardToolRef.current,
+      pointerInside: true,
+    })
+    setSnapVisual(allowed ? visual : null)
     setCursor(world)
     const canTrack = !draft && !commandRef.current && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)
     if (canTrack) {
@@ -2128,6 +2157,7 @@ export default function FloorPlanApp() {
     const closing = shouldCloseChain(chain, end) || shouldCloseChain(chain, locked)
     const target = closing ? chain.start : locked
     if (!start || !target || segmentLength(start, target) <= 0.05) {
+      clearGuides()
       if (closing) {
         chainRef.current = null
         setChainStart(null)
@@ -3206,6 +3236,10 @@ export default function FloorPlanApp() {
             exitToSelect()
             return
           }
+          toolRef.current = next
+          placingRef.current = null
+          yardToolRef.current = null
+          clearGuides()
           setHand(false)
           setTool(next)
           setPlacing(null)
@@ -3218,11 +3252,15 @@ export default function FloorPlanApp() {
         }}
         onRoomRect={() => {
           if (tool === 'room' && roomShape === 'rect') { exitToSelect(); return }
+          toolRef.current = 'room'
+          clearGuides()
           setHand(false)
           setTool('room'); setRoomShape('rect'); setPlacing(null); setSvcTool(null); setYardTool(null); setPoly([])
         }}
         onRoomPoly={() => {
           if (tool === 'room' && roomShape === 'poly') { exitToSelect(); return }
+          toolRef.current = 'room'
+          clearGuides()
           setHand(false)
           setTool('room'); setRoomShape('poly'); setPlacing(null); setSvcTool(null); setYardTool(null); setDraft(null)
         }}
@@ -3660,7 +3698,21 @@ export default function FloorPlanApp() {
               }}
             />
           ) : view === '2d' ? (
-            <div ref={hostRef} data-testid="plan-canvas-frame" data-active={engaged ? 'place' : 'select'} style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative', ...placeFrame(engaged) }}>
+            <div
+              ref={hostRef}
+              data-testid="plan-canvas-frame"
+              data-active={engaged ? 'place' : 'select'}
+              onPointerLeave={() => {
+                pointerInsideRef.current = false
+                setPointerInside(false)
+                clearGuides()
+              }}
+              onPointerEnter={() => {
+                pointerInsideRef.current = true
+                setPointerInside(true)
+              }}
+              style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative', ...placeFrame(engaged) }}
+            >
               {drawingWalls && (
                 <DrawCursor
                   x={pointerPx?.x ?? Math.min(120, Math.max(24, (size.w || 800) * 0.28))}
@@ -4315,7 +4367,7 @@ export default function FloorPlanApp() {
                     strokeDasharray="8 4"
                   />
                 )}
-                <SnapMark snap={tool === 'select' && !placing && !yardTool ? null : snapVisual} X={X} Y={Y} zoom={camera.zoom} />
+                <SnapMark snap={visibleSnap(snapVisual, guidesAllowed({ tool, placing, yardTool, pointerInside }))} X={X} Y={Y} zoom={camera.zoom} />
                 {track?.base && !draft && (
                   <g data-testid="track-base" style={{ pointerEvents: 'none' }}>
                     <circle cx={X(track.base.x)} cy={Y(track.base.z)} r={8 / (camera.zoom || 1)} fill="#fff" stroke="#0f766e" strokeWidth={2 / (camera.zoom || 1)} />
