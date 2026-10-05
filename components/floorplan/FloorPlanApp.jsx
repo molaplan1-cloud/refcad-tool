@@ -33,6 +33,8 @@ import {
   materialOf,
   materialsList,
   moveCorner,
+  resizeDimension,
+  wallForDimension,
   moveFixture,
   moveOpening,
   nearestEndpoint,
@@ -179,7 +181,8 @@ import {
   shellPlan,
 } from '@/lib/projects'
 import { registerDrawingFlush } from '@/lib/staleDeploy'
-import { pointAtLength, shouldCloseChain, snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
+import { shouldCloseChain, snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
+import { alignForReference, drawStepText, lockOrthoPoint, parseDrawFields, pointFromDraw } from '@/lib/drawInput'
 import {
   applyTemporaryDimension,
   defaultOpeningWidth,
@@ -254,33 +257,54 @@ function DeviceMark({ item }) {
   )
 }
 
-function DrawFields({ draft, end, onLength, onAngle, onCommit }) {
-  const lengthMm = Math.max(0, Math.round(segmentLength(draft, end) * 1000))
-  const angle = wallDirection({ a: draft, b: end })
-  const [len, setLen] = useState(String(lengthMm))
-  const [ang, setAng] = useState(String(angle))
-  const lenFocus = useRef(false)
-  const angFocus = useRef(false)
-  useEffect(() => { if (!lenFocus.current) setLen(String(lengthMm)) }, [lengthMm])
-  useEffect(() => { if (!angFocus.current) setAng(String(angle)) }, [angle])
-  const field = { width: 72, marginLeft: 4, padding: '2px 6px', borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }
-  const commitOnEnter = (event) => {
+function DrawCursor({ x, y, step, field, showInput, lengthValue, angleValue, lengthRef, angleRef, onLength, onAngle, onCommit, onSwitch, onCancel, onUndo }) {
+  const box = {
+    width: 84,
+    padding: '4px 6px',
+    borderRadius: 6,
+    border: '1px solid #0f766e',
+    fontSize: 16,
+    fontWeight: 700,
+    color: '#134e4a',
+    background: '#fff',
+  }
+  const onKey = (event) => {
     if (event.key === 'Enter') {
       event.preventDefault()
+      event.stopPropagation()
       onCommit()
+    } else if (event.key === 'Tab') {
+      event.preventDefault()
+      event.stopPropagation()
+      onSwitch(event.currentTarget.getAttribute('data-testid') === 'draw-cursor-length' ? 'angle' : 'length')
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      onCancel()
+    } else if (event.key === 'Backspace' && !event.currentTarget.value) {
+      event.preventDefault()
+      event.stopPropagation()
+      onUndo()
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      event.preventDefault()
+      event.stopPropagation()
+      onUndo()
     }
   }
   return (
-    <span data-testid="wall-draw-input" style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-      <label>Pituus
-        <input data-testid="draw-length" inputMode="decimal" value={len} style={field} onChange={(event) => { setLen(event.target.value); onLength(Number(event.target.value)) }} onFocus={(event) => { lenFocus.current = true; event.target.select() }} onBlur={() => { lenFocus.current = false }} onKeyDown={commitOnEnter} />
-        {' '}mm
-      </label>
-      <label>Kulma
-        <input data-testid="draw-angle" inputMode="decimal" value={ang} style={field} onChange={(event) => { setAng(event.target.value); onAngle(Number(event.target.value)) }} onFocus={(event) => { angFocus.current = true; event.target.select() }} onBlur={() => { angFocus.current = false }} onKeyDown={commitOnEnter} />
-        °
-      </label>
-    </span>
+    <div data-testid="draw-hud" style={{ position: 'absolute', left: x, top: y, zIndex: 6, transform: 'translate(18px, 18px)', pointerEvents: 'none', maxWidth: 280 }}>
+      <div data-testid="draw-step" style={{ display: 'inline-block', padding: '3px 8px', borderRadius: 6, background: '#134e4a', color: '#ecfdf5', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>{step}</div>
+      {showInput && (
+        <div data-testid="wall-draw-input" style={{ display: 'flex', gap: 6, marginTop: 4, pointerEvents: 'auto' }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a' }}>Pituus
+            <input ref={lengthRef} data-testid="draw-cursor-length" inputMode="decimal" value={lengthValue} style={{ ...box, display: 'block', borderColor: field === 'length' ? '#0f766e' : '#d6d3d1' }} onChange={(event) => onLength(event.target.value)} onFocus={(event) => { event.target.select(); onLength(event.target.value) }} onKeyDown={onKey} onPointerDown={(event) => event.stopPropagation()} />
+          </label>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a' }}>Kulma
+            <input ref={angleRef} data-testid="draw-cursor-angle" inputMode="decimal" value={angleValue} style={{ ...box, display: 'block', width: 64, borderColor: field === 'angle' ? '#0f766e' : '#d6d3d1' }} onChange={(event) => onAngle(event.target.value)} onFocus={(event) => { event.target.select(); onAngle(event.target.value) }} onKeyDown={onKey} onPointerDown={(event) => event.stopPropagation()} />
+          </label>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -514,7 +538,7 @@ function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
   )
 }
 
-function DimLine({ dim, X, Y, zoom }) {
+function DimLine({ dim, X, Y, zoom, onEdit }) {
   const view = Math.max(0.2, zoom || 1)
   const fontSize = dimensionFont(view)
   const stroke = 1 / view
@@ -592,8 +616,14 @@ function DimLine({ dim, X, Y, zoom }) {
   const ext2 = gapLine(ax2, ay2, x2, y2)
   const breakX = x1 + (x2 - x1) * 0.5
   const breakY = y1 + (y2 - y1) * 0.5
+  const editDim = (event) => {
+    if (!onEdit || !dim.wallId) return
+    event.stopPropagation()
+    event.preventDefault()
+    onEdit(dim, event)
+  }
   return (
-    <g data-testid={`dim-${dim.kind || 'dim'}`} data-label={dim.label} data-place={place.mode} fill="#292524">
+    <g data-testid={`dim-${dim.kind || 'dim'}`} data-label={dim.label} data-place={place.mode} data-wall={dim.wallId || ''} fill="#292524" style={{ pointerEvents: 'none' }}>
       {Math.hypot(ax1 - x1, ay1 - y1) > 4 / view && <line x1={ext1.x1} y1={ext1.y1} x2={ext1.x2} y2={ext1.y2} stroke="#a8a29e" strokeWidth={thin} />}
       {Math.hypot(ax2 - x2, ay2 - y2) > 4 / view && <line x1={ext2.x1} y1={ext2.y1} x2={ext2.x2} y2={ext2.y2} stroke="#a8a29e" strokeWidth={thin} />}
       <line x1={x1} y1={y1} x2={breakX - ux * gap / 2} y2={breakY - uy * gap / 2} stroke="#44403c" strokeWidth={stroke} />
@@ -617,6 +647,20 @@ function DimLine({ dim, X, Y, zoom }) {
           {label}
         </text>
       </g>
+      {onEdit && dim.wallId && (
+        <rect
+          data-testid="dim-hit"
+          data-wall={dim.wallId}
+          x={labelX - haloW / 2}
+          y={labelY - haloH / 2}
+          width={haloW}
+          height={haloH}
+          fill="transparent"
+          transform={rot || undefined}
+          style={{ cursor: 'text', pointerEvents: 'all' }}
+          onPointerDown={editDim}
+        />
+      )}
     </g>
   )
 }
@@ -867,6 +911,7 @@ function WallOutlines({ plan, X, Y, selectedIds = [], simple = false, zoom = 1 }
           data-testid="wall-axis"
           data-wall={wall.id}
           data-kind={wall.kind}
+          data-align={wall.align || 'center'}
           data-thickness={thicknessOf(wall, plan)}
           data-structure={wall.structureId || ''}
           data-ax={wall.a.x}
@@ -951,6 +996,15 @@ export default function FloorPlanApp() {
   const angleMemory = useRef(90)
   const [altDown, setAltDown] = useState(false)
   const [typedLen, setTypedLen] = useState('')
+  const [drawAngle, setDrawAngle] = useState('')
+  const [drawEdited, setDrawEdited] = useState(false)
+  const [drawField, setDrawField] = useState('length')
+  const [chainCount, setChainCount] = useState(0)
+  const [wallRefMode, setWallRefMode] = useState('outer')
+  const [refSide, setRefSide] = useState('left')
+  const [pointerPx, setPointerPx] = useState(null)
+  const [wallLenEdit, setWallLenEdit] = useState(null)
+  const [focusDraw, setFocusDraw] = useState(0)
   const [track, setTrack] = useState(null)
   const [dimEdit, setDimEdit] = useState(null)
   const [chainStart, setChainStart] = useState(null)
@@ -998,6 +1052,16 @@ export default function FloorPlanApp() {
   const shiftRef = useRef(false)
   const chainRef = useRef(null)
   const typedRef = useRef('')
+  const drawAngleRef = useRef('')
+  const drawEditedRef = useRef(false)
+  const drawFieldRef = useRef('length')
+  const lockAngleRef = useRef(null)
+  const segmentUndo = useRef([])
+  const angleStepRef = useRef(90)
+  const drawLenRef = useRef(null)
+  const drawAngRef = useRef(null)
+  const undoSegmentRef = useRef(() => {})
+  const closeChainRef = useRef(() => {})
   const trackRef = useRef(null)
   const draftRef = useRef(null)
   const liveRef = useRef(null)
@@ -1006,6 +1070,12 @@ export default function FloorPlanApp() {
   useEffect(() => {
     if (hydrated && plan.locale) setLocale(plan.locale)
   }, [hydrated, plan.locale, setLocale])
+
+  useEffect(() => {
+    if (!focusDraw) return
+    drawLenRef.current?.focus()
+    drawLenRef.current?.select()
+  }, [focusDraw])
 
   useEffect(() => {
     let cancel = false
@@ -1094,8 +1164,18 @@ export default function FloorPlanApp() {
     setDrawGuide(null)
     chainRef.current = null
     setChainStart(null)
+    setChainCount(0)
     typedRef.current = ''
     setTypedLen('')
+    drawAngleRef.current = ''
+    setDrawAngle('')
+    drawEditedRef.current = false
+    setDrawEdited(false)
+    drawFieldRef.current = 'length'
+    setDrawField('length')
+    lockAngleRef.current = null
+    segmentUndo.current = []
+    setWallLenEdit(null)
     trackRef.current = null
     setTrack(null)
     setDimEdit(null)
@@ -1188,10 +1268,11 @@ export default function FloorPlanApp() {
     const radius = snapRadius(ppm || ppm2d, 14)
     const enabled = !altRef.current
     const walls = plan.walls || []
-    const freeAngle = shiftRef.current
+    const freeAngle = shiftRef.current || angleStep === 0
     if (svcTool) return null
     if (tool === 'exterior' || tool === 'interior') {
       const origin = draft
+      const ortho = !freeAngle && angleStep === 90
       return snapPoint(world, {
         walls,
         grid: gridStep,
@@ -1199,7 +1280,8 @@ export default function FloorPlanApp() {
         origin,
         headings: wallHeadings(origin, walls),
         extraPoints: chainStart && origin ? [chainStart] : [],
-        polarAperture: freeAngle ? null : (7 * Math.PI) / 180,
+        angleStep: freeAngle ? 0 : angleStep,
+        ortho,
         freeAngle,
         joinWalls: true,
         enabled,
@@ -1549,7 +1631,8 @@ export default function FloorPlanApp() {
       return
     }
     const world = toWorld(event)
-    const typingDraw = document.activeElement?.getAttribute('data-testid') === 'draw-length' || document.activeElement?.getAttribute('data-testid') === 'draw-angle'
+    const typingId = document.activeElement?.getAttribute('data-testid') || ''
+    const typingDraw = typingId === 'draw-length' || typingId === 'draw-angle' || typingId === 'draw-cursor-length' || typingId === 'draw-cursor-angle'
     const visual = describeSnap(world, ppm2d)
     setSnapVisual(visual)
     setCursor(world)
@@ -1583,10 +1666,15 @@ export default function FloorPlanApp() {
     } else if (active?.name === 'measure' && active.step === 'to') {
       setCommand((current) => (current ? { ...current, readout: measureReadout(current, world) } : current))
     }
-    if (typedRef.current && draft && (tool === 'exterior' || tool === 'interior')) {
-      const mm = Number(typedRef.current)
-      const toward = visual?.point || world
-      if (mm >= 50) setDrawGuide(pointAtLength(draft, toward, mm))
+    if (hostRef.current) {
+      const frame = hostRef.current.getBoundingClientRect()
+      setPointerPx({ x: event.clientX - frame.left, y: event.clientY - frame.top })
+    }
+    if (drawEditedRef.current && draft && (tool === 'exterior' || tool === 'interior')) {
+      const parsed = parseDrawFields(typedRef.current, drawAngleRef.current)
+      const ortho = angleStepRef.current === 90 && !shiftRef.current
+      const next = parsed ? pointFromDraw(draft, visual?.point || world, parsed, { ortho, lockAngle: lockAngleRef.current }) : null
+      if (next) setDrawGuide(next)
     } else if (!typingDraw) setDrawGuide(null)
     const radius = Math.max(12 / Math.max(ppm2d, 0.001), 0.45)
     if (dragCorner.current) {
@@ -1925,9 +2013,17 @@ export default function FloorPlanApp() {
       if (!draft) {
         chainRef.current = { start: next, count: 0 }
         setChainStart(next)
+        setChainCount(0)
         setDraft(next)
         typedRef.current = ''
         setTypedLen('')
+        drawAngleRef.current = ''
+        setDrawAngle('')
+        drawEditedRef.current = false
+        setDrawEdited(false)
+        lockAngleRef.current = null
+        segmentUndo.current = []
+        if (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches) setFocusDraw((value) => value + 1)
         return
       }
       commitWallRef.current(draft, next)
@@ -1969,28 +2065,82 @@ export default function FloorPlanApp() {
 
   commitWallRef.current = (start, end) => {
     const chain = chainRef.current || (chainStart ? { start: chainStart, count: 0 } : null)
-    const closing = shouldCloseChain(chain, end)
-    const target = closing ? chain.start : end
+    const locked = lockOrthoPoint(start, end, 2)
+    const closing = shouldCloseChain(chain, end) || shouldCloseChain(chain, locked)
+    const target = closing ? chain.start : locked
     if (!start || !target || segmentLength(start, target) <= 0.05) {
       if (closing) {
         chainRef.current = null
         setChainStart(null)
+        setChainCount(0)
         setDraft(null)
       }
       return
     }
-    commit(refreshHeat(addWall(plan, start, target, tool)))
+    segmentUndo.current.push({
+      anchor: { x: start.x, z: start.z },
+      chain: chain ? { start: { ...chain.start }, count: chain.count || 0 } : null,
+      chainStart: chainStart ? { x: chainStart.x, z: chainStart.z } : (chain?.start ? { ...chain.start } : null),
+    })
+    commit(refreshHeat(addWall(plan, start, target, tool, {
+      align: alignForReference(wallRefMode, refSide),
+      axisDeg: 2,
+    })))
     setDrawGuide(null)
     typedRef.current = ''
     setTypedLen('')
+    drawAngleRef.current = ''
+    setDrawAngle('')
+    drawEditedRef.current = false
+    setDrawEdited(false)
+    lockAngleRef.current = null
     if (closing) {
       chainRef.current = null
       setChainStart(null)
+      setChainCount(0)
       setDraft(null)
       return
     }
     chainRef.current = { start: chain?.start || start, count: (chain?.count || 0) + 1 }
+    setChainCount((chain?.count || 0) + 1)
     setDraft(target)
+  }
+
+  undoSegmentRef.current = () => {
+    const mark = segmentUndo.current.pop()
+    typedRef.current = ''
+    setTypedLen('')
+    drawAngleRef.current = ''
+    setDrawAngle('')
+    drawEditedRef.current = false
+    setDrawEdited(false)
+    lockAngleRef.current = null
+    setDrawGuide(null)
+    if (!mark) {
+      chainRef.current = null
+      setChainStart(null)
+      setChainCount(0)
+      setDraft(null)
+      return
+    }
+    const prev = history.current.pop()
+    if (prev) {
+      setPlan((current) => {
+        redo.current = [...redo.current, current].slice(-40)
+        return prev
+      })
+    }
+    chainRef.current = mark.chain
+    setChainStart(mark.chainStart)
+    setChainCount(mark.chain?.count || 0)
+    setDraft(mark.anchor)
+  }
+
+  closeChainRef.current = () => {
+    const chain = chainRef.current
+    const origin = draftRef.current
+    if (!chain?.start || !origin || (chain.count || 0) < 2) return
+    commitWallRef.current(origin, chain.start)
   }
 
   endDrawingRef.current = (world) => {
@@ -2000,6 +2150,7 @@ export default function FloorPlanApp() {
       else {
         chainRef.current = null
         setChainStart(null)
+        setChainCount(0)
         setDraft(null)
       }
     } else if (tool === 'room' && roomShape === 'poly' && poly.length >= 3) {
@@ -2026,6 +2177,7 @@ export default function FloorPlanApp() {
 
   const onPointerDown = (event) => {
     if (view !== '2d') return
+    if (event.target?.closest?.('[data-testid="dim-hit"]') || event.target?.closest?.('[data-testid="wall-length-edit"]') || event.target?.closest?.('[data-testid="wall-draw-input"]')) return
     if (event.pointerType === 'touch') {
       if (event.nativeEvent?.__refcadTouch && event.eventPhase !== 1) return
       if (event.nativeEvent) event.nativeEvent.__refcadTouch = true
@@ -2173,32 +2325,90 @@ export default function FloorPlanApp() {
         return
       }
       const drawingWall = (tool === 'exterior' || tool === 'interior') && draftRef.current
-      if (drawingWall && !event.ctrlKey && !event.metaKey && !event.altKey && (/^[0-9]$/.test(event.key) || event.key === '.' || event.key === ',')) {
+      const drawingToolKey = tool === 'exterior' || tool === 'interior'
+      if (drawingWall && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
         event.preventDefault()
-        const next = `${typedRef.current}${event.key === ',' ? '.' : event.key}`.replace(/^0+(?=\d)/, '').slice(0, 7)
-        typedRef.current = next
-        setTypedLen(next)
-        const mm = Number(next)
-        const origin = draftRef.current
-        const toward = liveRef.current
-        if (origin && toward && Number.isFinite(mm) && mm >= 50) setDrawGuide(pointAtLength(origin, toward, mm))
+        undoSegmentRef.current()
         return
       }
-      if (drawingWall && event.key === 'Backspace' && typedRef.current) {
+      if (drawingWall && !event.ctrlKey && !event.metaKey && !event.altKey && event.key === 'Tab') {
         event.preventDefault()
-        const next = typedRef.current.slice(0, -1)
-        typedRef.current = next
-        setTypedLen(next)
-        if (!next) setDrawGuide(null)
-        else if (draftRef.current && liveRef.current) setDrawGuide(pointAtLength(draftRef.current, liveRef.current, Number(next)))
+        const next = drawFieldRef.current === 'length' ? 'angle' : 'length'
+        drawFieldRef.current = next
+        setDrawField(next)
+        const node = next === 'angle' ? drawAngRef.current : drawLenRef.current
+        node?.focus()
         return
       }
-      if (drawingWall && event.key === 'Enter' && typedRef.current) {
+      if (drawingWall && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'c') {
         event.preventDefault()
-        const mm = Number(typedRef.current)
+        closeChainRef.current()
+        return
+      }
+      const drawChar = event.key === ',' ? '.' : event.key
+      const isDrawChar = /^[0-9.]$/.test(drawChar) || event.key === '<' || event.key === '@'
+      if (drawingWall && !event.ctrlKey && !event.metaKey && !event.altKey && isDrawChar) {
+        event.preventDefault()
+        if (lockAngleRef.current == null && draftRef.current && liveRef.current) {
+          lockAngleRef.current = Math.atan2(liveRef.current.z - draftRef.current.z, liveRef.current.x - draftRef.current.x)
+        }
+        if (event.key === '<' || drawFieldRef.current === 'angle') {
+          if (event.key !== '<' && event.key !== '@') {
+            drawAngleRef.current = `${drawAngleRef.current}${drawChar}`.slice(0, 8)
+            setDrawAngle(drawAngleRef.current)
+          }
+          drawFieldRef.current = 'angle'
+          setDrawField('angle')
+        } else {
+          const next = `${typedRef.current}${event.key === '@' ? '@' : drawChar}`.replace(/^@?0+(?=\d)/, (prefix) => (prefix.startsWith('@') ? '@' : '')).slice(0, 16)
+          typedRef.current = next
+          setTypedLen(next)
+        }
+        drawEditedRef.current = true
+        setDrawEdited(true)
+        const parsed = parseDrawFields(typedRef.current, drawAngleRef.current)
+        const ortho = angleStepRef.current === 90 && !shiftRef.current
+        const guide = parsed ? pointFromDraw(draftRef.current, liveRef.current, parsed, { ortho, lockAngle: lockAngleRef.current }) : null
+        if (guide) setDrawGuide(guide)
+        return
+      }
+      if (drawingWall && event.key === 'Backspace') {
+        event.preventDefault()
+        if (drawFieldRef.current === 'angle' && drawAngleRef.current) {
+          drawAngleRef.current = drawAngleRef.current.slice(0, -1)
+          setDrawAngle(drawAngleRef.current)
+          return
+        }
+        if (typedRef.current) {
+          typedRef.current = typedRef.current.slice(0, -1)
+          setTypedLen(typedRef.current)
+          if (!typedRef.current && !drawAngleRef.current) {
+            drawEditedRef.current = false
+            setDrawEdited(false)
+            lockAngleRef.current = null
+            setDrawGuide(null)
+          }
+          return
+        }
+        undoSegmentRef.current()
+        return
+      }
+      if (drawingWall && event.key === 'Enter') {
+        event.preventDefault()
+        const parsed = drawEditedRef.current ? parseDrawFields(typedRef.current, drawAngleRef.current) : null
         const origin = draftRef.current
         const toward = liveRef.current || origin
-        if (origin && toward && Number.isFinite(mm) && mm >= 50) commitWallRef.current(origin, pointAtLength(origin, toward, mm))
+        const ortho = angleStepRef.current === 90 && !shiftRef.current
+        if (origin && parsed && parsed.lengthMm >= 50) {
+          const guide = pointFromDraw(origin, toward, parsed, { ortho, lockAngle: lockAngleRef.current })
+          if (guide) commitWallRef.current(origin, guide)
+          return
+        }
+        exitToSelect()
+        return
+      }
+      if (drawingToolKey && !draftRef.current && event.key === 'Escape') {
+        exitToSelect()
         return
       }
       const trackingTool = !draftRef.current && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)
@@ -2735,6 +2945,12 @@ export default function FloorPlanApp() {
   const liveEnd = draft && (tool === 'exterior' || tool === 'interior') ? (drawGuide || snapVisual?.point || null) : null
   draftRef.current = draft
   liveRef.current = liveEnd
+  angleStepRef.current = angleStep
+  const drawingWalls = tool === 'exterior' || tool === 'interior'
+  const stepText = drawingWalls ? drawStepText(draft, chainCount) : ''
+  const drawAlign = alignForReference(wallRefMode, refSide)
+  const liveMm = draft && liveEnd ? Math.max(0, Math.round(segmentLength(draft, liveEnd) * 1000)) : 0
+  const liveDeg = draft && liveEnd ? wallDirection({ a: draft, b: liveEnd }) : 0
   trackRef.current = track
   const trackingActive = !draft && !command && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)
   const trackLive = trackingActive && track?.base && cursor
@@ -2897,6 +3113,8 @@ export default function FloorPlanApp() {
           setSvcTool(null)
           setYardTool(null)
           if (next === 'select' || next === 'door' || next === 'window') setDraft(null)
+          if (next === 'exterior') setWallRefMode('outer')
+          if (next === 'interior') setWallRefMode('center')
           if (next === 'detect') { setDraft(null); setPoly([]) }
         }}
         onRoomRect={() => {
@@ -3285,28 +3503,27 @@ export default function FloorPlanApp() {
                 onApply={() => { if (command.step === 'to') confirmCommand(snappedPoint(cursor || command.from || command.base || { x: 0, z: 0 })) }}
                 onCancel={cancelCommand}
               />
-            ) : draft && liveEnd && (tool === 'exterior' || tool === 'interior') ? (
-              <DrawFields
-                draft={draft}
-                end={liveEnd}
-                onLength={(mm) => {
-                  if (!Number.isFinite(mm) || mm < 50) return
-                  const ang = Math.atan2(liveEnd.z - draft.z, liveEnd.x - draft.x)
-                  const metres = mm / 1000
-                  setDrawGuide({ x: draft.x + Math.cos(ang) * metres, z: draft.z + Math.sin(ang) * metres })
-                }}
-                onAngle={(deg) => {
-                  if (!Number.isFinite(deg)) return
-                  const metres = Math.max(0.2, segmentLength(draft, liveEnd))
-                  const rad = deg * Math.PI / 180
-                  setDrawGuide({ x: draft.x + Math.cos(rad) * metres, z: draft.z + Math.sin(rad) * metres })
-                }}
-                onCommit={() => {
-                  const end = drawGuide || liveEnd
-                  if (!draft || !end) return
-                  commitWallRef.current(draft, end)
-                }}
-              />
+            ) : drawingWalls ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
+                <span data-testid="draw-status" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{activeName} · {stepText}</span>
+                <span data-testid="draw-ortho">{angleStep === 0 ? 'Vapaa' : angleStep === 90 ? 'Orto' : `${angleStep}°`}</span>
+                {liveEnd && <span data-testid="draw-readout-status">{formatMm(segmentLength(draft, liveEnd))} mm · {liveDeg}°</span>}
+                {[
+                  ['outer', 'Ulkopinta', 'wall-ref-outer'],
+                  ['center', 'Keskiviiva', 'wall-ref-center'],
+                  ['inner', 'Sisäpinta', 'wall-ref-inner'],
+                ].map(([id, label, testid]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    data-testid={testid}
+                    aria-pressed={wallRefMode === id}
+                    style={{ ...statusBtn, background: wallRefMode === id ? '#134e4a' : '#fff', color: wallRefMode === id ? '#ecfdf5' : '#1c1917' }}
+                    onClick={() => setWallRefMode(id)}
+                  >{label}</button>
+                ))}
+                <button type="button" data-testid="wall-ref-flip" style={statusBtn} onClick={() => setRefSide((side) => (side === 'left' ? 'right' : 'left'))}>Vaihda puoli</button>
+              </span>
             ) : (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <span data-testid="status-tool">{track?.armed === 'pick' ? 'Mistä: napsauta peruspiste' : status}</span>
@@ -3346,6 +3563,78 @@ export default function FloorPlanApp() {
             />
           ) : view === '2d' ? (
             <div ref={hostRef} data-testid="plan-canvas-frame" data-active={engaged ? 'place' : 'select'} style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative', ...placeFrame(engaged) }}>
+              {drawingWalls && pointerPx && (
+                <DrawCursor
+                  x={Math.min(Math.max(pointerPx.x, 8), Math.max(8, (size.w || 800) - 220))}
+                  y={Math.min(Math.max(pointerPx.y, 8), Math.max(8, (size.h || 600) - 120))}
+                  field={drawField}
+                  step={stepText}
+                  showInput={Boolean(draft)}
+                  lengthValue={drawEdited ? typedLen : (draft ? String(liveMm) : '')}
+                  angleValue={drawAngle !== '' ? drawAngle : (draft ? String(liveDeg) : '')}
+                  lengthRef={drawLenRef}
+                  angleRef={drawAngRef}
+                  onLength={(value) => {
+                    typedRef.current = value
+                    setTypedLen(value)
+                    drawEditedRef.current = true
+                    setDrawEdited(true)
+                    if (lockAngleRef.current == null && draft && liveEnd) lockAngleRef.current = Math.atan2(liveEnd.z - draft.z, liveEnd.x - draft.x)
+                    const parsed = parseDrawFields(value, drawAngleRef.current)
+                    const guide = draft && parsed ? pointFromDraw(draft, liveEnd, parsed, { ortho: angleStep === 90 && !shiftRef.current, lockAngle: lockAngleRef.current }) : null
+                    if (guide) setDrawGuide(guide)
+                  }}
+                  onAngle={(value) => {
+                    drawAngleRef.current = value
+                    setDrawAngle(value)
+                    drawEditedRef.current = true
+                    setDrawEdited(true)
+                    drawFieldRef.current = 'angle'
+                    const parsed = parseDrawFields(typedRef.current || String(liveMm), value)
+                    const guide = draft && parsed ? pointFromDraw(draft, liveEnd, parsed, { ortho: false, lockAngle: null }) : null
+                    if (guide) setDrawGuide(guide)
+                  }}
+                  onCommit={() => {
+                    const parsed = parseDrawFields(drawEdited ? typedLen : String(liveMm), drawAngle !== '' ? drawAngle : String(liveDeg))
+                    if (!draft || !parsed || parsed.lengthMm < 50) return
+                    const angle = lockAngleRef.current ?? (liveEnd ? Math.atan2(liveEnd.z - draft.z, liveEnd.x - draft.x) : 0)
+                    const guide = pointFromDraw(draft, liveEnd || draft, parsed, { ortho: angleStep === 90 && !shiftRef.current && parsed.angleDeg == null, lockAngle: parsed.angleDeg == null ? angle : null })
+                    if (guide) commitWallRef.current(draft, guide)
+                  }}
+                  onSwitch={(next) => {
+                    drawFieldRef.current = next
+                    setDrawField(next)
+                    const node = next === 'angle' ? drawAngRef.current : drawLenRef.current
+                    node?.focus()
+                    node?.select()
+                  }}
+                  onCancel={exitToSelect}
+                  onUndo={() => undoSegmentRef.current()}
+                />
+              )}
+              {wallLenEdit && (
+                <input
+                  data-testid="wall-length-edit"
+                  autoFocus
+                  inputMode="decimal"
+                  value={wallLenEdit.value}
+                  onFocus={(event) => event.target.select()}
+                  onChange={(event) => setWallLenEdit((current) => (current ? { ...current, value: event.target.value } : current))}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      const mm = Number(String(wallLenEdit.value).replace(',', '.'))
+                      if (Number.isFinite(mm) && mm >= 50 && wallLenEdit.dim) commit(resizeDimension(plan, wallLenEdit.dim, mm / 1000))
+                      setWallLenEdit(null)
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault()
+                      setWallLenEdit(null)
+                    }
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  style={{ position: 'fixed', left: wallLenEdit.x, top: wallLenEdit.y, zIndex: 30, width: 96, padding: '4px 6px', fontSize: 16, fontWeight: 700, border: '2px solid #0f766e', borderRadius: 6 }}
+                />
+              )}
               <ModeChip workspace={workspaceName} name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />
               <PlaceToast text={toast} />
               <svg
@@ -3559,10 +3848,30 @@ export default function FloorPlanApp() {
                 }} />}
                 </g>
                 {sheetMode !== 'site' && plan.walls.length > 0 && (
-                  <g style={{ pointerEvents: 'none' }} data-testid="dimension-chains">
-                    {stackDimensionLabels(dedupeDimensions(dimLines, 18 / (Math.max(camera.zoom || 1, 0.2) * Math.max(layout.scale * k, 0.001))), X, Y, camera.zoom || 1).map((dim, index) => (
-                      <DimLine key={`${dim.kind || 'dim'}-${dim.id || index}-${dim.label}-${dim.x1}-${dim.z1}`} dim={dim} X={X} Y={Y} zoom={camera.zoom || 1} />
-                    ))}
+                  <g data-testid="dimension-chains">
+                    {stackDimensionLabels(dedupeDimensions(dimLines, 18 / (Math.max(camera.zoom || 1, 0.2) * Math.max(layout.scale * k, 0.001))), X, Y, camera.zoom || 1).map((dim, index) => {
+                      const host = tool === 'select' ? wallForDimension(plan, dim) : null
+                      const next = host ? { ...dim, wallId: host.id } : dim
+                      return (
+                        <DimLine
+                          key={`dim-${index}-${next.wallId || 'x'}-${next.label}-${next.x1}-${next.z1}`}
+                          dim={next}
+                          X={X}
+                          Y={Y}
+                          zoom={camera.zoom || 1}
+                          onEdit={tool === 'select' ? (item, event) => {
+                            const wall = (plan.walls || []).find((entry) => entry.id === item.wallId)
+                            if (!wall) return
+                            setWallLenEdit({
+                              dim: item,
+                              value: String(item.label || Math.round(segmentLength(wall.a, wall.b) * 1000)),
+                              x: event.clientX,
+                              y: event.clientY - 10,
+                            })
+                          } : null}
+                        />
+                      )
+                    })}
                   </g>
                 )}
                 {sheetMode !== 'site' && display.openingSizes && openingTags(plan).map((tag) => (
@@ -3624,14 +3933,43 @@ export default function FloorPlanApp() {
                     })()}
                   </g>
                 )}
-                {liveEnd && tool !== 'room' && (
-                  <g style={{ pointerEvents: 'none' }}>
-                    <line x1={X(draft.x)} y1={Y(draft.z)} x2={X(liveEnd.x)} y2={Y(liveEnd.z)} stroke="#0f766e" strokeWidth={1.5 / camera.zoom} strokeDasharray={`${6 / camera.zoom} ${4 / camera.zoom}`} />
-                    <g data-testid="draw-readout" data-length={typedLen || String(Math.round(liveLength * 1000))} data-angle={wallDirection({ a: draft, b: liveEnd })} transform={`translate(${X(liveEnd.x)} ${Y(liveEnd.z)}) scale(${1 / (camera.zoom || 1)})`}>
-                      <rect x="14" y="8" width="128" height="18" rx="3" fill="#fbfaf7" stroke="#0f766e" strokeWidth="1" />
-                      <text x="78" y="21" textAnchor="middle" fontSize="12" fontWeight={700} fill="#0f766e">{typedLen || formatMm(liveLength)} mm  {wallDirection({ a: draft, b: liveEnd })}°</text>
+                {liveEnd && drawingWalls && (
+                  <g data-testid="draw-preview" data-length={String(liveMm)} data-angle={String(liveDeg)} style={{ pointerEvents: 'none' }}>
+                    <polygon
+                      points={selectionRibbon({ a: draft, b: liveEnd, align: drawAlign, kind: tool === 'interior' ? 'interior' : 'exterior' }, plan).map((point) => `${X(point.x)},${Y(point.z)}`).join(' ')}
+                      fill="rgba(15,118,110,0.55)"
+                      stroke="#0f766e"
+                      strokeWidth={1.8 / (camera.zoom || 1)}
+                    />
+                    <line
+                      data-testid="draw-reference"
+                      x1={X(draft.x)}
+                      y1={Y(draft.z)}
+                      x2={X(liveEnd.x)}
+                      y2={Y(liveEnd.z)}
+                      stroke="#134e4a"
+                      strokeWidth={1.6 / (camera.zoom || 1)}
+                      strokeDasharray={`${7 / (camera.zoom || 1)} ${4 / (camera.zoom || 1)}`}
+                    />
+                    <g data-testid="draw-readout" data-length={String(liveMm)} data-angle={String(liveDeg)} transform={`translate(${X((draft.x + liveEnd.x) / 2)} ${Y((draft.z + liveEnd.z) / 2)}) scale(${1 / (camera.zoom || 1)})`}>
+                      <rect x="-58" y="-30" width="116" height="36" rx="4" fill="#fbfaf7" stroke="#0f766e" />
+                      <text x="0" y="-14" textAnchor="middle" fontSize="13" fontWeight={700} fill="#134e4a">{formatMm(liveLength)} mm</text>
+                      <text x="0" y="2" textAnchor="middle" fontSize="12" fontWeight={700} fill="#0f766e">{liveDeg}°</text>
                     </g>
                   </g>
+                )}
+                {chainStart && draft && drawingWalls && (
+                  <rect
+                    data-testid="draw-origin"
+                    x={X(chainStart.x) - 6 / (camera.zoom || 1)}
+                    y={Y(chainStart.z) - 6 / (camera.zoom || 1)}
+                    width={12 / (camera.zoom || 1)}
+                    height={12 / (camera.zoom || 1)}
+                    fill="#fff"
+                    stroke="#ea580c"
+                    strokeWidth={2 / (camera.zoom || 1)}
+                    style={{ pointerEvents: 'none' }}
+                  />
                 )}
                 {tool === 'room' && roomShape === 'rect' && draft && roomCursor && (
                   <polygon
