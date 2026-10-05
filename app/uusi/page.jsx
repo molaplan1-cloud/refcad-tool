@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { PROJECT_TYPES, accessFor, canStartType } from '@/lib/access'
-import { useLocale } from '@/components/i18n/Locale'
 import { emptyPlan } from '@/lib/floorplan'
 import { CURRENT_KEY } from '@/lib/projects'
+import { ShellLanguage, useLocale } from '@/components/i18n/Locale'
 
 export default function TypePage() {
   const { t } = useLocale()
@@ -40,21 +40,22 @@ export default function TypePage() {
     <div data-testid="type-picker" style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a' }}>
       <header className="picker-header safe-page" style={{ paddingTop: 'calc(18px + env(safe-area-inset-top))' }}>
         <Link href="/" style={{ fontWeight: 800, color: '#0f172a', textDecoration: 'none' }}>RefCAD</Link>
-        <Link href={access.admin ? '/admin' : '/login'} style={{ color: '#0369a1', textDecoration: 'none' }}>{access.admin ? 'Ylläpito' : user ? user.email : 'Kirjaudu'}</Link>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+          <Link href={access.admin ? '/admin' : '/login'} style={{ color: '#0369a1', textDecoration: 'none' }}>{access.admin ? t('shell.admin') : user ? user.email : t('shell.login')}</Link>
+          <ShellLanguage tone="light" />
+        </span>
       </header>
       <main style={{ maxWidth: 1080, margin: '0 auto', padding: '12px 24px 64px' }}>
-        <p style={{ letterSpacing: '0.14em', textTransform: 'uppercase', fontSize: 12, color: '#0369a1', fontWeight: 700 }}>Uusi hanke</p>
-        <h1 className="picker-title" style={{ fontSize: 40, lineHeight: 1.1, margin: '8px 0 12px' }}>Valitse, mitä suunnittelet</h1>
-        <p style={{ maxWidth: 640, color: '#475569', fontSize: 17, lineHeight: 1.5 }}>
-          {t('price.workspaces')}
-        </p>
+        <p style={{ letterSpacing: '0.14em', textTransform: 'uppercase', fontSize: 12, color: '#0369a1', fontWeight: 700 }}>{t('type.new')}</p>
+        <h1 className="picker-title" style={{ fontSize: 40, lineHeight: 1.1, margin: '8px 0 12px' }}>{t('type.heading')}</h1>
+        <p style={{ maxWidth: 640, color: '#475569', fontSize: 17, lineHeight: 1.5 }}>{t('price.workspaces')}</p>
         {access.pending && (
           <p data-testid="order-thanks" style={{ marginTop: 16, maxWidth: 640, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 10, color: '#166534', lineHeight: 1.5 }}>
             {t('price.thanks')}
           </p>
         )}
         {access.admin && (
-          <p data-testid="admin-no-draw" style={{ marginTop: 16 }}>Ylläpitäjä ei piirrä. Käyttäjät ja maksut ovat ylläpitonäkymässä.</p>
+          <p data-testid="admin-no-draw" style={{ marginTop: 16 }}>{t('type.adminNoDraw')}</p>
         )}
         <div className="picker-grid" style={{ marginTop: 28 }}>
           {PROJECT_TYPES.map((type) => {
@@ -76,10 +77,10 @@ export default function TypePage() {
                   opacity: allowed ? 1 : 0.72,
                 }}
               >
-                <div style={{ fontSize: 18, fontWeight: 750 }}>{type.name}</div>
-                <p style={{ color: '#475569', lineHeight: 1.45, minHeight: 64 }}>{type.summary}</p>
+                <div style={{ fontSize: 18, fontWeight: 750 }}>{t(`type.${type.id}.name`)}</div>
+                <p style={{ color: '#475569', lineHeight: 1.45, minHeight: 64 }}>{t(`type.${type.id}.summary`)}</p>
                 <div style={{ fontSize: 13, fontWeight: 700, color: allowed ? '#0f766e' : '#9a3412' }}>
-                  {allowed ? 'Aloita' : 'Vaatii Pro-tilauksen'}
+                  {allowed ? t('type.start') : t('type.needsPro')}
                 </div>
               </button>
             )

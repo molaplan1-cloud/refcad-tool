@@ -557,7 +557,7 @@ export default function DesignerApp({
     const width = Math.abs(x2 - x1)
     const depth = Math.abs(z2 - z1)
     if (width < 0.8 || depth < 0.8) {
-      setNotice('Vedä vähintään 0,8 m × 0,8 m kokoinen alue.')
+      setNotice(t('designer.minRoom'))
       return
     }
     const rect = {
@@ -571,7 +571,7 @@ export default function DesignerApp({
     if (tool === 'partition' && isRefrigerated(drawType)) {
       parent = findContainer(current, rect)
       if (!parent) {
-        setNotice('Väliseinä piirretään olemassa olevan huoneen sisään.')
+        setNotice(t('designer.partitionInside'))
         return
       }
     }
@@ -589,18 +589,18 @@ export default function DesignerApp({
     setRooms([...current, room])
     setSelectedIds([room.id])
     setTool('select')
-    setNotice(`${room.label} lisätty. Sisämitat tulevat ulkomitasta miinus seinät.`)
+    setNotice(t('designer.roomAdded', { label: room.label }))
   }
 
   function onCreatePolygon(points) {
     const clean = cleanOrthogonal(points)
     if (clean.length < 4 || selfIntersects(clean)) {
-      setNotice('Monikulmio tarvitsee vähintään neljä nurkkaa, eikä seinät saa risteytyä.')
+      setNotice(t('designer.badPolygon'))
       return
     }
     const box = bboxOf(clean)
     if (box.width < 0.8 || box.depth < 0.8) {
-      setNotice('Vedä vähintään 0,8 m × 0,8 m kokoinen alue.')
+      setNotice(t('designer.minRoom'))
       return
     }
     const current = roomsRef.current
@@ -622,7 +622,7 @@ export default function DesignerApp({
     setRooms([...current, placed])
     setSelectedIds([placed.id])
     setTool('select')
-    setNotice(inside ? `${placed.label} lisättiin väliseinänä.` : `${placed.label} lisätty. Reuna on monikulmio.`)
+    setNotice(inside ? t('designer.addedPartition', { label: placed.label }) : t('designer.addedOutline', { label: placed.label }))
   }
 
   function showToast(text) {
@@ -664,7 +664,7 @@ export default function DesignerApp({
       item.id === roomId ? { ...item, equipment: [...item.equipment, eq] } : item
     )))
     setSelectedIds([eq.id])
-    setNotice(warning || `${eq.name} sijoitettiin huoneeseen ${room.label}.`)
+    setNotice(warning || t('designer.placedIn', { name: eq.name, room: room.label }))
     if (!stamp.shift && !repeatPlace) {
       setPlacingId(null)
       setTool('select')
@@ -679,7 +679,7 @@ export default function DesignerApp({
     const loose = pipesRef.current.filter((pipe) => pipe.kind === 'cable' && !pipe.locked)
     setPipes([...locked, ...loose, ...fresh])
     setSelectedIds(fresh[0] ? [fresh[0].id] : (locked[0] ? [locked[0].id] : []))
-    setNotice(locked.length ? `${result.notice || 'Putket reititetty.'} Manuaaliset reitit säilyivät.` : result.notice)
+    setNotice(locked.length ? t('designer.pipesKept', { notice: result.notice || t('designer.pipesDone') }) : result.notice)
     setPipeOffer(null)
   }
 
@@ -734,7 +734,7 @@ export default function DesignerApp({
       const cable = { id: genId(), points: clean }
       setCables([...cablesRef.current, cable])
       setSelectedIds([cable.id])
-      setNotice('Kaapeli lisättiin.')
+      setNotice(t('designer.cableAdded'))
       return
     }
     const room = [...roomsRef.current].filter((item) => {
@@ -763,8 +763,8 @@ export default function DesignerApp({
     setSelectedIds([pipe.id])
     setTool('select')
     setNotice(pipe.kind === 'drain' && pipe.roomTempC < 0
-      ? 'Kondenssivesiputki lisättiin. Pakastetilassa se merkitään eristetyksi ja lämmityskaapelilla.'
-      : 'Putki lisättiin. Koko lasketaan kuormasta, kylmäaineesta ja pituudesta.')
+      ? t('designer.drainHeated')
+      : t('designer.pipeAdded'))
   }
 
   function patchSelected(patch) {
@@ -780,7 +780,7 @@ export default function DesignerApp({
   }
 
   function loadExample() {
-    if (rooms.length && !window.confirm('Korvataanko nykyinen pohja esimerkillä 8 × 12 × 6 m?')) return
+    if (rooms.length && !window.confirm(t('designer.replaceExample'))) return
     pushUndo()
     const scene = decorateExample(buildEnquiryExample())
     setRooms(normalizeRooms(scene.rooms))
@@ -789,7 +789,7 @@ export default function DesignerApp({
     setSelectedIds([scene.rooms[0].id])
     setView('2d')
     setFitToken((token) => token + 1)
-    setNotice('Esimerkki: kylmähuoneet, varasto, konehuone ja putket. Kuorma on oikealla.')
+    setNotice(t('designer.exampleLoaded'))
   }
 
   const routeBase = useRef(null)
@@ -990,9 +990,9 @@ export default function DesignerApp({
         setCables(Array.isArray(data.cables) ? data.cables : [])
         if (data.schematic && typeof data.schematic === 'object') setSchematic((current) => ({ ...current, ...data.schematic }))
         if (data.unitSystem === 'IP' || data.unitSystem === 'SI') setUnitSystem(data.unitSystem)
-        setNotice('Tuotu JSON-tiedosto.')
+        setNotice(t('designer.imported'))
       } catch {
-        setNotice('Tiedosto ei ole RefCAD-projekti.')
+        setNotice(t('designer.badFile'))
       }
     }
     reader.readAsText(file)
@@ -1098,7 +1098,7 @@ export default function DesignerApp({
     setCad(null)
   }
 
-  const saveText = saveState === 'saving' ? 'Tallentaa…' : saveState === 'error' ? 'Tallennus epäonnistui' : `Tallennettu ${persistLabel}`
+  const saveText = saveState === 'saving' ? t('designer.savingNow') : saveState === 'error' ? t('designer.saveFailed') : t('designer.savedAs', { where: persistLabel })
   const planProps = {
     rooms,
     selectedIds,
@@ -1121,7 +1121,7 @@ export default function DesignerApp({
           const wz = room.z + eq.z
           if (!insideRefrigerated(current, wx, wz)) return eq
           const snapped = snapOutdoorUnit(current, eq, wx, wz, { mount: eq.mount || 'wall' })
-          setNotice(snapped.warning || 'Ulkoyksikkö siirrettiin kylmähuoneen ulkopuolelle.')
+          setNotice(snapped.warning || t('designer.movedOut'))
           return { ...eq, x: snapped.x - room.x, z: snapped.z - room.z, rotation: snapped.rotation, mount: eq.mount || snapped.mount }
         }),
       })))
@@ -1192,7 +1192,7 @@ export default function DesignerApp({
     router.push('/pohjakuva')
   }
 
-  const designName = placing?.name || (tool === 'draw' ? 'Huone' : tool === 'polygon' ? 'Monikulmio' : tool === 'partition' ? 'Väliseinä' : tool === 'pipe' ? 'Putki' : tool === 'cable' ? 'Kaapeli' : null)
+  const designName = placing?.name || (tool === 'draw' ? t('designer.room') : tool === 'polygon' ? t('designer.polygon') : tool === 'partition' ? t('designer.partition') : tool === 'pipe' ? t('designer.pipe') : tool === 'cable' ? t('designer.cable') : null)
   const designDrawing = Boolean(designName && !placing)
   const designLabel = modeChipText({ name: designName, repeat: repeatPlace && Boolean(placing), drawing: designDrawing })
 
@@ -1206,7 +1206,7 @@ export default function DesignerApp({
         <Link href="/projects" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, letterSpacing: -0.2, flexShrink: 0 }}>RefCAD</Link>
         <select
           data-testid="project-type"
-          aria-label="Hanketyyppi"
+          aria-label={t('chrome.projectType')}
           value={projectType}
           onChange={(event) => chooseProjectType(event.target.value)}
           style={{ height: 32, maxWidth: 168, borderRadius: 8, border: '1px solid #3f3f46', background: '#1c212b', color: '#f5f5f4', fontSize: 12, fontWeight: 650, flexShrink: 0 }}
@@ -1214,6 +1214,7 @@ export default function DesignerApp({
           {PROJECT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
         </select>
         <div className="designer-tool"><LanguageSwitch value={locale} onChange={setLocale} /></div>
+        <LanguageSwitch className="compact-only" value={locale} onChange={setLocale} />
         {projectType !== 'kylmio' && (
           <Link href="/pohjakuva" data-testid="open-floorplan" title={t('designer.floorplanTitle')} style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>{t('designer.floorplan')}</Link>
         )}
@@ -1230,69 +1231,69 @@ export default function DesignerApp({
         <span title={saveText} style={{ fontSize: 11, color: saveState === 'error' ? '#fca5a5' : '#86efac', flexShrink: 0, whiteSpace: 'nowrap' }}>
           {saveState === 'error' ? t('designer.error') : saveState === 'saving' ? t('designer.saving') : t('designer.saved')}
         </span>
-        <button type="button" className="compact-only" data-testid="designer-tools" aria-expanded={toolsOpen} onClick={() => setToolsOpen((open) => !open)} style={compactBtn(toolsOpen)}>Työkalut</button>
-        <button type="button" className="compact-only" data-testid="designer-hand" aria-pressed={hand} onClick={() => setHand((value) => !value)} style={compactBtn(hand)}>{hand ? 'Piirrä' : 'Siirrä'}</button>
-        <button type="button" className="compact-only" data-testid="designer-rooms" aria-pressed={drawer === 'rooms'} onClick={() => setDrawer((current) => current === 'rooms' ? null : 'rooms')} style={compactBtn(drawer === 'rooms')}>Huoneet</button>
-        <button type="button" className="compact-only" data-testid="designer-info" aria-pressed={drawer === 'info'} onClick={() => setDrawer((current) => current === 'info' ? null : 'info')} style={compactBtn(drawer === 'info')}>Tiedot</button>
+        <button type="button" className="compact-only" data-testid="designer-tools" aria-expanded={toolsOpen} onClick={() => setToolsOpen((open) => !open)} style={compactBtn(toolsOpen)}>{t('edit.tools')}</button>
+        <button type="button" className="compact-only" data-testid="designer-hand" aria-pressed={hand} onClick={() => setHand((value) => !value)} style={compactBtn(hand)}>{hand ? t('edit.draw') : t('edit.pan')}</button>
+        <button type="button" className="compact-only" data-testid="designer-rooms" aria-pressed={drawer === 'rooms'} onClick={() => setDrawer((current) => current === 'rooms' ? null : 'rooms')} style={compactBtn(drawer === 'rooms')}>{t('designer.rooms')}</button>
+        <button type="button" className="compact-only" data-testid="designer-info" aria-pressed={drawer === 'info'} onClick={() => setDrawer((current) => current === 'info' ? null : 'info')} style={compactBtn(drawer === 'info')}>{t('designer.info')}</button>
         <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
-          <button type="button" data-testid="tool-select" aria-pressed={tool === 'select' && !placing} title="Valitse (V)" style={iconBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-select" aria-pressed={tool === 'select' && !placing} title={t('designer.selectTitle')} style={iconBtn(tool === 'select' && !placing)} onClick={() => { setTool('select'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M4 2.4 L4 13.2 L7.1 9.8 L10.4 14 L11.8 13.2 L8.5 9 L12.8 8.4 Z" /></Icon>
           </button>
-          <button type="button" data-testid="tool-draw" aria-pressed={tool === 'draw'} title="Huone, suorakulmio (R)" style={iconBtn(tool === 'draw')} onClick={() => { if (tool === 'draw') { setTool('select'); return } setTool('draw'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-draw" aria-pressed={tool === 'draw'} title={t('designer.roomTitle')} style={iconBtn(tool === 'draw')} onClick={() => { if (tool === 'draw') { setTool('select'); return } setTool('draw'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3.2 3.6 H12.8 V12.4 H3.2 Z" /></Icon>
           </button>
-          <button type="button" data-testid="tool-polygon" aria-pressed={tool === 'polygon'} title="Monikulmio (P)" style={iconBtn(tool === 'polygon')} onClick={() => { if (tool === 'polygon') { setTool('select'); return } setTool('polygon'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-polygon" aria-pressed={tool === 'polygon'} title={t('designer.polygonTitle')} style={iconBtn(tool === 'polygon')} onClick={() => { if (tool === 'polygon') { setTool('select'); return } setTool('polygon'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3.2 11.2 L6.2 3 L13 5.2 L11 13 Z" /></Icon>
           </button>
-          <button type="button" data-testid="tool-partition" aria-pressed={tool === 'partition'} title="Väliseinä (W)" style={iconBtn(tool === 'partition')} onClick={() => { if (tool === 'partition') { setTool('select'); return } setTool('partition'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-partition" aria-pressed={tool === 'partition'} title={t('designer.partitionTitle')} style={iconBtn(tool === 'partition')} onClick={() => { if (tool === 'partition') { setTool('select'); return } setTool('partition'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3 3.2 H13 V12.8 H8.2 V3.2" /></Icon>
           </button>
-          <button type="button" data-testid="tool-pipe" aria-pressed={tool === 'pipe'} title="Putki (L)" style={iconBtn(tool === 'pipe')} onClick={() => { if (tool === 'pipe') { setTool('select'); return } setTool('pipe'); setPlacingId(null) }}>
+          <button type="button" data-testid="tool-pipe" aria-pressed={tool === 'pipe'} title={t('designer.pipeTitle')} style={iconBtn(tool === 'pipe')} onClick={() => { if (tool === 'pipe') { setTool('select'); return } setTool('pipe'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3 12.2 H7 V4.2 H13" /></Icon>
           </button>
-          <button type="button" data-testid="auto-pipe" title="Luo kylmäainepiiri laitteista" style={textBtn(false)} onClick={runAutoPipe}>Autoputkitus</button>
-          <button type="button" data-testid="tool-cable" aria-pressed={tool === 'cable'} title="Kaapeli (K)" style={iconBtn(tool === 'cable')} onClick={() => { if (tool === 'cable') { setTool('select'); return } setTool('cable'); setPlacingId(null) }}>
+          <button type="button" data-testid="auto-pipe" title={t('designer.autoPipeTitle')} style={textBtn(false)} onClick={runAutoPipe}>{t('designer.autoPipe')}</button>
+          <button type="button" data-testid="tool-cable" aria-pressed={tool === 'cable'} title={t('designer.cableTitle')} style={iconBtn(tool === 'cable')} onClick={() => { if (tool === 'cable') { setTool('select'); return } setTool('cable'); setPlacingId(null) }}>
             <Icon><path {...stroke} d="M3 4.2 H6.2 V8 H9.8 V4.2 H13 V12.2" /></Icon>
           </button>
-          <button type="button" data-testid="repeat-place" aria-pressed={repeatPlace} title="Jätä sijoitus päälle" style={{ ...textBtn(false), ...(repeatPlace ? { background: '#9a3412', color: '#fff7ed', boxShadow: '0 0 0 2px #fdba74' } : {}) }} onClick={() => setRepeatPlace((value) => !value)}>Toista</button>
-          <button type="button" data-testid="cleanup-duplicates" title="Poista päällekkäiset laitteet" style={textBtn(false)} onClick={() => {
+          <button type="button" data-testid="repeat-place" aria-pressed={repeatPlace} title={t('designer.repeatTitle')} style={{ ...textBtn(false), ...(repeatPlace ? { background: '#9a3412', color: '#fff7ed', boxShadow: '0 0 0 2px #fdba74' } : {}) }} onClick={() => setRepeatPlace((value) => !value)}>{t('designer.repeat')}</button>
+          <button type="button" data-testid="cleanup-duplicates" title={t('designer.cleanupTitle')} style={textBtn(false)} onClick={() => {
             const result = removeStackedEquipment(roomsRef.current)
-            if (!result.removed) { showToast('Päällekkäisiä ei löytynyt'); return }
+            if (!result.removed) { showToast(t('toast.noneStacked')); return }
             pushUndo()
             setRooms(result.rooms)
-            showToast(`Poistettiin ${result.removed} päällekkäistä`)
-          }}>Siivoa päällekkäiset</button>
+            showToast(t('toast.removedStacked', { count: result.removed }))
+          }}>{t('edit.cleanup')}</button>
         </div>
         <div className="designer-tool">
-          <select aria-label="Huonetyyppi" value={drawType} onChange={(e) => setDrawType(e.target.value)} style={{ background: '#1c212b', color: '#f5f5f4', border: '1px solid transparent', borderRadius: 8, height: 44, padding: '0 8px', fontSize: 12, maxWidth: 160, flexShrink: 1 }}>
+          <select aria-label={t('designer.roomType')} value={drawType} onChange={(e) => setDrawType(e.target.value)} style={{ background: '#1c212b', color: '#f5f5f4', border: '1px solid transparent', borderRadius: 8, height: 44, padding: '0 8px', fontSize: 12, maxWidth: 160, flexShrink: 1 }}>
             {ROOM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
           </select>
         </div>
         <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
-          <button type="button" title="Pohjakuva" style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
-          <button type="button" data-testid="view-3d" title="Kolmiulotteinen näkymä" style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
-          <button type="button" data-testid="view-split" title="Pohja ja 3D rinnakkain" style={textBtn(view === 'split')} onClick={() => setView('split')}>Jaettu</button>
-          <button type="button" data-testid="view-schematic" title="Periaatekaavio" style={textBtn(view === 'schematic')} onClick={() => setView('schematic')}>Kaavio</button>
+          <button type="button" title={t('designer.viewPlan')} style={textBtn(view === '2d')} onClick={() => setView('2d')}>2D</button>
+          <button type="button" data-testid="view-3d" title={t('designer.view3d')} style={textBtn(view === '3d')} onClick={() => setView('3d')}>3D</button>
+          <button type="button" data-testid="view-split" title={t('designer.splitTitle')} style={textBtn(view === 'split')} onClick={() => setView('split')}>{t('designer.split')}</button>
+          <button type="button" data-testid="view-schematic" title={t('designer.schematicTitle')} style={textBtn(view === 'schematic')} onClick={() => setView('schematic')}>{t('designer.schematic')}</button>
         </div>
         <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10, background: '#1c212b', flexShrink: 0 }}>
-          <button type="button" data-testid="unit-si" title="SI-yksiköt" style={textBtn(unitSystem === 'SI')} onClick={() => setUnitSystem('SI')}>SI</button>
-          <button type="button" data-testid="unit-ip" title="IP-yksiköt" style={textBtn(unitSystem === 'IP')} onClick={() => setUnitSystem('IP')}>IP</button>
+          <button type="button" data-testid="unit-si" title={t('designer.unitsSi')} style={textBtn(unitSystem === 'SI')} onClick={() => setUnitSystem('SI')}>SI</button>
+          <button type="button" data-testid="unit-ip" title={t('designer.unitsIp')} style={textBtn(unitSystem === 'IP')} onClick={() => setUnitSystem('IP')}>IP</button>
         </div>
         <div className="designer-tool" style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          <button type="button" title="Kumoa (Ctrl+Z)" onClick={undo} style={iconBtn(false)}>
+          <button type="button" title={t('designer.undoTitle')} onClick={undo} style={iconBtn(false)}>
             <Icon><path {...stroke} d="M4 7.5 H11 A3.2 3.2 0 1 1 11 11.2" /><path {...stroke} d="M4 4.6 V7.8 H7.2" /></Icon>
           </button>
-          <button type="button" title="Tee uudelleen (Ctrl+Y)" onClick={redo} style={iconBtn(false)}>
+          <button type="button" title={t('designer.redoTitle')} onClick={redo} style={iconBtn(false)}>
             <Icon><path {...stroke} d="M12 7.5 H5 A3.2 3.2 0 1 0 5 11.2" /><path {...stroke} d="M12 4.6 V7.8 H8.8" /></Icon>
           </button>
-          <button type="button" title="Sovita näkymä (F)" onClick={() => setFitToken((token) => token + 1)} style={iconBtn(false)}>
+          <button type="button" title={t('designer.fitTitle')} onClick={() => setFitToken((token) => token + 1)} style={iconBtn(false)}>
             <Icon><path {...stroke} d="M3.2 6.2 V3.2 H6.2 M9.8 3.2 H12.8 V6.2 M12.8 9.8 V12.8 H9.8 M6.2 12.8 H3.2 V9.8" /></Icon>
           </button>
         </div>
         <span style={{ flex: 1, minWidth: 8 }} />
-        <button type="button" className="designer-tool" data-testid="example-enquiry" title="Esimerkki 8 × 12 × 6 m" onClick={loadExample} style={textBtn(false)}>Esimerkki</button>
+        <button type="button" className="designer-tool" data-testid="example-enquiry" title={t('designer.exampleTitle')} onClick={loadExample} style={textBtn(false)}>{t('designer.example')}</button>
         <div style={{ position: 'relative', flexShrink: 0 }} onMouseDown={(event) => event.stopPropagation()}>
-          <button type="button" title="Vie ja tuo" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)} style={textBtn(exportOpen)}>Vie</button>
+          <button type="button" title={t('designer.exportTitle')} aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)} style={textBtn(exportOpen)}>{t('designer.export')}</button>
           {exportOpen && (
             <div style={{
               position: 'absolute', right: 0, top: 36, width: 188, zIndex: 30,
@@ -1300,8 +1301,8 @@ export default function DesignerApp({
               padding: 4, boxShadow: '0 16px 40px rgba(0,0,0,0.35)',
             }}>
               {[
-                { id: 'pdf', test: 'export-pdf', label: 'PDF-tarjous', run: exportPdf },
-                { id: 'dxf', test: 'export-dxf', label: 'DXF-pohja', run: exportDxf },
+                { id: 'pdf', test: 'export-pdf', label: t('designer.pdf'), run: exportPdf },
+                { id: 'dxf', test: 'export-dxf', label: t('designer.dxf'), run: exportDxf },
                 { id: 'json', test: undefined, label: 'JSON', run: exportJson },
               ].map((item) => (
                 <button
@@ -1327,7 +1328,7 @@ export default function DesignerApp({
                   fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none',
                 }}
               >
-                Tuo JSON
+                {t('designer.import')}
               </button>
               {user && (
                 <form action="/api/auth/logout" method="POST">
@@ -1335,7 +1336,7 @@ export default function DesignerApp({
                     display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
                     background: 'transparent', color: '#fecaca', border: 'none', borderRadius: 7,
                     fontSize: 13, fontWeight: 600, cursor: 'pointer', transform: 'none',
-                  }}>Poistu</button>
+                  }}>{t('designer.signOut')}</button>
                 </form>
               )}
             </div>
@@ -1471,7 +1472,7 @@ export default function DesignerApp({
                       data-testid={`template-${item.id}`}
                       onClick={() => {
                         if (placingId === item.id) { setPlacingId(null); setTool('select'); return }
-                        setPlacingId(item.id); setTool('select'); setNotice(`Klikkaa huonetta: ${item.name}`)
+                        setPlacingId(item.id); setTool('select'); setNotice(t('designer.clickRoom', { name: item.name }))
                       }}
                       style={{
                         width: '100%', textAlign: 'left', marginBottom: 3, padding: '4px 6px',
@@ -1499,7 +1500,7 @@ export default function DesignerApp({
               onClick={() => setGridSize((g) => (g === 0.1 ? 0.25 : g === 0.25 ? 0.5 : 0.1))}
               style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff', color: '#44403c', fontSize: 12, transform: 'none' }}
             >
-              Ruutu {snapOn ? `${gridSize} m` : 'pois'}
+              {t('designer.grid', { size: snapOn ? `${gridSize} m` : t('designer.gridOff') })}
             </button>
           </div>
         </aside>
@@ -1512,7 +1513,7 @@ export default function DesignerApp({
             <div data-testid="outdoor-move-offer" style={{ position: 'absolute', top: 12, left: 12, zIndex: 6, maxWidth: 420, padding: '10px 12px', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
               <div style={{ fontSize: 13, color: '#78350f', lineHeight: 1.4 }}>{notice}</div>
               <button type="button" data-testid="accept-outdoor-move" onClick={acceptOutdoorMove} style={{ marginTop: 8, padding: '6px 10px', borderRadius: 8, border: 'none', background: '#0f766e', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
-                Siirrä ulkoseinälle ja putkita
+                {t('designer.moveOutdoor')}
               </button>
             </div>
           )}
@@ -1545,23 +1546,23 @@ export default function DesignerApp({
           {(tool === 'pipe' || tool === 'cable') && view !== '3d' && view !== 'schematic' && (
             <div data-testid="pipe-settings" style={{ position: 'absolute', top: 12, right: 12, zIndex: 4, display: 'flex', gap: 6, alignItems: 'center', background: 'rgba(255,255,255,0.96)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '6px 8px' }}>
               {tool === 'pipe' && (
-                <select aria-label="Putkityyppi" value={pipeKind} onChange={(e) => setPipeKind(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
-                  <option value="suction">Imuputki</option>
-                  <option value="liquid">Nesteputki</option>
-                  <option value="hotgas">Kuumakaasu</option>
-                  <option value="drain">Kondenssivesi</option>
+                <select aria-label={t('designer.pipe')} value={pipeKind} onChange={(e) => setPipeKind(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
+                  <option value="suction">{t('designer.pipeSuction')}</option>
+                  <option value="liquid">{t('designer.pipeLiquid')}</option>
+                  <option value="hotgas">{t('designer.pipeHot')}</option>
+                  <option value="drain">{t('designer.pipeDrain')}</option>
                 </select>
               )}
               {tool === 'pipe' && pipeKind !== 'drain' && (
                 <>
-                  <select aria-label="Kylmäaine" value={refrigerant} onChange={(e) => setRefrigerant(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
+                  <select aria-label={t('designer.refrigerant')} value={refrigerant} onChange={(e) => setRefrigerant(e.target.value)} style={{ height: 28, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12 }}>
                     {REFRIGERANT_IDS.map((id) => <option key={id} value={id}>{id === 'R744' ? 'R744 / CO2' : id}</option>)}
                   </select>
                   <label style={{ fontSize: 11, color: '#44403c' }}>Te
-                    <input aria-label="Höyrystymislämpötila" type="number" value={teC} onChange={(e) => setTeC(parseFloat(e.target.value) || 0)} style={{ width: 52, marginLeft: 4, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
+                    <input aria-label={t('designer.te')} type="number" value={teC} onChange={(e) => setTeC(parseFloat(e.target.value) || 0)} style={{ width: 52, marginLeft: 4, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
                   </label>
                   <label style={{ fontSize: 11, color: '#44403c' }}>Tc
-                    <input aria-label="Lauhtumislämpötila" type="number" value={tcC} onChange={(e) => setTcC(parseFloat(e.target.value) || 0)} style={{ width: 52, marginLeft: 4, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
+                    <input aria-label={t('designer.tc')} type="number" value={tcC} onChange={(e) => setTcC(parseFloat(e.target.value) || 0)} style={{ width: 52, marginLeft: 4, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
                   </label>
                 </>
               )}
@@ -1772,6 +1773,7 @@ export default function DesignerApp({
 }
 
 function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily, onReroute, onHeight, onLock, onCad }) {
+  const { t } = useLocale()
   const host = rooms.find((room) => room.id === menu.id) || rooms.find((room) => (room.equipment || []).some((eq) => eq.id === menu.id))
   const eq = host?.equipment?.find((item) => item.id === menu.id) || null
   const pipe = pipes.find((item) => item.id === menu.id) || cables.find((item) => item.id === menu.id) || null
@@ -1786,27 +1788,27 @@ function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAng
   const top = Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 520)
   return (
     <div data-testid="context-menu" style={{ position: 'fixed', left, top, zIndex: 40, width: 280, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }} onMouseDown={(event) => event.stopPropagation()}>
-      <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{eq?.name || pipe?.kind || host?.name || 'Kohde'}</div>
-      <MenuBtn testid="ctx-cad-move" onClick={() => onCad?.('move')}>Siirrä</MenuBtn>
-      <MenuBtn testid="ctx-cad-copy" onClick={() => onCad?.('copy')}>Kopioi</MenuBtn>
-      <MenuBtn testid="ctx-cad-rotate" onClick={() => onCad?.('rotate')}>Käännä</MenuBtn>
-      <MenuBtn testid="ctx-cad-mirror" onClick={() => onCad?.('mirror')}>Peilaa</MenuBtn>
+      <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{eq?.name || pipe?.kind || host?.name || t('ctx.object')}</div>
+      <MenuBtn testid="ctx-cad-move" onClick={() => onCad?.('move')}>{t('cad.move')}</MenuBtn>
+      <MenuBtn testid="ctx-cad-copy" onClick={() => onCad?.('copy')}>{t('cad.copy')}</MenuBtn>
+      <MenuBtn testid="ctx-cad-rotate" onClick={() => onCad?.('rotate')}>{t('cad.rotate')}</MenuBtn>
+      <MenuBtn testid="ctx-cad-mirror" onClick={() => onCad?.('mirror')}>{t('cad.mirror')}</MenuBtn>
       {menu.kind !== 'pipe' && menu.kind !== 'cable' && (
         <>
-          <MenuBtn testid="ctx-rotate-cw" onClick={() => onRotate(90)}>Käännä 90° myötäpäivään  ]</MenuBtn>
-          <MenuBtn testid="ctx-rotate-ccw" onClick={() => onRotate(-90)}>Käännä 90° vastapäivään  [</MenuBtn>
+          <MenuBtn testid="ctx-rotate-cw" onClick={() => onRotate(90)}>{t('designer.rotateCw')}  ]</MenuBtn>
+          <MenuBtn testid="ctx-rotate-ccw" onClick={() => onRotate(-90)}>{t('designer.rotateCcw')}  [</MenuBtn>
           {eq?.category === 'door' && (
             <>
               <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>
-                Sääntö
+                {t('designer.rule')}
                 <select data-testid="ctx-door-family" value={eq.doorFamily === 'cold' || eq.doorFamily === 'ambient' ? eq.doorFamily : 'auto'} onChange={(e) => onDoorFamily(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
-                  <option value="auto">Automaattinen (kylmempi puoli)</option>
-                  <option value="cold">Kylmäovi</option>
-                  <option value="ambient">Tavallinen ovi</option>
+                  <option value="auto">{t('designer.doorAuto')}</option>
+                  <option value="cold">{t('designer.coldDoor')}</option>
+                  <option value="ambient">{t('designer.ambientDoor')}</option>
                 </select>
               </label>
               <label style={{ display: 'block', fontSize: 12, padding: '4px 6px' }}>
-                Oivityyppi
+                {t('designer.doorType')}
                 <select data-testid="ctx-door-type" value={doorOptions.some((item) => item.id === eq.catalogId) ? eq.catalogId : ''} onChange={(e) => onDoorType(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
                   {!doorOptions.some((item) => item.id === eq.catalogId) && <option value="">{eq.name}</option>}
                   {doorOptions.map((item) => (

@@ -502,8 +502,8 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
         <span style={{ width: 1, height: 18, background: '#d6d3d1', flexShrink: 0 }} />
         <button type="button" data-testid="facade-realistic" style={chip(realistic)} onClick={() => onApply({ ...plan, sceneStyle: 'realistic' })}>{t('finish.realistic')}</button>
         <button type="button" data-testid="facade-technical" style={chip(!realistic)} onClick={() => onApply({ ...plan, sceneStyle: 'technical' })}>{t('finish.technical')}</button>
-        <button type="button" data-testid="facade-pdf" style={chip(false)} onClick={() => { const doc = buildElevationPdf(plan, side); if (watermark) stampDemoWatermark(doc); doc.save(`julkisivu-${side}.pdf`) }}>PDF</button>
-        <button type="button" data-testid="facade-pdf-all" title={t('facade.allSides')} style={chip(false)} onClick={() => { const doc = buildElevationPdf(plan, 'all'); if (watermark) stampDemoWatermark(doc); doc.save('julkisivut.pdf') }}>PDF 4</button>
+        <button type="button" data-testid="facade-pdf" style={chip(false)} onClick={() => { const doc = buildElevationPdf(plan, side); if (watermark) stampDemoWatermark(doc, t('watermark.demo')); doc.save(`julkisivu-${side}.pdf`) }}>PDF</button>
+        <button type="button" data-testid="facade-pdf-all" title={t('facade.allSides')} style={chip(false)} onClick={() => { const doc = buildElevationPdf(plan, 'all'); if (watermark) stampDemoWatermark(doc, t('watermark.demo')); doc.save('julkisivut.pdf') }}>PDF 4</button>
       </div>
       <div ref={hostRef} data-testid="facade-view" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <svg

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { useLocale } from '@/components/i18n/Locale'
+import { ShellLanguage, useLocale } from '@/components/i18n/Locale'
 
 export default function SignupClient() {
   const { t } = useLocale()
@@ -37,19 +37,24 @@ export default function SignupClient() {
       })
       const data = await res.json()
       if (!res.ok) {
-        setError(data.error || 'Rekisteröinti epäonnistui')
+        setError(data.error || t('auth.signupFailed'))
         setLoading(false)
         return
       }
       router.push('/uusi')
     } catch (e) {
-      setError('Verkkovirhe')
+      setError(t('auth.network'))
       setLoading(false)
     }
   }
 
   return (
-    <div className="safe-page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100dvh', padding: '20px' }}>
+    <div className="safe-page" style={{ display: 'flex', flexDirection: 'column', minHeight: '100dvh', padding: '20px', paddingTop: 'calc(20px + env(safe-area-inset-top))' }}>
+      <header className="landing-header" style={{ background: 'transparent', border: 'none', padding: '0 0 16px' }}>
+        <Link href="/" style={{ color: '#e2e8f0', fontWeight: 800, textDecoration: 'none' }}>RefCAD</Link>
+        <ShellLanguage tone="dark" />
+      </header>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
       <div style={{ width: '100%', maxWidth: '420px', padding: '32px', background: 'rgba(30,41,59,0.6)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', backdropFilter: 'blur(12px)' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <Link href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none', color: 'inherit', marginBottom: '16px' }}>
@@ -65,23 +70,23 @@ export default function SignupClient() {
             </svg>
             <span style={{ fontSize: '15px', fontWeight: 800, background: 'linear-gradient(135deg, #60a5fa, #06b6d4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>RefCAD Tool</span>
           </Link>
-          <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>Luo tili</h1>
+          <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>{t('auth.createTitle')}</h1>
           <p data-testid={orderedPlan ? 'pricing-note' : 'signup-free'} style={{ color: 'rgba(255,255,255,0.72)', fontSize: '13px', lineHeight: 1.5 }}>{orderedPlan ? t('price.note') : t('price.signupFree')}</p>
         </div>
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '14px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>Nimi</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Etunimi Sukunimi"
+            <label style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>{t('auth.name')}</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('auth.nameHint')}
               style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f1f5f9', fontSize: '14px' }} />
           </div>
           <div style={{ marginBottom: '14px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>Sähköposti</label>
+            <label style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>{t('auth.email')}</label>
             <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="esimerkki@refcad.fi"
               style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f1f5f9', fontSize: '14px' }} />
           </div>
           <div style={{ marginBottom: '14px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>Salasana (min 6 merkkiä)</label>
+            <label style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>{t('auth.passwordRule')}</label>
             <input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
               style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f1f5f9', fontSize: '14px' }} />
           </div>
@@ -95,13 +100,14 @@ export default function SignupClient() {
             border: 'none', borderRadius: '8px', color: '#fff', fontSize: '14px', fontWeight: 700, cursor: loading ? 'wait' : 'pointer',
             boxShadow: '0 4px 12px rgba(59,130,246,0.3)'
           }}>
-            {loading ? 'Luodaan tiliä...' : 'Luo tili ja aloita'}
+            {loading ? t('auth.creating') : t('auth.create')}
           </button>
         </form>
 
         <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: 'rgba(255,255,255,0.5)' }}>
-          Onko jo tili? <Link href="/login" style={{ color: '#06b6d4', fontWeight: 600, textDecoration: 'none' }}>Kirjaudu sisään</Link>
+          {t('auth.hasAccount')} <Link href="/login" style={{ color: '#06b6d4', fontWeight: 600, textDecoration: 'none' }}>{t('auth.submit')}</Link>
         </div>
+      </div>
       </div>
     </div>
   )

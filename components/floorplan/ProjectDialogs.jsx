@@ -31,6 +31,7 @@ const choiceBtn = {
 }
 
 function Overlay({ testid, title, children, onClose }) {
+  const { t } = useLocale()
   return (
     <div
       data-testid={testid}
@@ -41,7 +42,7 @@ function Overlay({ testid, title, children, onClose }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <div style={{ fontSize: 16, fontWeight: 800, flex: 1 }}>{title}</div>
           {onClose && (
-            <button type="button" data-testid={`${testid}-close`} onClick={onClose} style={{ ...choiceBtn, width: 'auto', margin: 0, padding: '6px 10px' }}>Sulje</button>
+            <button type="button" data-testid={`${testid}-close`} onClick={onClose} style={{ ...choiceBtn, width: 'auto', margin: 0, padding: '6px 10px' }}>{t('panel.close')}</button>
           )}
         </div>
         {children}
@@ -78,6 +79,7 @@ export function StartDialog({ library, onEmpty, onExample, onOpen }) {
 }
 
 export function ShellDialog({ title, onCancel, onCreate, onExample }) {
+  const { t } = useLocale()
   const [length, setLength] = useState(12000)
   const [width, setWidth] = useState(9000)
   const [thickness, setThickness] = useState(240)
@@ -86,33 +88,36 @@ export function ShellDialog({ title, onCancel, onCreate, onExample }) {
   const [pitch, setPitch] = useState(25)
   const [createWalls, setCreateWalls] = useState(false)
   return (
-    <Overlay testid="shell-dialog" title={title || 'Uusi pohja'} onClose={onCancel}>
-      <p style={{ fontSize: 13, margin: '0 0 12px', color: '#44403c' }}>Nykyinen pohja korvataan.</p>
-      <button type="button" data-testid="new-example" style={choiceBtn} onClick={onExample}>Esimerkkitalo</button>
-      <div style={{ fontSize: 13, fontWeight: 800, margin: '4px 0 8px' }}>Tyhjä pohja</div>
-      <Field label="Pituus (mm)">
+    <Overlay testid="shell-dialog" title={title || t('shell.new')} onClose={onCancel}>
+      <p style={{ fontSize: 13, margin: '0 0 12px', color: '#44403c' }}>{t('shell.replace')}</p>
+      <button type="button" data-testid="new-example" style={choiceBtn} onClick={onExample}>{t('file.example')}</button>
+      <div style={{ fontSize: 13, fontWeight: 800, margin: '4px 0 8px' }}>{t('shell.blank')}</div>
+      <Field label={t('shell.length')}>
         <input data-testid="shell-length" style={inputStyle} type="number" min="0" value={length} onChange={(event) => setLength(Number(event.target.value))} />
       </Field>
-      <Field label="Leveys (mm)">
+      <Field label={t('shell.width')}>
         <input data-testid="shell-width" style={inputStyle} type="number" min="0" value={width} onChange={(event) => setWidth(Number(event.target.value))} />
       </Field>
-      <Field label="Ulkoseinän paksuus (mm)">
+      <Field label={t('shell.thickness')}>
         <input data-testid="shell-thickness" style={inputStyle} type="number" min="80" value={thickness} onChange={(event) => setThickness(Number(event.target.value))} />
       </Field>
-      <Field label="Kerroskorkeus (mm)">
+      <Field label={t('shell.storey')}>
         <input data-testid="shell-height" style={inputStyle} type="number" min="2200" value={height} onChange={(event) => setHeight(Number(event.target.value))} />
       </Field>
-      <Field label="Kattomuoto">
+      <Field label={t('shell.roof')}>
         <select data-testid="shell-roof" style={inputStyle} value={roofType} onChange={(event) => setRoofType(event.target.value)}>
-          {ROOF_TYPES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          {ROOF_TYPES.map((item) => {
+            const named = t(`roof.${item.id}`)
+            return <option key={item.id} value={item.id}>{named === `roof.${item.id}` ? item.name : named}</option>
+          })}
         </select>
       </Field>
-      <Field label="Kattokaltevuus (°)">
+      <Field label={t('shell.pitch')}>
         <input data-testid="shell-pitch" style={inputStyle} type="number" min="0" max="60" value={pitch} onChange={(event) => setPitch(Number(event.target.value))} />
       </Field>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, margin: '4px 0 12px' }}>
         <input data-testid="shell-walls" type="checkbox" checked={createWalls} onChange={(event) => setCreateWalls(event.target.checked)} />
-        Luo ulkoseinät suorakulmiona
+        {t('shell.rectWalls')}
       </label>
       <button
         type="button"
@@ -126,38 +131,39 @@ export function ShellDialog({ title, onCancel, onCreate, onExample }) {
           roofType,
           roofPitch: pitch,
           createWalls,
-          name: 'Uusi pohja',
+          name: t('shell.new'),
         })}
       >
-        Tyhjä pohja
+        {t('shell.blank')}
       </button>
     </Overlay>
   )
 }
 
 export function LibraryDialog({ library, onClose, onSave, onOpen, onRename, onDelete, onExport, onImport }) {
+  const { t } = useLocale()
   return (
-    <Overlay testid="plan-library" title="Avaa / Tallenna" onClose={onClose}>
+    <Overlay testid="plan-library" title={t('library.title')} onClose={onClose}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <button type="button" data-testid="library-save" style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={onSave}>Tallenna</button>
-        <button type="button" data-testid="plan-export-json" style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={onExport}>Vie JSON</button>
+        <button type="button" data-testid="library-save" style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={onSave}>{t('library.save')}</button>
+        <button type="button" data-testid="plan-export-json" style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={onExport}>{t('designer.export')}</button>
         <label style={{ ...choiceBtn, width: 'auto', margin: 0 }}>
-          Tuo JSON
+          {t('designer.import')}
           <input data-testid="plan-import-json" type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) onImport(file); event.target.value = '' }} />
         </label>
       </div>
-      {(library?.projects || []).length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>Ei tallennettuja pohjia.</div>}
+      {(library?.projects || []).length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>{t('library.empty')}</div>}
       {(library?.projects || []).map((item) => (
         <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 6, alignItems: 'center', marginBottom: 8 }}>
           <input
             data-testid={`library-rename-${item.id}`}
-            aria-label={`Nimeä ${item.name}`}
+            aria-label={t('library.rename', { name: item.name })}
             style={inputStyle}
             defaultValue={item.name}
             onBlur={(event) => onRename(item.id, event.target.value)}
           />
-          <button type="button" data-testid={`library-open-${item.id}`} style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={() => onOpen(item.id)}>Avaa</button>
-          <button type="button" data-testid={`library-delete-${item.id}`} style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={() => onDelete(item.id)}>Poista</button>
+          <button type="button" data-testid={`library-open-${item.id}`} style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={() => onOpen(item.id)}>{t('projects.open')}</button>
+          <button type="button" data-testid={`library-delete-${item.id}`} style={{ ...choiceBtn, width: 'auto', margin: 0 }} onClick={() => onDelete(item.id)}>{t('projects.delete')}</button>
         </div>
       ))}
     </Overlay>

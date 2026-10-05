@@ -1,8 +1,19 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { normalizeLocale, translate } from '@/lib/i18n'
 import { STALE_DEPLOY_ACTION, STALE_DEPLOY_MESSAGE, refreshAfterStaleDeploy } from '@/lib/staleDeploy'
 
 export default function StaleDeployNotice() {
+  const [locale, setLocale] = useState('fi')
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('refcad-locale')
+      if (saved) setLocale(normalizeLocale(saved))
+    } catch { /* storage can be blocked */ }
+  }, [])
+  const message = locale === 'fi' ? STALE_DEPLOY_MESSAGE : translate(locale, 'stale.message')
+  const action = locale === 'fi' ? STALE_DEPLOY_ACTION : translate(locale, 'stale.action')
   return (
     <div
       data-testid="stale-deploy-notice"
@@ -21,10 +32,10 @@ export default function StaleDeployNotice() {
       }}
     >
       <h1 style={{ fontSize: '1.6rem', fontWeight: 700, margin: 0, maxWidth: '24rem', lineHeight: 1.35 }}>
-        {STALE_DEPLOY_MESSAGE}
+        {message}
       </h1>
       <p style={{ fontSize: '1rem', marginTop: '1rem', color: '#94a3b8', maxWidth: '28rem' }}>
-        Piirros on tallessa selaimessa.
+        {translate(locale, 'stale.saved')}
       </p>
       <button
         type="button"
@@ -41,7 +52,7 @@ export default function StaleDeployNotice() {
           cursor: 'pointer',
         }}
       >
-        {STALE_DEPLOY_ACTION}
+        {action}
       </button>
     </div>
   )

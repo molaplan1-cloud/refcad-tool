@@ -53,7 +53,7 @@ import {
   updateWall,
   visibleRooms,
 } from '@/lib/floorplan'
-import { usePlanLocale } from '@/components/i18n/Locale'
+import { useLocale, usePlanLocale } from '@/components/i18n/Locale'
 import { BRICK_TONES, PAINTS, PLINTHS, ROOFINGS, ROOF_COLOURS, finishesOf, roofingOf } from '@/lib/finishes'
 import { text } from '@/lib/i18n'
 import { COUNTRIES, climateOf, countryById } from '@/lib/places'
@@ -509,25 +509,32 @@ export function selectionLabel(plan, selection) {
   return 'Kohde'
 }
 
+function phrase(t, item) {
+  if (!item?.key) return item?.label || ''
+  const value = t(item.key)
+  return value === item.key ? (item.label || value) : value
+}
+
 export function SelectionPanel({ plan, selection, picks, onApply, onCommit, onClear, onRedrawRoute, onPatchMany }) {
+  const { t } = usePlanLocale(plan)
   if (picks && picks.length > 1) {
     const shared = sharedProperties(plan, picks)
     return (
       <div data-testid="selection-form">
         <CadStyles />
         <MultiProperties count={picks.length}>
-          <Field label="Taso">
+          <Field label={t('menu.layers')}>
             <select data-testid="multi-layer" style={inputStyle} value={shared.layer || ''} onChange={(event) => onPatchMany({ layer: event.target.value })}>
-              <option value="">Sekalaiset</option>
-              {CAD_LAYERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              <option value="">{t('select.mixed')}</option>
+              {CAD_LAYERS.map((item) => <option key={item.id} value={item.id}>{phrase(t, item)}</option>)}
             </select>
           </Field>
           {shared.kinds.length === 1 && shared.kinds[0] === 'wall' && (
-            <Field label="Tyyppi">
+            <Field label={t('opening.kind')}>
               <select data-testid="multi-kind" style={inputStyle} value={shared.kind || 'exterior'} onChange={(event) => onPatchMany({ kind: event.target.value, layer: event.target.value })}>
-                <option value="exterior">Ulkoseinä</option>
-                <option value="bearing">Kantava</option>
-                <option value="interior">Väliseinä</option>
+                <option value="exterior">{t('tool.exterior')}</option>
+                <option value="bearing">{t('tool.bearing')}</option>
+                <option value="interior">{t('tool.interior')}</option>
               </select>
             </Field>
           )}
@@ -819,7 +826,10 @@ const handBtn = (on) => ({
   cursor: 'pointer',
 })
 
-export function DoorHandControls({ swing = 1, inward = false, onSwing, onInward, compact = false, handLabel = 'Kätisyys:', leafLabel = 'Aukeaa:', showHand = true, showLeaf = true }) {
+export function DoorHandControls({ swing = 1, inward = false, onSwing, onInward, compact = false, handLabel, leafLabel, showHand = true, showLeaf = true }) {
+  const { t } = useLocale()
+  const hand = handLabel || `${t('opening.hand')}:`
+  const leaf = leafLabel || `${t('opening.leaf')}:`
   const left = (swing || 1) >= 0
   const choice = (testid, label, on, click) => (
     <button type="button" data-testid={testid} aria-pressed={on} onClick={click} style={{ ...handBtn(on), flex: compact ? '0 0 auto' : 1, minWidth: compact ? 58 : 0 }}>{label}</button>
@@ -833,13 +843,13 @@ export function DoorHandControls({ swing = 1, inward = false, onSwing, onInward,
   )
   return (
     <div data-testid="door-hand" style={{ display: compact ? 'flex' : 'block', alignItems: 'center', gap: compact ? 14 : 0, marginBottom: compact ? 0 : 4 }}>
-      {showHand && row('door-handedness', handLabel, compact ? null : 'F', <>
-        {choice('door-hand-left', 'Vasen', left, () => onSwing?.(1))}
-        {choice('door-hand-right', 'Oikea', !left, () => onSwing?.(-1))}
+      {showHand && row('door-handedness', hand, compact ? null : 'F', <>
+        {choice('door-hand-left', t('opening.left'), left, () => onSwing?.(1))}
+        {choice('door-hand-right', t('opening.right'), !left, () => onSwing?.(-1))}
       </>)}
-      {showLeaf && row('door-leaf', leafLabel, compact ? null : 'Shift+F', <>
-        {choice('door-leaf-in', 'Sisään', Boolean(inward), () => onInward?.(true))}
-        {choice('door-leaf-out', 'Ulos', !inward, () => onInward?.(false))}
+      {showLeaf && row('door-leaf', leaf, compact ? null : 'Shift+F', <>
+        {choice('door-leaf-in', t('opening.in'), Boolean(inward), () => onInward?.(true))}
+        {choice('door-leaf-out', t('opening.out'), !inward, () => onInward?.(false))}
       </>)}
     </div>
   )
@@ -919,8 +929,8 @@ export function DoorPlaceControls({ value, onChange, compact = false, t }) {
         inward={value?.inward}
         showHand
         showLeaf={leafFace}
-        handLabel={direction || style === 'folding' ? `${label('opening.slideTo', 'Liukuu')}:` : 'Kätisyys:'}
-        leafLabel={sliding ? `${label('opening.mount', 'Asennus')}:` : 'Aukeaa:'}
+        handLabel={direction || style === 'folding' ? `${label('opening.slideTo', 'Liukuu')}:` : `${label('opening.hand', 'Kätisyys')}:`}
+        leafLabel={sliding ? `${label('opening.mount', 'Asennus')}:` : `${label('opening.leaf', 'Aukeaa')}:`}
         onSwing={(swing) => set({ swing })}
         onInward={(inward) => set({ inward })}
       />
@@ -1543,10 +1553,10 @@ function FixtureFields({ plan, id, onApply, onCommit }) {
   )
 }
 
-function wallKindName(kind) {
-  if (kind === 'interior') return 'Väliseinä'
-  if (kind === 'bearing') return 'Kantava seinä'
-  return 'Ulkoseinä'
+function wallKindName(kind, t) {
+  if (kind === 'interior') return t('tool.interior')
+  if (kind === 'bearing') return t('select.bearingWall')
+  return t('tool.exterior')
 }
 
 function claddingChoices(wall) {
@@ -1554,20 +1564,21 @@ function claddingChoices(wall) {
   return CLADDING.map((item) => ({ id: item.id, name: item.group ? `${item.group}: ${item.name}` : item.name, color: item.color }))
 }
 
-function CadEditItems({ onNavigate }) {
+function CadEditItems({ onNavigate, t }) {
   return (
-    <Flyout label="Muokkaa" testid="ctx-cad">
+    <Flyout label={t('ctx.edit')} testid="ctx-cad">
       {CAD_COMMANDS.map((cmd) => (
-        <CadItem key={cmd.id} testid={`ctx-${cmd.testid}`} shortcut={cmd.short} onClick={() => onNavigate(`cad:${cmd.id}`)}>{cmd.label}</CadItem>
+        <CadItem key={cmd.id} testid={`ctx-${cmd.testid}`} shortcut={cmd.short} onClick={() => onNavigate(`cad:${cmd.id}`)}>{phrase(t, cmd)}</CadItem>
       ))}
-      <CadItem testid="ctx-cad-delete" onClick={() => onNavigate('cad:delete')}>Poista</CadItem>
-      <CadItem testid="ctx-cad-group" onClick={() => onNavigate('cad:group')}>Ryhmitä</CadItem>
-      <CadItem testid="ctx-cad-lock" onClick={() => onNavigate('cad:lock')}>Lukitse</CadItem>
+      <CadItem testid="ctx-cad-delete" onClick={() => onNavigate('cad:delete')}>{t('cad.delete')}</CadItem>
+      <CadItem testid="ctx-cad-group" onClick={() => onNavigate('cad:group')}>{t('cad.group')}</CadItem>
+      <CadItem testid="ctx-cad-lock" onClick={() => onNavigate('cad:lock')}>{t('cad.lock')}</CadItem>
     </Flyout>
   )
 }
 
 export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
+  const { t } = usePlanLocale(plan)
   if (!menu || menu.kind === 'service') return null
   const wall = (plan.walls || []).find((item) => item.id === menu.id)
   const opening = (plan.openings || []).find((item) => item.id === menu.id)
@@ -1584,11 +1595,11 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
   if (menu.kind === 'wall' && wall) {
     const thick = wallThicknessMm(plan, wall)
     const activeCladding = wall.materialId || (wall.kind === 'interior' ? '' : plan.exteriorId)
-    title = `${wallKindName(wall.kind)} ${mm(segmentLength(wall.a, wall.b))} mm`
+    title = `${wallKindName(wall.kind, t)} ${mm(segmentLength(wall.a, wall.b))} mm`
     body = (
       <>
         <Segmented
-          label="Paksuus"
+          label={t('ctx.thickness')}
           value={thick}
           onChange={(mmValue) => onCommit(updateWall(plan, wall.id, { thickness: mmValue / 1000, thicknessCustom: true }))}
           options={[
@@ -1597,22 +1608,22 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
           ]}
         />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
-          Kohdistus
+          {t('ctx.align')}
           <select
             data-testid="ctx-wall-align"
             value={wall.align === 'left' || wall.align === 'right' ? wall.align : 'center'}
             onChange={(event) => onCommit(updateWall(plan, wall.id, { align: event.target.value }))}
             style={{ flex: 1, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
           >
-            <option value="center">Keskeltä</option>
-            <option value="left">Vasemmasta pinnasta</option>
-            <option value="right">Oikeasta pinnasta</option>
+            <option value="center">{t('ctx.alignCenter')}</option>
+            <option value="left">{t('ctx.alignLeft')}</option>
+            <option value="right">{t('ctx.alignRight')}</option>
           </select>
         </label>
-        <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
-        <CadEditItems onNavigate={onNavigate} />
+        <CadItem testid="ctx-properties" onClick={properties}>{t('ctx.properties')}</CadItem>
+        <CadEditItems t={t} onNavigate={onNavigate} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
-          Suunta
+          {t('ctx.direction')}
           <input
             data-testid="ctx-wall-angle"
             type="number"
@@ -1625,11 +1636,11 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
           °
         </label>
         <CadSep />
-        <CadItem testid="ctx-shift-wall" onClick={() => onNavigate('cad:shift-wall')}>Siirrä seinä</CadItem>
-        <CadItem testid="ctx-split" onClick={() => act(splitWall(plan, wall.id, menu.at || { x: (wall.a.x + wall.b.x) / 2, z: (wall.a.z + wall.b.z) / 2 }), true)}>Jaa seinä</CadItem>
-        <CadItem testid="ctx-door" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'door'), true)}>Lisää ovi</CadItem>
-        <CadItem testid="ctx-window" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'window'), true)}>Lisää ikkuna</CadItem>
-        <Flyout label="Verhous" testid="ctx-cladding">
+        <CadItem testid="ctx-shift-wall" onClick={() => onNavigate('cad:shift-wall')}>{t('draw.shiftWall')}</CadItem>
+        <CadItem testid="ctx-split" onClick={() => act(splitWall(plan, wall.id, menu.at || { x: (wall.a.x + wall.b.x) / 2, z: (wall.a.z + wall.b.z) / 2 }), true)}>{t('ctx.split')}</CadItem>
+        <CadItem testid="ctx-door" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'door'), true)}>{t('ctx.addDoor')}</CadItem>
+        <CadItem testid="ctx-window" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'window'), true)}>{t('ctx.addWindow')}</CadItem>
+        <Flyout label={t('ctx.cladding')} testid="ctx-cladding">
           {claddingChoices(wall).map((item) => (
             <CadItem key={item.id} onClick={() => onApply(updateWall(plan, wall.id, { materialId: item.id }))}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -1640,20 +1651,20 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
             </CadItem>
           ))}
         </Flyout>
-        <CadItem testid="ctx-facade" onClick={() => onNavigate('facade')}>Julkisivu</CadItem>
+        <CadItem testid="ctx-facade" onClick={() => onNavigate('facade')}>{t('view.facadeWord')}</CadItem>
         <CadSep />
-        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteWall(plan, wall.id), true)}>Poista</CadItem>
+        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteWall(plan, wall.id), true)}>{t('cad.delete')}</CadItem>
       </>
     )
   } else if (menu.kind === 'corner') {
     const joint = cornerJoint(plan.walls, menu.at || { x: 0, z: 0 }, 0.2)
     const angle = cornerAngles(plan.walls).find((item) => joint && Math.hypot(item.x - joint.x, item.z - joint.z) < 0.12)
     const degrees = angle?.degrees ?? 90
-    title = `Kulma ${degrees}°`
+    title = t('ctx.corner', { degrees })
     body = (
       <>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
-          Kulma…
+          {t('ctx.cornerField')}
           <input
             data-testid="corner-angle"
             type="number"
@@ -1670,34 +1681,34 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
           />
           °
         </label>
-        <div style={{ padding: '0 8px 6px', fontSize: 11, color: '#78716c' }}>Viereinen seinä kiertyy nurkan ympäri.</div>
+        <div style={{ padding: '0 8px 6px', fontSize: 11, color: '#78716c' }}>{t('ctx.cornerNote')}</div>
       </>
     )
   } else if (menu.kind === 'opening' && opening) {
-    title = `${opening.kind === 'window' ? 'Ikkuna' : opening.kind === 'passage' ? 'Oviaukko' : 'Ovi'} ${mm(opening.width)} mm`
+    title = `${opening.kind === 'window' ? t('opening.window') : opening.kind === 'passage' ? t('opening.passage') : t('opening.door')} ${mm(opening.width)} mm`
     body = (
       <>
-        <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        <CadItem testid="ctx-properties" onClick={properties}>{t('ctx.properties')}</CadItem>
         {opening.kind === 'passage' && (
-          <CadItem testid="ctx-merge-spaces" onClick={() => act(updateOpening(plan, opening.id, { mergeSpaces: !opening.mergeSpaces }), true)}>{opening.mergeSpaces ? 'Erota tilat' : 'Yhdistä tilat'}</CadItem>
+          <CadItem testid="ctx-merge-spaces" onClick={() => act(updateOpening(plan, opening.id, { mergeSpaces: !opening.mergeSpaces }), true)}>{opening.mergeSpaces ? t('ctx.separate') : t('opening.merge')}</CadItem>
         )}
         {opening.kind === 'door' && (
           <>
-            <CadItem testid="ctx-handedness" shortcut="F" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }]))}>Vaihda kätisyys</CadItem>
-            <CadItem testid="ctx-leaf" shortcut="Shift+F" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }], { direction: true }))}>Vaihda aukeamissuunta</CadItem>
+            <CadItem testid="ctx-handedness" shortcut="F" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }]))}>{t('ctx.hand')}</CadItem>
+            <CadItem testid="ctx-leaf" shortcut="Shift+F" onClick={() => act(mirrorOpenings(plan, [{ kind: 'opening', id: opening.id }], { direction: true }))}>{t('ctx.leaf')}</CadItem>
           </>
         )}
-        <CadEditItems onNavigate={onNavigate} />
+        <CadEditItems t={t} onNavigate={onNavigate} />
         <CadSep />
-        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteOpening(plan, opening.id), true)}>Poista</CadItem>
+        <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteOpening(plan, opening.id), true)}>{t('cad.delete')}</CadItem>
       </>
     )
   } else if (menu.kind === 'room' && room) {
     title = room.name || 'Huone'
     body = (
       <>
-        <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
-        <CadEditItems onNavigate={onNavigate} />
+        <CadItem testid="ctx-properties" onClick={properties}>{t('ctx.properties')}</CadItem>
+        <CadEditItems t={t} onNavigate={onNavigate} />
         <CadSep />
         <CadItem testid="ctx-delete" danger shortcut="Del" onClick={() => act(deleteRoom(plan, room.id), true)}>Poista</CadItem>
       </>
@@ -1725,8 +1736,8 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
           </label>
         )}
         <ColorSwatches value={fixture.color} onChange={(color) => onApply(updateFixture(plan, fixture.id, { color }))} testid="ctx-fixture-color" customTestid="ctx-color-custom" />
-        <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
-        <CadEditItems onNavigate={onNavigate} />
+        <CadItem testid="ctx-properties" onClick={properties}>{t('ctx.properties')}</CadItem>
+        <CadEditItems t={t} onNavigate={onNavigate} />
         <CadSep />
         {spec.chimney && <CadItem testid="ctx-add-chimney" onClick={() => act(addChimneyFor(plan, fixture.id))}>Lisää hormi</CadItem>}
         <CadItem testid="ctx-rotate" shortcut="R" onClick={() => onCommit(rotateFixture(plan, fixture.id))}>Kierrä</CadItem>
@@ -1742,7 +1753,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
     title = current ? `Julkisivuvyöhyke: ${current.name}` : 'Julkisivuvyöhyke'
     body = (
       <>
-        <CadItem testid="ctx-properties" onClick={properties}>Ominaisuudet…</CadItem>
+        <CadItem testid="ctx-properties" onClick={properties}>{t('ctx.properties')}</CadItem>
         <Flyout label="Verhous" testid="ctx-cladding">
           {CLADDING.map((item) => (
             <CadItem key={item.id} onClick={() => onCommit(assignFacadeCell(plan, cell, { materialId: item.id }))}>{item.name}</CadItem>
@@ -1771,7 +1782,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
     body = (
       <>
         <CadItem testid="ctx-paste" onClick={() => onNavigate('paste')}>Liitä</CadItem>
-        <CadEditItems onNavigate={onNavigate} />
+        <CadEditItems t={t} onNavigate={onNavigate} />
         <CadItem testid="ctx-draw-wall" onClick={() => onNavigate('wall')}>Piirrä seinä</CadItem>
         <CadItem testid="ctx-draw-room" onClick={() => onNavigate('room')}>Piirrä huone</CadItem>
         <CadSep />

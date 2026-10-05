@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import DesignerApp from '@/components/designer/DesignerApp'
+import { useLocale } from '@/components/i18n/Locale'
 
 const STORAGE_KEY = 'refcad-design-v1'
 
 export default function ColdWorkspace({ plan, onProjectType, onName }) {
+  const { t } = useLocale()
   const [ready, setReady] = useState(false)
   const [saved, setSaved] = useState(null)
 
@@ -25,7 +27,7 @@ export default function ColdWorkspace({ plan, onProjectType, onName }) {
 
   return (
     <DesignerApp
-      initialName={plan?.name || saved?.projectName || 'Kylmiö'}
+      initialName={plan?.name || saved?.projectName || t('cold.defaultName')}
       initialRooms={saved?.rooms || []}
       initialPipes={saved?.pipes || []}
       initialCables={saved?.cables || []}

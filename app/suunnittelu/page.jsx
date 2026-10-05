@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import DesignerApp from '@/components/designer/DesignerApp'
+import { ShellLanguage, useLocale } from '@/components/i18n/Locale'
 import { accessFor } from '@/lib/access'
-import { useLocale } from '@/components/i18n/Locale'
 
 const STORAGE_KEY = 'refcad-design-v1'
 
@@ -53,18 +53,21 @@ export default function Page() {
 
   if (!access.workspaces.includes('kylma')) {
     const message = access.admin
-      ? 'Ylläpitäjä ei piirrä.'
+      ? t('gate.admin')
       : access.pending
         ? t('price.thanks')
-        : 'Kylmätekniikka kuuluu Pro-tilaukseen.'
+        : t('gate.cold')
     return (
       <div data-testid="cold-room-gate" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', color: '#0f172a', padding: 24 }}>
         <div style={{ maxWidth: 460, textAlign: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <ShellLanguage tone="light" />
+          </div>
           <h1 data-testid={access.pending ? 'order-thanks' : undefined} style={{ fontSize: 28, marginBottom: 12 }}>{message}</h1>
           <p style={{ color: '#475569', lineHeight: 1.5 }}>{t('price.cold')}</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 20 }}>
-            <Link href="/#pricing" style={{ color: '#0369a1' }}>Hinnasto</Link>
-            <Link href={access.admin ? '/admin' : '/uusi'} style={{ color: '#0369a1' }}>{access.admin ? 'Ylläpito' : 'Pohjakuva'}</Link>
+            <Link href="/#pricing" style={{ color: '#0369a1' }}>{t('shell.pricing')}</Link>
+            <Link href={access.admin ? '/admin' : '/uusi'} style={{ color: '#0369a1' }}>{access.admin ? t('shell.admin') : t('designer.floorplan')}</Link>
           </div>
         </div>
       </div>
@@ -80,7 +83,7 @@ export default function Page() {
       initialSchematic={saved?.schematic || null}
       initialUnitSystem={saved?.unitSystem || (saved?.dimUnit === 'ft' ? 'IP' : 'SI')}
       onPersist={onPersist}
-      persistLabel="selaimeen"
+      persistLabel={t('designer.browser')}
     />
   )
 }

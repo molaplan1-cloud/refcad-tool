@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import StaleDeployNotice from '@/components/StaleDeployNotice'
+import { normalizeLocale, translate } from '@/lib/i18n'
 import { isStaleChunkError, recoverStaleDeploy } from '@/lib/staleDeploy'
 
 // Global error boundary for the root layout.
@@ -10,6 +11,14 @@ import { isStaleChunkError, recoverStaleDeploy } from '@/lib/staleDeploy'
 // Component and must include html/body tags (it replaces the root layout).
 
 export default function GlobalError({ error, reset }) {
+  const [locale, setLocale] = useState('fi')
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('refcad-locale')
+      if (saved) setLocale(normalizeLocale(saved))
+    } catch { /* storage can be blocked */ }
+  }, [])
+  const t = (key) => translate(locale, key)
   const stale = isStaleChunkError(error)
   useEffect(() => {
     if (stale) recoverStaleDeploy()
@@ -17,7 +26,7 @@ export default function GlobalError({ error, reset }) {
 
   if (stale) {
     return (
-      <html lang="fi">
+      <html lang={locale}>
         <body style={{ margin: 0 }}>
           <StaleDeployNotice />
         </body>
@@ -26,7 +35,7 @@ export default function GlobalError({ error, reset }) {
   }
 
   return (
-    <html lang="fi">
+    <html lang={locale}>
       <body
         style={{
           margin: 0,
@@ -43,10 +52,10 @@ export default function GlobalError({ error, reset }) {
         }}
       >
         <h1 style={{ fontSize: '3rem', fontWeight: 800, margin: 0, color: '#f87171' }}>
-          Sovellusvirhe
+          {t('error.app')}
         </h1>
         <p style={{ fontSize: '1.1rem', marginTop: '1rem', color: '#94a3b8' }}>
-          Jotain meni pieleen. Yritä ladata sivu uudelleen.
+          {t('error.reload')}
         </p>
         {error?.message && (
           <pre
@@ -78,7 +87,7 @@ export default function GlobalError({ error, reset }) {
             cursor: 'pointer',
           }}
         >
-          Lataa uudelleen
+          {t('error.retry')}
         </button>
       </body>
     </html>

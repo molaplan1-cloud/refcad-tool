@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocale } from '@/components/i18n/Locale'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
@@ -398,6 +399,7 @@ export default function PlanView({
   onToolMenu,
   hand = false,
 }) {
+  const { t } = useLocale()
   const hostRef = useRef(null)
   const viewRef = useRef({ scale: 36, offsetX: 480, offsetY: 320 })
   const [view, setView] = useState(viewRef.current)
@@ -1251,14 +1253,14 @@ export default function PlanView({
   const selected = new Set(selectedIds)
   const drawing = tool === 'draw' || tool === 'partition' || isRouteTool(tool)
   const hint = tool === 'pipe'
-    ? 'Putki: klikkaa pisteet, suora kulma napsahtaa. Enter päättää, portti napsahtaa laitteeseen.'
+    ? t('designer.pipeHint')
     : tool === 'cable'
-      ? 'Kaapeli: klikkaa reitti anturista säätimelle. Enter päättää.'
+      ? t('designer.cableHint')
       : tool === 'polygon'
-        ? 'Klikkaa nurkat. Seinä pysyy suorassa. Enter sulkee, askelpalautin peruu pisteen.'
+        ? t('designer.polyHint')
         : tool === 'draw' || tool === 'partition'
-          ? 'Vedä huone tai muu tila. Näppäile mitta, Tab vaihtaa sivua, Enter vahvistaa.'
-          : 'Vedä siirtää · oikea näppäin valikko · kahvat mitoittavat · rulla zoomaa'
+          ? t('designer.dragHint')
+          : t('designer.selectHint')
 
   const rectDraft = draft?.kind === 'rect' ? draft : null
   const draftWidth = rectDraft ? Math.abs(rectDraft.x2 - rectDraft.x1) : 0
