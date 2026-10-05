@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { PROJECT_TYPES } from '@/lib/access'
 import { COVER_TYPES } from '@/lib/covers'
 import { GROUND_TOOLS } from '@/lib/groundworks'
 import { PLACEABLES, SERVICE_SYSTEMS, airflowBalance, ensureServices, layerVisible } from '@/lib/services'
@@ -129,6 +130,7 @@ export function PlanChrome({
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
   doorHand = { swing: 1, inward: false, doorStyle: 'hinged', slideMount: 'pocket', panels: 1 }, onDoorHand,
   access = null,
+  onProjectType,
   compact = false,
   toolsOpen = false,
   onToggleTools,
@@ -264,6 +266,9 @@ export function PlanChrome({
           <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, flexShrink: 0 }}>RefCAD</Link>
           <input aria-label={t('app.drawingName')} value={plan.name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 16, flex: 1, minWidth: 0, width: 0 }} />
           <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
+          <select data-testid="project-type" aria-label={t('chrome.projectType')} value={plan.projectType || 'omakotitalo'} onChange={(event) => onProjectType?.(event.target.value)} style={{ height: 36, maxWidth: 148, borderRadius: 8, border: '1px solid #3f3f46', background: '#1c212b', color: '#f5f5f4', fontSize: 12, fontWeight: 650, flexShrink: 0 }}>
+            {PROJECT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+          </select>
           <button type="button" data-testid="chrome-menu" aria-expanded={open === 'root'} onClick={() => setOpen(open === 'root' ? null : 'root')} style={{ ...modeTab(open === 'root'), minHeight: 44, minWidth: 44, padding: '0 12px' }}>{t('chrome.menu')}</button>
         </header>
         <div className="workspace-scroll view-tabs" data-testid="view-tabs" style={{ background: '#14181f' }}>
@@ -335,6 +340,9 @@ export function PlanChrome({
       <header style={{ display: 'flex', alignItems: 'center', gap: 10, height: 40, padding: '0 10px', background: '#14181f', color: '#f5f5f4' }}>
         <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14 }}>RefCAD</Link>
         <input aria-label={t('app.drawingName')} value={plan.name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 13, width: 160 }} />
+        <select data-testid="project-type" aria-label={t('chrome.projectType')} value={plan.projectType || 'omakotitalo'} onChange={(event) => onProjectType?.(event.target.value)} style={{ height: 28, maxWidth: 180, borderRadius: 6, border: '1px solid #3f3f46', background: '#1c212b', color: '#f5f5f4', fontSize: 12, fontWeight: 650 }}>
+          {PROJECT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+        </select>
         <span style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 8, background: '#1c212b' }}>
           <button type="button" data-testid="view-floor-2d" style={modeTab(mode === 'plan')} onClick={() => onMode('plan')}>{t('mode.plan')}</button>

@@ -3,10 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { LanguageSwitch, useLocale } from '@/components/i18n/Locale'
 import PlanView from './PlanView'
 import HeatLoadPanel from './HeatLoadPanel'
 import { ROOM_TYPES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
+import { PROJECT_TYPES } from '@/lib/access'
+import { applyProjectType } from '@/lib/projectMode'
+import { CURRENT_KEY } from '@/lib/projects'
+import { emptyPlan } from '@/lib/floorplan'
 import {
   buildEnquiryExample,
   createRoom,
@@ -241,7 +246,10 @@ export default function DesignerApp({
   onPersist,
   user = null,
   persistLabel = 'selaimeen',
+  projectType = 'kylmio',
+  onProjectType,
 }) {
+  const router = useRouter()
   const { t, locale, setLocale } = useLocale()
   const { compact } = useViewport()
   const [hand, setHand] = useState(false)
@@ -1166,21 +1174,50 @@ export default function DesignerApp({
     hand,
   }
 
+  const chooseProjectType = (id) => {
+    if (!id || id === projectType) return
+    if (onProjectType) {
+      onProjectType(id)
+      return
+    }
+    if (id === 'kylmio') return
+    let stored = null
+    try {
+      stored = JSON.parse(window.localStorage.getItem(CURRENT_KEY) || 'null')
+    } catch (err) {
+      console.error(err)
+    }
+    const base = stored && Array.isArray(stored.walls) ? stored : emptyPlan()
+    window.localStorage.setItem(CURRENT_KEY, JSON.stringify(applyProjectType(base, id)))
+    router.push('/pohjakuva')
+  }
+
   const designName = placing?.name || (tool === 'draw' ? t('designer.room') : tool === 'polygon' ? t('designer.polygon') : tool === 'partition' ? t('designer.partition') : tool === 'pipe' ? t('designer.pipe') : tool === 'cable' ? t('designer.cable') : null)
   const designDrawing = Boolean(designName && !placing)
   const designLabel = modeChipText({ name: designName, repeat: repeatPlace && Boolean(placing), drawing: designDrawing })
 
   return (
-    <div className="designer-app" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
+    <div className="designer-app" data-testid="cold-workspace" data-project-type={projectType} style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
       <header className={`designer-header${toolsOpen ? ' tools-open' : ''}`} style={{
         display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 8,
         height: 48, padding: '0 10px', overflow: 'hidden',
         background: '#14181f', borderBottom: '1px solid #0c0f14', color: '#f5f5f4',
       }}>
         <Link href="/projects" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, letterSpacing: -0.2, flexShrink: 0 }}>RefCAD</Link>
+        <select
+          data-testid="project-type"
+          aria-label={t('chrome.projectType')}
+          value={projectType}
+          onChange={(event) => chooseProjectType(event.target.value)}
+          style={{ height: 32, maxWidth: 168, borderRadius: 8, border: '1px solid #3f3f46', background: '#1c212b', color: '#f5f5f4', fontSize: 12, fontWeight: 650, flexShrink: 0 }}
+        >
+          {PROJECT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+        </select>
         <div className="designer-tool"><LanguageSwitch value={locale} onChange={setLocale} /></div>
         <LanguageSwitch className="compact-only" value={locale} onChange={setLocale} />
-        <Link href="/pohjakuva" data-testid="open-floorplan" title={t('designer.floorplanTitle')} style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>{t('designer.floorplan')}</Link>
+        {projectType !== 'kylmio' && (
+          <Link href="/pohjakuva" data-testid="open-floorplan" title={t('designer.floorplanTitle')} style={{ color: '#e7e5e4', textDecoration: 'none', fontSize: 12, fontWeight: 650, padding: '4px 8px', borderRadius: 8, background: '#1c212b', flexShrink: 0 }}>{t('designer.floorplan')}</Link>
+        )}
         <input
           aria-label={t('designer.projectName')}
           value={name}
@@ -1310,6 +1347,7 @@ export default function DesignerApp({
 
       <div className={`designer-cad${toolsOpen ? ' tools-open' : ''}`}>
       <CadToolbar
+        scope="cold"
         active={cad?.name}
         onCommand={beginCad}
         onSelectType={(type) => {

@@ -80,7 +80,7 @@ export default function AdminPage() {
             <Link href="/" style={{ color: '#0369a1' }}>{t('shell.home')}</Link>
           </div>
         </header>
-        <p style={{ color: '#475569', marginTop: 0 }}>{t('admin.lead')}</p>
+        <p style={{ color: '#475569', marginTop: 0 }}>{t('price.adminLead')}</p>
         {error && <p data-testid="admin-error" style={{ color: '#9f1239' }}>{error}</p>}
         <div data-testid="admin-users" className="admin-users">
           <table>
@@ -107,7 +107,7 @@ export default function AdminPage() {
                         {PLAN_IDS.map((id) => <option key={id} value={id}>{planName(id)}</option>)}
                       </select>
                     ) : planName(user.plan)}</td>
-                    <td style={{ padding: '12px', fontWeight: 700 }} data-testid="admin-status">{t(`admin.status.${status}`)}</td>
+                    <td style={{ padding: '12px', fontWeight: 700 }} data-testid="admin-status">{t(`price.status.${status}`)}</td>
                     <td style={{ padding: '12px' }}>{open ? (
                       <input aria-label={t('admin.from')} type="date" value={(user.validFrom || '').slice(0, 10)} onChange={(event) => patch(user.id, { validFrom: event.target.value })} style={field} />
                     ) : (user.validFrom || '—')}</td>
@@ -117,7 +117,7 @@ export default function AdminPage() {
                     <td style={{ padding: '12px' }}>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {(status === 'pending' || status === 'expired') && user.role !== 'admin' && user.role !== 'demo' && (
-                          <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>{t('admin.confirm')}</button>
+                          <button type="button" data-testid="admin-confirm" style={button} onClick={() => patch(user.id, { payment: 'received' })}>{t('price.markPaid')}</button>
                         )}
                         <button type="button" data-testid="admin-edit" style={quiet} onClick={() => setEditing(open ? null : user.id)}>{open ? t('admin.close') : t('admin.edit')}</button>
                         <button type="button" data-testid="admin-disable" style={quiet} onClick={() => patch(user.id, { disabled: !user.disabled })}>{user.disabled ? t('admin.enable') : t('admin.disable')}</button>

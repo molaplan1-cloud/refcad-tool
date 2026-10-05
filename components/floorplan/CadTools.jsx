@@ -68,13 +68,17 @@ function byId(id) {
   return COMMANDS.find((item) => item.id === id)
 }
 
-export function CadToolbar({ active, onCommand, onSelectType, onLayer }) {
+export function CadToolbar({ active, onCommand, onSelectType, onLayer, scope = 'house' }) {
   const { t } = useLocale()
+  const types = scope === 'cold'
+    ? SELECT_TYPES.filter((item) => item.id === 'all' || item.id === 'room' || item.id === 'door')
+    : SELECT_TYPES
+  const layers = scope === 'cold' ? [] : CAD_LAYERS
   return (
-    <div data-testid="cad-toolbar" style={{ display: 'flex', flexWrap: 'nowrap', gap: 4, alignItems: 'center', padding: '3px 8px', background: '#fff', borderBottom: '1px solid #e7e5e4', overflowX: 'auto' }}>
+    <div data-testid="cad-toolbar" data-scope={scope} style={{ display: 'flex', flexWrap: 'nowrap', gap: 4, alignItems: 'center', padding: '3px 8px', background: '#fff', borderBottom: '1px solid #e7e5e4', overflowX: 'auto' }}>
       <select data-testid="select-by-type" defaultValue="" title={t('select.type')} onChange={(event) => { onSelectType(event.target.value); event.target.value = '' }} style={{ height: 28, maxWidth: 132, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12, fontWeight: 650, flexShrink: 0 }}>
         <option value="">{t('select.type')}…</option>
-        {SELECT_TYPES.map((item) => <option key={item.id} value={item.id}>{phrase(t, item)}</option>)}
+        {types.map((item) => <option key={item.id} value={item.id}>{phrase(t, item)}</option>)}
       </select>
       <span style={{ width: 1, height: 18, background: '#e7e5e4', flexShrink: 0 }} />
       {GROUPS.map((group) => (
@@ -91,10 +95,12 @@ export function CadToolbar({ active, onCommand, onSelectType, onLayer }) {
           <span style={{ width: 1, height: 18, background: '#e7e5e4', flexShrink: 0, marginLeft: 2 }} />
         </span>
       ))}
-      <select data-testid="cad-layer" defaultValue="" title="Vaihda taso" onChange={(event) => { if (event.target.value) onLayer(event.target.value); event.target.value = '' }} style={{ height: 28, maxWidth: 120, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12, fontWeight: 650, flexShrink: 0 }}>
-        <option value="">Taso…</option>
-          {CAD_LAYERS.map((item) => <option key={item.id} value={item.id}>{phrase(t, item)}</option>)}
-      </select>
+      {layers.length > 0 && (
+        <select data-testid="cad-layer" defaultValue="" title={t('cad.changeLayer')} onChange={(event) => { if (event.target.value) onLayer(event.target.value); event.target.value = '' }} style={{ height: 28, maxWidth: 120, borderRadius: 6, border: '1px solid #d6d3d1', fontSize: 12, fontWeight: 650, flexShrink: 0 }}>
+          <option value="">{t('cad.layer')}…</option>
+          {layers.map((item) => <option key={item.id} value={item.id}>{phrase(t, item)}</option>)}
+        </select>
+      )}
     </div>
   )
 }

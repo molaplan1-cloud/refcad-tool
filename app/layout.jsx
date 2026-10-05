@@ -1,10 +1,11 @@
 import './globals.css'
 import ChunkRecovery from '@/components/ChunkRecovery'
 import { LocaleProvider } from '@/components/i18n/Locale'
+import { MESSAGES } from '@/lib/messages'
 
 export const metadata = {
   title: 'RefCAD',
-  description: 'Draw a cold room, house or hall. The floor plan is free; services and refrigeration open after payment is confirmed.',
+  description: MESSAGES.fi['price.meta'],
   manifest: '/manifest.json'
 }
 

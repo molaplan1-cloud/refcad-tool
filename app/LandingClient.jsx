@@ -13,6 +13,7 @@ export default function LandingClient() {
   const [yearly, setYearly] = useState(false)
   const [user, setUser] = useState(null)
   const [notice, setNotice] = useState('')
+  const [ordered, setOrdered] = useState(false)
 
   useEffect(() => {
     fetch('/api/auth/session').then((res) => res.json()).then((data) => setUser(data.user || null)).catch(() => {})
@@ -30,7 +31,8 @@ export default function LandingClient() {
       body: JSON.stringify({ plan: plan.id, cycle: yearly ? 'year' : 'month' }),
     })
     const data = await res.json()
-    setNotice(res.ok ? t('shell.pending') : (data.error || t('shell.requestFailed')))
+    setOrdered(res.ok)
+    setNotice(res.ok ? t('price.thanks') : (data.error || t('price.failed')))
   }
 
   return (
@@ -75,13 +77,15 @@ export default function LandingClient() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'end' }}>
             <div>
               <h2 style={{ fontSize: 36, margin: '0 0 8px' }}>{t('shell.pricing')}</h2>
-              <p data-testid="pricing-note" style={{ margin: 0, color: '#9a3412', fontWeight: 700 }}>{t('shell.priceNote')}</p>
+              <p data-testid="pricing-note" style={{ margin: 0, maxWidth: 640, color: '#475569', lineHeight: 1.5 }}>{t('price.note')}</p>
             </div>
             <button type="button" data-testid="billing-cycle" onClick={() => setYearly((value) => !value)} style={secondary}>
               {yearly ? t('shell.yearly') : t('shell.showYearly')}
             </button>
           </div>
-          {notice && <p data-testid="payment-pending" style={{ marginTop: 16 }}>{notice}</p>}
+          {notice && (
+            <p data-testid={ordered ? 'order-thanks' : 'order-error'} style={{ marginTop: 16, maxWidth: 640, padding: '12px 14px', background: ordered ? '#f0fdf4' : '#fff7ed', border: `1px solid ${ordered ? '#86efac' : '#fdba74'}`, borderRadius: 10, color: ordered ? '#166534' : '#9a3412', lineHeight: 1.5 }}>{notice}</p>
+          )}
           <div data-testid="pricing-grid" className="pricing-grid" style={{ marginTop: 24 }}>
             {PLANS.map((plan) => (
               <article key={plan.id} data-testid={`price-${plan.id}`} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column' }}>
@@ -96,7 +100,7 @@ export default function LandingClient() {
                 {plan.id === 'free' ? (
                   <Link href="/uusi" style={{ ...primary, textAlign: 'center' }}>{t('shell.drawPlan')}</Link>
                 ) : (
-                  <button type="button" data-testid={`ask-${plan.id}`} onClick={() => ask(plan)} style={primary}>{t('shell.askAccess')}</button>
+                  <button type="button" data-testid={`ask-${plan.id}`} onClick={() => ask(plan)} style={primary}>{t('price.order')}</button>
                 )}
               </article>
             ))}

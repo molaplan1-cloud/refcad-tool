@@ -48,10 +48,10 @@ export default function TypePage() {
       <main style={{ maxWidth: 1080, margin: '0 auto', padding: '12px 24px 64px' }}>
         <p style={{ letterSpacing: '0.14em', textTransform: 'uppercase', fontSize: 12, color: '#0369a1', fontWeight: 700 }}>{t('type.new')}</p>
         <h1 className="picker-title" style={{ fontSize: 40, lineHeight: 1.1, margin: '8px 0 12px' }}>{t('type.heading')}</h1>
-        <p style={{ maxWidth: 640, color: '#475569', fontSize: 17, lineHeight: 1.5 }}>{t('type.lead')}</p>
+        <p style={{ maxWidth: 640, color: '#475569', fontSize: 17, lineHeight: 1.5 }}>{t('price.workspaces')}</p>
         {access.pending && (
-          <p data-testid="payment-pending" style={{ marginTop: 16, padding: '10px 14px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 10 }}>
-            {t('shell.pending')}
+          <p data-testid="order-thanks" style={{ marginTop: 16, maxWidth: 640, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 10, color: '#166534', lineHeight: 1.5 }}>
+            {t('price.thanks')}
           </p>
         )}
         {access.admin && (

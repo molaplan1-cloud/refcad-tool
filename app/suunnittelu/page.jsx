@@ -55,7 +55,7 @@ export default function Page() {
     const message = access.admin
       ? t('gate.admin')
       : access.pending
-        ? t('shell.pending')
+        ? t('price.thanks')
         : t('gate.cold')
     return (
       <div data-testid="cold-room-gate" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', color: '#0f172a', padding: 24 }}>
@@ -63,8 +63,8 @@ export default function Page() {
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             <ShellLanguage tone="light" />
           </div>
-          <h1 style={{ fontSize: 28, marginBottom: 12 }}>{message}</h1>
-          <p style={{ color: '#475569', lineHeight: 1.5 }}>{t('gate.coldLead')}</p>
+          <h1 data-testid={access.pending ? 'order-thanks' : undefined} style={{ fontSize: 28, marginBottom: 12 }}>{message}</h1>
+          <p style={{ color: '#475569', lineHeight: 1.5 }}>{t('price.cold')}</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 20 }}>
             <Link href="/#pricing" style={{ color: '#0369a1' }}>{t('shell.pricing')}</Link>
             <Link href={access.admin ? '/admin' : '/uusi'} style={{ color: '#0369a1' }}>{access.admin ? t('shell.admin') : t('designer.floorplan')}</Link>

@@ -44,6 +44,7 @@ import {
   doorSchedule,
   openingTags,
   planBounds,
+  extensionWitnesses,
   planDimensions,
   dedupeDimensions,
   straightenWalls,
@@ -197,6 +198,8 @@ import {
   wallShiftMetres,
 } from '@/lib/tracking'
 import { WORKSPACES, applyWorkspaceSwitch, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
+import { applyProjectType, hasHouseElements, isColdProject, stripHouseElements } from '@/lib/projectMode'
+import ColdWorkspace from './ColdWorkspace'
 import { FIT_CAMERA, fitRect, panBy, pinchZoom, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 import { touchAction } from '@/lib/touch'
 import { useViewport } from '@/components/useViewport'
@@ -587,7 +590,7 @@ function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
   )
 }
 
-function DimLine({ dim, X, Y, zoom, onEdit }) {
+function DimLine({ dim, X, Y, zoom, onEdit, witnesses = [] }) {
   const view = Math.max(0.2, zoom || 1)
   const fontSize = dimensionFont(view)
   const stroke = 1 / view
@@ -650,19 +653,6 @@ function DimLine({ dim, X, Y, zoom, onEdit }) {
   const rot = vertical ? `rotate(${dimensionRotation(true)} ${labelX} ${labelY})` : null
   const haloW = place.textW + fontSize * 0.7
   const haloH = fontSize * 1.45
-  const ax1 = X(dim.ax ?? dim.x1)
-  const ay1 = Y(dim.az ?? dim.z1)
-  const ax2 = X(dim.bx ?? dim.x2)
-  const ay2 = Y(dim.bz ?? dim.z2)
-  const gapLine = (sx, sy, ex, ey) => {
-    const dx = ex - sx
-    const dy = ey - sy
-    const span = Math.hypot(dx, dy) || 1
-    const inset = Math.min(fontSize * 0.55, span * 0.35)
-    return { x1: sx + (dx / span) * inset, y1: sy + (dy / span) * inset, x2: ex, y2: ey }
-  }
-  const ext1 = gapLine(ax1, ay1, x1, y1)
-  const ext2 = gapLine(ax2, ay2, x2, y2)
   const breakX = x1 + (x2 - x1) * 0.5
   const breakY = y1 + (y2 - y1) * 0.5
   const editDim = (event) => {
@@ -673,8 +663,18 @@ function DimLine({ dim, X, Y, zoom, onEdit }) {
   }
   return (
     <g data-testid={`dim-${dim.kind || 'dim'}`} data-label={dim.label} data-place={place.mode} data-wall={dim.wallId || ''} fill="#292524" style={{ pointerEvents: 'none' }}>
-      {Math.hypot(ax1 - x1, ay1 - y1) > 4 / view && <line x1={ext1.x1} y1={ext1.y1} x2={ext1.x2} y2={ext1.y2} stroke="#a8a29e" strokeWidth={thin} />}
-      {Math.hypot(ax2 - x2, ay2 - y2) > 4 / view && <line x1={ext2.x1} y1={ext2.y1} x2={ext2.x2} y2={ext2.y2} stroke="#a8a29e" strokeWidth={thin} />}
+      {(witnesses || []).map((line, index) => (
+        <line
+          key={`ext-${index}`}
+          data-testid="dim-extension"
+          x1={X(line.x1)}
+          y1={Y(line.z1)}
+          x2={X(line.x2)}
+          y2={Y(line.z2)}
+          stroke="#a8a29e"
+          strokeWidth={thin}
+        />
+      ))}
       <line x1={x1} y1={y1} x2={breakX - ux * gap / 2} y2={breakY - uy * gap / 2} stroke="#44403c" strokeWidth={stroke} />
       <line x1={breakX + ux * gap / 2} y1={breakY + uy * gap / 2} x2={x2} y2={y2} stroke="#44403c" strokeWidth={stroke} />
       <line x1={x1 - tx} y1={y1 - ty} x2={x1 + tx} y2={y1 + ty} stroke="#44403c" strokeWidth={stroke} />
@@ -766,20 +766,13 @@ function worldPath(points, X, Y) {
   return `${points.map((point, index) => `${index ? 'L' : 'M'}${X(point.x)} ${Y(point.z)}`).join(' ')} Z`
 }
 
-function faceInk(color) {
-  const hex = String(color || '').replace('#', '')
-  if (hex.length < 6) return color || '#44403c'
-  return `#${hex.slice(0, 6)}`
-}
-
-function FaceLines({ plan, X, Y, selected, onSelect }) {
+function FaceLines({ plan, X, Y, selected, onSelect, interactive = true }) {
   return (
     <g data-testid="face-lines">
       {visibleRooms(plan).map((room) => (room.walls || []).map((edge, index) => {
         const wall = (plan.walls || []).find((item) => item.id === edge.wallId)
         const side = wall ? faceSide(wall, edge.a, edge.b) : 'left'
         const material = wall ? resolveFaceMaterial(plan, wall, side) : (room.interiorId || 'paint')
-        const color = materialOf('interior', material).color
         const a0 = room.polygon?.[index]
         const b0 = room.polygon?.[(index + 1) % (room.polygon?.length || 1)]
         if (!a0 || !b0) return null
@@ -808,10 +801,11 @@ function FaceLines({ plan, X, Y, selected, onSelect }) {
             y1={Y(a.z)}
             x2={X(b.x)}
             y2={Y(b.z)}
-            stroke={active ? '#0f766e' : faceInk(color)}
-            strokeWidth={active ? 1.8 : 0.55}
+            stroke={active ? '#0f766e' : 'transparent'}
+            strokeWidth={active ? 1.8 : 6}
             strokeDasharray={hatch}
             strokeLinecap="butt"
+            style={{ pointerEvents: interactive ? 'stroke' : 'none' }}
             onPointerDown={(event) => {
               if (event.pointerType === 'touch') return
               event.stopPropagation()
@@ -1012,6 +1006,7 @@ export default function FloorPlanApp() {
   const [poly, setPoly] = useState([])
   const [partitions, setPartitions] = useState(true)
   const [view, setView] = useState('2d')
+  const [typeAsk, setTypeAsk] = useState(false)
   const [facadeSideId, setFacadeSideId] = useState('north')
   const [svcSystem, setSvcSystem] = useState('iv')
   const [svcKind, setSvcKind] = useState('valve-tulo')
@@ -3162,6 +3157,40 @@ export default function FloorPlanApp() {
 
   const px = (metres) => metres * layout.scale * k
 
+  const onProjectType = (id) => {
+    const current = planRef.current
+    const currentId = current.projectType || 'omakotitalo'
+    if (!id || id === currentId) return
+    if (id === 'kylmio' && hasHouseElements(current)) {
+      setTypeAsk(true)
+      return
+    }
+    setTypeAsk(false)
+    setView('2d')
+    setSheetMode('plan')
+    setWorkspace('rakenne')
+    commit(applyProjectType(current, id))
+  }
+  const confirmColdType = (remove) => {
+    const current = planRef.current
+    const base = remove ? stripHouseElements(current) : current
+    setView('2d')
+    setSheetMode('plan')
+    setWorkspace('rakenne')
+    commit(applyProjectType(base, 'kylmio'))
+    setTypeAsk(false)
+  }
+
+  if (isColdProject(plan)) {
+    return (
+      <ColdWorkspace
+        plan={plan}
+        onProjectType={onProjectType}
+        onName={(name) => setPlan((current) => (current.name === name ? current : { ...current, name }))}
+      />
+    )
+  }
+
   if (access.admin || !access.draw) {
     return (
       <div data-testid="draw-blocked" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', color: '#0f172a' }}>
@@ -3174,10 +3203,25 @@ export default function FloorPlanApp() {
   }
 
   return (
-    <div className="plan-app" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
+    <div data-testid="house-workspace" data-project-type={plan.projectType || 'omakotitalo'} className="plan-app" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
+      {typeAsk && (
+        <div data-testid="house-hide-ask" role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(28,25,23,0.45)', display: 'grid', placeItems: 'center', padding: 24 }}>
+          <div style={{ width: 440, maxWidth: '100%', background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 16px 40px rgba(0,0,0,0.2)' }}>
+            <div style={{ fontSize: 18, fontWeight: 750, marginBottom: 8 }}>{t('cold.hideTitle')}</div>
+            <p style={{ margin: 0, fontSize: 14, color: '#44403c', lineHeight: 1.45 }}>
+              {t('cold.hideLead')}
+            </p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+              <button type="button" data-testid="house-hide-keep" onClick={() => confirmColdType(false)} style={{ height: 36, padding: '0 12px', borderRadius: 8, border: 'none', background: '#0f766e', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>{t('cold.hide')}</button>
+              <button type="button" data-testid="house-hide-remove" onClick={() => confirmColdType(true)} style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid #b91c1c', background: '#fff', color: '#b91c1c', fontWeight: 700, cursor: 'pointer' }}>{t('cold.removeHouse')}</button>
+              <button type="button" data-testid="house-hide-cancel" onClick={() => setTypeAsk(false)} style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid #d6d3d1', background: '#fff', color: '#1c1917', fontWeight: 650, cursor: 'pointer' }}>{t('projects.cancel')}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {access.pending && (
-        <div data-testid="payment-pending" style={{ background: '#fff7ed', color: '#9a3412', textAlign: 'center', padding: '8px 12px', fontWeight: 700 }}>
-          {t('shell.pending')}
+        <div data-testid="order-thanks" style={{ background: '#f0fdf4', color: '#166534', textAlign: 'center', padding: '8px 12px', fontWeight: 650 }}>
+          {t('price.thanks')}
         </div>
       )}
       <PlanChrome
@@ -3336,6 +3380,7 @@ export default function FloorPlanApp() {
         }}
         workspace={workspace}
         access={access}
+        onProjectType={onProjectType}
         onWorkspace={(id) => {
           if (!access.workspaces.includes(id)) return
           const nextPlan = applyWorkspaceSwitch(plan, id)
@@ -3705,7 +3750,7 @@ export default function FloorPlanApp() {
               }}
               style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative', ...placeFrame(engaged) }}
             >
-              {drawingWalls && (
+              {drawingWalls && draft && (
                 <DrawCursor
                   x={pointerPx?.x ?? Math.min(120, Math.max(24, (size.w || 800) * 0.28))}
                   y={pointerPx?.y ?? Math.min(96, Math.max(24, (size.h || 600) * 0.22))}
@@ -3991,7 +4036,7 @@ export default function FloorPlanApp() {
                 })}
                 </g>
                 <g opacity={workspace === 'rakenne' ? 1 : 0.32} style={{ pointerEvents: workspace === 'rakenne' ? 'auto' : 'none' }}>
-                {sheetMode !== 'site' && <FaceLines plan={plan} X={X} Y={Y} selected={pick?.kind === 'room' ? pick : null} onSelect={(face) => {
+                {sheetMode !== 'site' && <FaceLines plan={plan} X={X} Y={Y} interactive={tool === 'select'} selected={pick?.kind === 'room' ? pick : null} onSelect={(face) => {
                   setPick(face)
                   setSelectedRoom(face.id)
                   setPanel('object')
@@ -4007,6 +4052,7 @@ export default function FloorPlanApp() {
                         <DimLine
                           key={`dim-${index}-${next.wallId || 'x'}-${next.label}-${next.x1}-${next.z1}`}
                           dim={next}
+                          witnesses={extensionWitnesses(next, plan)}
                           X={X}
                           Y={Y}
                           zoom={camera.zoom || 1}
