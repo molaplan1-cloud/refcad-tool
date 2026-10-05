@@ -48,7 +48,7 @@ export default function ColdWorkspace({ plan, onProjectType, onName }) {
         }))
         if (data.name && data.name !== plan?.name) onName?.(data.name)
       }}
-      persistLabel="selaimeen"
+      persistLabel={t('designer.browser')}
     />
   )
 }

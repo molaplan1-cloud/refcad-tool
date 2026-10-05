@@ -2,16 +2,14 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { PROJECT_TYPES } from '@/lib/access'
 import { COVER_TYPES } from '@/lib/covers'
 import { GROUND_TOOLS } from '@/lib/groundworks'
 import { PLACEABLES, SERVICE_SYSTEMS, airflowBalance, ensureServices, layerVisible } from '@/lib/services'
 import { WORKSPACES, workspaceSystems } from '@/lib/workspaces'
-import { BUILDINGS, OBJECTS, PLANTS, ensureYard } from '@/lib/yard'
+import { BUILDINGS, OBJECTS, PLANTS } from '@/lib/yard'
 import { LanguageSwitch } from '@/components/i18n/Locale'
 import { zoomPercent } from '@/lib/zoom'
 import { CadToolbar } from './CadTools'
-import { DoorPlaceControls } from './FloorMenus'
 import { YARD_DRAW_TOOLS } from './YardLayer'
 
 const rib = (active) => ({
@@ -119,18 +117,17 @@ export function LayerDock({ plan, open, onToggle, onLayer, t }) {
 }
 
 export function PlanChrome({
-  t, plan, locale, setLocale, mode, tool, placing, roomShape, yardTool, partitions, polyReady,
-  gridStep, angleStep, camera, display, panel, command, svcSystem, svcKind, svcTool, floorHeating, drawing,
+  t, plan, locale, setLocale, mode, tool, placing, roomShape, yardTool, polyReady,
+  gridStep, angleStep, camera, display, panel, command, svcSystem, svcKind, svcTool, drawing,
   wallMode, roofMode, showClearances, onName, onMode, onTool, onRoomRect, onRoomPoly,
-  onUndo, onRedo, onNew, onOpen, onHouse, onDisplay, onPreset, onExample, onFamily, onPaper,
-  onPartitions, onCloseRoom, onYardTool, onNorth, onGrid, onAngle, onZoomOut, onZoomIn, onZoomFit,
-  onClearances, onWallMode, onRoofMode, onSceneStyle, onSystem, onKind, onSvcTool, onFloorHeating,
+  onUndo, onRedo, onNew, onOpen, onHouse, onDisplay, onExample, onFamily,
+  onCloseRoom, onYardTool, onGrid, onAngle, onZoomOut, onZoomIn, onZoomFit,
+  onClearances, onWallMode, onRoofMode, onSceneStyle, onSystem, onKind, onSvcTool,
   onFinish, onRoute, onRewire, onSchedule, onDiagram, onRewireWater, onRewireHeat, onHeatTable,
-  onHeatSchematic,   onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup, onRemoveAuto, onStraighten,
+  onHeatSchematic, onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup, onRemoveAuto, onStraighten,
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
-  doorHand = { swing: 1, inward: false, doorStyle: 'hinged', slideMount: 'pocket', panels: 1 }, onDoorHand,
   access = null,
-  onProjectType,
+  onProjectInfo,
   compact = false,
   toolsOpen = false,
   onToggleTools,
@@ -158,10 +155,6 @@ export function PlanChrome({
       <button type="button" data-testid="tool-room" aria-pressed={tool === 'room' && roomShape === 'rect'} style={style(tool === 'room' && roomShape === 'rect')} onClick={() => { close(); onRoomRect() }}>{t('tool.room')}</button>
       <button type="button" data-testid="tool-room-poly" aria-pressed={tool === 'room' && roomShape === 'poly'} style={style(tool === 'room' && roomShape === 'poly')} onClick={() => { close(); onRoomPoly() }}>{t('tool.polygon')}</button>
       <button type="button" data-testid="tool-detect" aria-pressed={tool === 'detect'} style={style(tool === 'detect')} onClick={() => { close(); onTool('detect') }}>{t('tool.detect')}</button>
-      <label style={{ ...style(false), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-        <input data-testid="room-partitions" type="checkbox" checked={partitions} onChange={(event) => onPartitions(event.target.checked)} />
-        {t('partition.create')}
-      </label>
       {tool === 'room' && roomShape === 'poly' && polyReady && (
         <button type="button" data-testid="close-room" style={style(false)} onClick={() => { close(); onCloseRoom() }}>{t('room.close')}</button>
       )}
@@ -194,22 +187,17 @@ export function PlanChrome({
         {GROUND_TOOLS.map((item) => <option key={item.id} value={`ground:${item.id}`}>{t(`ground.tool.${item.id}`)}</option>)}
       </select>
       <button type="button" data-testid="show-clearances" aria-pressed={showClearances} style={style(showClearances)} onClick={() => { close(); onClearances(!showClearances) }}>{t('menu.clearances')}</button>
-      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#1c1917', flexShrink: 0 }}>
-        {t('north.label')}
-        <input data-testid="north-angle" type="number" value={ensureYard(plan).north || 0} onChange={(event) => onNorth(Number(event.target.value) || 0)} style={{ width: 52, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
-        °
-      </label>
     </>
   )
 
   const snapTools = (
     <>
       <span style={{ fontSize: 11, color: '#78716c', flexShrink: 0 }}>{t('snap.snap')}</span>
-      <button type="button" data-testid="snap-100" title="Ruudukko 100 mm" style={rib(gridStep === 0.1)} onClick={() => onGrid(0.1)}>100</button>
-      <button type="button" data-testid="snap-50" title="Ruudukko 50 mm" style={rib(gridStep === 0.05)} onClick={() => onGrid(0.05)}>50</button>
-      <button type="button" data-testid="snap-10" title="Ruudukko 10 mm" style={rib(gridStep === 0.01)} onClick={() => onGrid(0.01)}>10</button>
+      <button type="button" data-testid="snap-100" title={t('snap.grid100')} style={rib(gridStep === 0.1)} onClick={() => onGrid(0.1)}>100</button>
+      <button type="button" data-testid="snap-50" title={t('snap.grid50')} style={rib(gridStep === 0.05)} onClick={() => onGrid(0.05)}>50</button>
+      <button type="button" data-testid="snap-10" title={t('snap.grid10')} style={rib(gridStep === 0.01)} onClick={() => onGrid(0.01)}>10</button>
       <span style={{ fontSize: 11, color: '#78716c', flexShrink: 0 }}>{t('snap.angle')}</span>
-      <button type="button" data-testid="angle-90" data-ortho="true" title="90° (Shift)" aria-pressed={angleStep === 90} style={rib(angleStep === 90)} onClick={() => onAngle(90)}>90°</button>
+      <button type="button" data-testid="angle-90" data-ortho="true" title={t('snap.angle90')} aria-pressed={angleStep === 90} style={rib(angleStep === 90)} onClick={() => onAngle(90)}>90°</button>
       <button type="button" data-testid="angle-45" aria-pressed={angleStep === 45} style={rib(angleStep === 45)} onClick={() => onAngle(45)}>45°</button>
       <button type="button" data-testid="angle-15" aria-pressed={angleStep === 15} style={rib(angleStep === 15)} onClick={() => onAngle(15)}>15°</button>
       <button type="button" data-testid="angle-free" aria-pressed={angleStep === 0} style={rib(angleStep === 0)} onClick={() => onAngle(0)}>{t('snap.free')}</button>
@@ -231,7 +219,8 @@ export function PlanChrome({
       <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="plan-new" style={menuItem(false)} onClick={() => { close(); onNew() }}>{t('file.new')}</button>
         <button type="button" data-testid="plan-open" style={menuItem(false)} onClick={() => { close(); onOpen() }}>{t('file.open')}</button>
-        <button type="button" data-testid="house-settings" style={menuItem(panel === 'house')} onClick={() => { close(); onHouse() }}>{t('file.house')}</button>
+        <button type="button" data-testid="project-info" style={menuItem(false)} onClick={() => { close(); onProjectInfo?.() }}>{t('file.projectInfo')}</button>
+        <button type="button" data-testid="house-settings" style={menuItem(panel === 'house')} onClick={() => { close(); onHouse() }}>{t('file.projectSettings')}</button>
         <button type="button" data-testid="example-house" style={menuItem(false)} onClick={() => { close(); onExample() }}>{t('file.example')}</button>
         <button type="button" data-testid="family-house" style={menuItem(false)} onClick={() => { close(); onFamily() }}>{t('file.apartment')}</button>
       </Menu>
@@ -243,10 +232,7 @@ export function PlanChrome({
         <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
       </Menu>
       <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen} dock={dock}>
-        <button type="button" data-testid="open-display" style={menuItem(false)} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
-        <button type="button" data-testid="toolbar-preset-plain" title={`${t('preset.plain')} (Alt+1)`} style={menuItem(display.preset === 'plain')} onClick={() => { close(); onPreset('plain') }}>{t('preset.plain')}</button>
-        <button type="button" data-testid="toolbar-preset-measure" title={`${t('preset.measure')} (Alt+2)`} style={menuItem(display.preset === 'measure')} onClick={() => { close(); onPreset('measure') }}>{t('preset.measure')}</button>
-        <button type="button" data-testid="toolbar-preset-all" title={`${t('preset.all')} (Alt+3)`} style={menuItem(display.preset === 'all')} onClick={() => { close(); onPreset('all') }}>{t('preset.all')}</button>
+        <button type="button" data-testid="open-display" style={menuItem(display.preset !== 'custom')} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
       </Menu>
       <Menu id="print" label={t('menu.print')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="export-floor-pdf" style={menuItem(false)} onClick={() => { close(); onPdf() }}>PDF</button>
@@ -265,10 +251,9 @@ export function PlanChrome({
         <header className="plan-chrome-header" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 48, padding: '4px 8px', paddingLeft: 'max(8px, env(safe-area-inset-left))', paddingRight: 'max(8px, env(safe-area-inset-right))' }}>
           <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, flexShrink: 0 }}>RefCAD</Link>
           <input aria-label={t('app.drawingName')} value={plan.name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 16, flex: 1, minWidth: 0, width: 0 }} />
+          <span data-testid="project-type" style={{ fontSize: 12, fontWeight: 650, color: '#d6d3d1', whiteSpace: 'nowrap', flexShrink: 0 }}>{t(`type.${plan.projectType || 'omakotitalo'}.name`)}</span>
+          <GearButton compact label={t('file.projectSettings')} onClick={onHouse} />
           <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
-          <select data-testid="project-type" aria-label={t('chrome.projectType')} value={plan.projectType || 'omakotitalo'} onChange={(event) => onProjectType?.(event.target.value)} style={{ height: 36, maxWidth: 148, borderRadius: 8, border: '1px solid #3f3f46', background: '#1c212b', color: '#f5f5f4', fontSize: 12, fontWeight: 650, flexShrink: 0 }}>
-            {PROJECT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-          </select>
           <button type="button" data-testid="chrome-menu" aria-expanded={open === 'root'} onClick={() => setOpen(open === 'root' ? null : 'root')} style={{ ...modeTab(open === 'root'), minHeight: 44, minWidth: 44, padding: '0 12px' }}>{t('chrome.menu')}</button>
         </header>
         <div className="workspace-scroll view-tabs" data-testid="view-tabs" style={{ background: '#14181f' }}>
@@ -293,10 +278,6 @@ export function PlanChrome({
         {open === 'root' && (
           <div className="compact-menu" data-testid="chrome-menu-panel" style={{ background: '#fff', color: '#1c1917', maxHeight: '46vh', overflow: 'auto', padding: 8 }}>
             {menus(true)}
-            <div style={{ display: 'flex', gap: 8, padding: '8px 0' }}>
-              <button type="button" style={hit(plan.paper !== 'a4')} onClick={() => onPaper('a3')}>A3</button>
-              <button type="button" style={hit(plan.paper === 'a4')} onClick={() => onPaper('a4')}>A4</button>
-            </div>
             <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
           </div>
         )}
@@ -321,7 +302,6 @@ export function PlanChrome({
                   <button type="button" data-testid="suggest-equipment" style={hit(ghostCount > 0)} onClick={() => onSuggest?.()}>{t('service.suggest')}</button>
                 </>
               )}
-              {tool === 'door' && <DoorPlaceControls compact t={t} value={doorHand} onChange={(next) => onDoorHand?.(next)} />}
               {snapTools}
               {zoomTools}
             </div>
@@ -340,19 +320,14 @@ export function PlanChrome({
       <header style={{ display: 'flex', alignItems: 'center', gap: 10, height: 40, padding: '0 10px', background: '#14181f', color: '#f5f5f4' }}>
         <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14 }}>RefCAD</Link>
         <input aria-label={t('app.drawingName')} value={plan.name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 13, width: 160 }} />
-        <select data-testid="project-type" aria-label={t('chrome.projectType')} value={plan.projectType || 'omakotitalo'} onChange={(event) => onProjectType?.(event.target.value)} style={{ height: 28, maxWidth: 180, borderRadius: 6, border: '1px solid #3f3f46', background: '#1c212b', color: '#f5f5f4', fontSize: 12, fontWeight: 650 }}>
-          {PROJECT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-        </select>
+        <span data-testid="project-type" style={{ fontSize: 12, fontWeight: 650, color: '#d6d3d1', whiteSpace: 'nowrap' }}>{t(`type.${plan.projectType || 'omakotitalo'}.name`)}</span>
         <span style={{ flex: 1 }} />
+        <GearButton label={t('file.projectSettings')} onClick={onHouse} />
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 8, background: '#1c212b' }}>
           <button type="button" data-testid="view-floor-2d" style={modeTab(mode === 'plan')} onClick={() => onMode('plan')}>{t('mode.plan')}</button>
           <button type="button" data-testid="view-site" disabled={access && !access.workspaces.includes('piha')} style={modeTab(mode === 'site')} onClick={() => { if (!access || access.workspaces.includes('piha')) onMode('site') }}>{t('view.site')}</button>
           <button type="button" data-testid="view-floor-3d" style={modeTab(mode === '3d')} onClick={() => onMode('3d')}>3D</button>
           <button type="button" data-testid="view-facade" style={modeTab(mode === 'facade')} onClick={() => onMode('facade')}>{t('view.facade')}</button>
-        </div>
-        <div style={{ display: 'flex', gap: 2 }}>
-          <button type="button" style={modeTab(plan.paper !== 'a4')} onClick={() => onPaper('a3')}>A3</button>
-          <button type="button" style={modeTab(plan.paper === 'a4')} onClick={() => onPaper('a4')}>A4</button>
         </div>
         <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
       </header>
@@ -369,11 +344,12 @@ export function PlanChrome({
           <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), textDecoration: 'none' }}>{t('workspace.cold')}</a>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 32, padding: '0 6px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
+      <div data-testid="menu-bar" style={{ display: 'flex', alignItems: 'center', gap: 2, height: 32, padding: '0 6px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
         <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="plan-new" style={menuItem(false)} onClick={() => { close(); onNew() }}>{t('file.new')}</button>
           <button type="button" data-testid="plan-open" style={menuItem(false)} onClick={() => { close(); onOpen() }}>{t('file.open')}</button>
-          <button type="button" data-testid="house-settings" style={menuItem(panel === 'house')} onClick={() => { close(); onHouse() }}>{t('file.house')}</button>
+          <button type="button" data-testid="project-info" style={menuItem(false)} onClick={() => { close(); onProjectInfo?.() }}>{t('file.projectInfo')}</button>
+          <button type="button" data-testid="house-settings" style={menuItem(panel === 'house')} onClick={() => { close(); onHouse() }}>{t('file.projectSettings')}</button>
           <button type="button" data-testid="example-house" style={menuItem(false)} onClick={() => { close(); onExample() }}>{t('file.example')}</button>
           <button type="button" data-testid="family-house" style={menuItem(false)} onClick={() => { close(); onFamily() }}>{t('file.apartment')}</button>
         </Menu>
@@ -386,9 +362,6 @@ export function PlanChrome({
         </Menu>
         <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="open-display" style={menuItem(false)} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
-          <button type="button" data-testid="toolbar-preset-plain" title={`${t('preset.plain')} (Alt+1)`} style={menuItem(display.preset === 'plain')} onClick={() => { close(); onPreset('plain') }}>{t('preset.plain')}</button>
-          <button type="button" data-testid="toolbar-preset-measure" title={`${t('preset.measure')} (Alt+2)`} style={menuItem(display.preset === 'measure')} onClick={() => { close(); onPreset('measure') }}>{t('preset.measure')}</button>
-          <button type="button" data-testid="toolbar-preset-all" title={`${t('preset.all')} (Alt+3)`} style={menuItem(display.preset === 'all')} onClick={() => { close(); onPreset('all') }}>{t('preset.all')}</button>
           {!onSheet && snapTools}
           {!onSheet && zoomTools}
         </Menu>
@@ -411,10 +384,6 @@ export function PlanChrome({
             {placeables.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
           {drawing && <button type="button" data-testid="service-finish" style={menuItem(false)} onClick={() => { close(); onFinish() }}>{t('cad.done')}</button>}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 8px' }}>
-            <input data-testid="floor-heating" type="checkbox" checked={floorHeating} onChange={(event) => onFloorHeating(event.target.checked)} />
-            {t('heat.floorOn')}
-          </label>
           <button type="button" data-testid="route-services" style={menuItem(false)} onClick={() => { close(); onRoute() }}>{t('route.auto')}</button>
           {svcSystem === 'electric' && (
             <>
@@ -457,14 +426,6 @@ export function PlanChrome({
             {workspace === 'rakenne' && (onPlan || mode === '3d') && (
               <Group>
                 {drawTools(toolStyle)}
-                {tool === 'door' && (
-                  <DoorPlaceControls
-                    compact
-                    t={t}
-                    value={doorHand}
-                    onChange={(next) => onDoorHand?.(next)}
-                  />
-                )}
               </Group>
             )}
             {workspace === 'kalusteet' && (
@@ -529,6 +490,17 @@ function workspaceTab(active) {
     cursor: 'pointer',
     boxShadow: active ? 'inset 0 -2px 0 #99f6e4' : 'none',
   }
+}
+
+function GearButton({ label, onClick, compact = false }) {
+  return (
+    <button type="button" data-testid="open-project-settings" aria-label={label} title={label} onClick={onClick} style={{ width: compact ? 44 : 28, height: compact ? 44 : 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: '1px solid #57534e', background: 'transparent', color: '#e7e5e4', cursor: 'pointer', flexShrink: 0, padding: 0 }}>
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4">
+        <circle cx="8" cy="8" r="2.1" />
+        <path d="M8 1.5v1.7M8 12.8v1.7M1.5 8h1.7M12.8 8h1.7M3.3 3.3l1.2 1.2M11.5 11.5l1.2 1.2M12.7 3.3l-1.2 1.2M4.5 11.5l-1.2 1.2" />
+      </svg>
+    </button>
+  )
 }
 
 function modeTab(active) {

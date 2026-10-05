@@ -1724,7 +1724,7 @@ export default function PlanView({
         <div style={{ width: 22, height: 22, border: '1.5px solid #44403c', borderRadius: 11, position: 'relative' }}>
           <div style={{ position: 'absolute', left: 10, top: 2, width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: '7px solid #0f766e' }} />
         </div>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#44403c' }}>POHJOINEN</span>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#44403c' }}>{t('north.label').toUpperCase()}</span>
       </div>
       {notice && (
         <div style={{ position: 'absolute', left: 14, top: 44, maxWidth: 420, padding: '6px 10px', background: 'rgba(255,251,235,0.95)', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#78350f' }}>
@@ -1740,7 +1740,7 @@ export default function PlanView({
           <div style={{ marginTop: 2 }}>{formatLength(bar, unitSystem)}</div>
         </div>
         <div style={{ textAlign: 'center', maxWidth: 520 }}>{hint}</div>
-        <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+        <div data-testid="cursor-card" style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', background: 'rgba(255,255,255,0.92)', border: '1px solid #e7e5e4', borderRadius: 8, padding: '4px 8px' }}>
           {cursor ? `X ${formatLength(cursor.x, unitSystem)}   Y ${formatLength(cursor.z, unitSystem)}` : 'X —   Y —'}
           {cursor?.kind ? ` · ${snapLabel(cursor.kind)}` : ''}
         </div>
