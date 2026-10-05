@@ -197,6 +197,8 @@ import {
   wallShiftMetres,
 } from '@/lib/tracking'
 import { WORKSPACES, applyWorkspaceSwitch, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
+import { applyProjectType, hasHouseElements, isColdProject, stripHouseElements } from '@/lib/projectMode'
+import ColdWorkspace from './ColdWorkspace'
 import { FIT_CAMERA, fitRect, panBy, pinchZoom, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 import { touchAction } from '@/lib/touch'
 import { useViewport } from '@/components/useViewport'
@@ -1022,6 +1024,7 @@ export default function FloorPlanApp() {
   const [poly, setPoly] = useState([])
   const [partitions, setPartitions] = useState(true)
   const [view, setView] = useState('2d')
+  const [typeAsk, setTypeAsk] = useState(false)
   const [facadeSideId, setFacadeSideId] = useState('north')
   const [svcSystem, setSvcSystem] = useState('iv')
   const [svcKind, setSvcKind] = useState('valve-tulo')
@@ -3170,6 +3173,40 @@ export default function FloorPlanApp() {
 
   const px = (metres) => metres * layout.scale * k
 
+  const onProjectType = (id) => {
+    const current = planRef.current
+    const currentId = current.projectType || 'omakotitalo'
+    if (!id || id === currentId) return
+    if (id === 'kylmio' && hasHouseElements(current)) {
+      setTypeAsk(true)
+      return
+    }
+    setTypeAsk(false)
+    setView('2d')
+    setSheetMode('plan')
+    setWorkspace('rakenne')
+    commit(applyProjectType(current, id))
+  }
+  const confirmColdType = (remove) => {
+    const current = planRef.current
+    const base = remove ? stripHouseElements(current) : current
+    setView('2d')
+    setSheetMode('plan')
+    setWorkspace('rakenne')
+    commit(applyProjectType(base, 'kylmio'))
+    setTypeAsk(false)
+  }
+
+  if (isColdProject(plan)) {
+    return (
+      <ColdWorkspace
+        plan={plan}
+        onProjectType={onProjectType}
+        onName={(name) => setPlan((current) => (current.name === name ? current : { ...current, name }))}
+      />
+    )
+  }
+
   if (access.admin || !access.draw) {
     return (
       <div data-testid="draw-blocked" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', color: '#0f172a' }}>
@@ -3182,7 +3219,22 @@ export default function FloorPlanApp() {
   }
 
   return (
-    <div className="plan-app" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
+    <div data-testid="house-workspace" data-project-type={plan.projectType || 'omakotitalo'} className="plan-app" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }} onPointerDown={() => setMenu(null)}>
+      {typeAsk && (
+        <div data-testid="house-hide-ask" role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(28,25,23,0.45)', display: 'grid', placeItems: 'center', padding: 24 }}>
+          <div style={{ width: 440, maxWidth: '100%', background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 16px 40px rgba(0,0,0,0.2)' }}>
+            <div style={{ fontSize: 18, fontWeight: 750, marginBottom: 8 }}>Talon osat piilotetaan</div>
+            <p style={{ margin: 0, fontSize: 14, color: '#44403c', lineHeight: 1.45 }}>
+              Hankkeessa on talon pohjakuvaa, kalusteita, pihaa tai talotekniikkaa. Kylmiötilassa ne piilotetaan. Piirustukset säilyvät, ellet valitse poistoa.
+            </p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+              <button type="button" data-testid="house-hide-keep" onClick={() => confirmColdType(false)} style={{ height: 36, padding: '0 12px', borderRadius: 8, border: 'none', background: '#0f766e', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>Piilota</button>
+              <button type="button" data-testid="house-hide-remove" onClick={() => confirmColdType(true)} style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid #b91c1c', background: '#fff', color: '#b91c1c', fontWeight: 700, cursor: 'pointer' }}>Poista talon osat</button>
+              <button type="button" data-testid="house-hide-cancel" onClick={() => setTypeAsk(false)} style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid #d6d3d1', background: '#fff', color: '#1c1917', fontWeight: 650, cursor: 'pointer' }}>Peruuta</button>
+            </div>
+          </div>
+        </div>
+      )}
       {access.pending && (
         <div data-testid="order-thanks" style={{ background: '#f0fdf4', color: '#166534', textAlign: 'center', padding: '8px 12px', fontWeight: 650 }}>
           {t('price.thanks')}
@@ -3344,6 +3396,7 @@ export default function FloorPlanApp() {
         }}
         workspace={workspace}
         access={access}
+        onProjectType={onProjectType}
         onWorkspace={(id) => {
           if (!access.workspaces.includes(id)) return
           const nextPlan = applyWorkspaceSwitch(plan, id)
