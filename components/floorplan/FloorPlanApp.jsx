@@ -257,16 +257,59 @@ function DeviceMark({ item }) {
   )
 }
 
-function DrawCursor({ x, y, step, field, showInput, lengthValue, angleValue, lengthRef, angleRef, onLength, onAngle, onCommit, onSwitch, onCancel, onUndo }) {
+function cardClearsSegment(left, top, cardW, cardH, ax, ay, bx, by, pad) {
+  if (ax == null || ay == null || bx == null || by == null) return true
+  const steps = 24
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps
+    const px = ax + (bx - ax) * t
+    const py = ay + (by - ay) * t
+    if (px >= left - pad && px <= left + cardW + pad && py >= top - pad && py <= top + cardH + pad) return false
+  }
+  return true
+}
+
+function DrawCursor({ x, y, frameW, frameH, ax, ay, bx, by, clearance, step, field, showInput, lengthValue, angleValue, lengthRef, angleRef, onLength, onAngle, onCommit, onSwitch, onCancel, onUndo }) {
+  const cardW = 268
+  const lines = Math.max(1, Math.ceil(String(step || '').length / 34))
+  const cardH = 14 + lines * 17 + (showInput ? 54 : 0)
+  const maxL = Math.max(8, (frameW || 800) - cardW - 8)
+  const maxT = Math.max(8, (frameH || 600) - cardH - 8)
+  const clamp = (left, top) => ({
+    left: Math.min(Math.max(8, left), maxL),
+    top: Math.min(Math.max(8, top), maxT),
+  })
+  const spots = showInput ? [
+    [x + 28, y + 28],
+    [x - cardW - 28, y + 28],
+    [x + 28, y - cardH - 28],
+    [x - cardW - 28, y - cardH - 28],
+    [x - cardW / 2, y + 36],
+    [x - cardW / 2, y - cardH - 36],
+    [8, 8],
+    [maxL, 8],
+  ] : [[x + 18, y + 18]]
+  let placed = clamp(spots[0][0], spots[0][1])
+  const pad = Math.max(12, clearance || 16)
+  for (const [left, top] of spots) {
+    const next = clamp(left, top)
+    if (cardClearsSegment(next.left, next.top, cardW, cardH, ax, ay, bx, by, pad)) {
+      placed = next
+      break
+    }
+  }
+  const { left, top } = placed
   const box = {
-    width: 84,
-    padding: '4px 6px',
+    width: 92,
+    height: 28,
+    padding: '2px 6px',
     borderRadius: 6,
-    border: '1px solid #0f766e',
+    border: '1px solid #d6d3d1',
     fontSize: 16,
     fontWeight: 700,
     color: '#134e4a',
     background: '#fff',
+    boxSizing: 'border-box',
   }
   const onKey = (event) => {
     if (event.key === 'Enter') {
@@ -292,15 +335,30 @@ function DrawCursor({ x, y, step, field, showInput, lengthValue, angleValue, len
     }
   }
   return (
-    <div data-testid="draw-hud" style={{ position: 'absolute', left: x, top: y, zIndex: 6, transform: 'translate(18px, 18px)', pointerEvents: 'none', maxWidth: 280 }}>
-      <div data-testid="draw-step" style={{ display: 'inline-block', padding: '3px 8px', borderRadius: 6, background: '#134e4a', color: '#ecfdf5', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>{step}</div>
+    <div
+      data-testid="draw-hud"
+      style={{
+        position: 'absolute',
+        left,
+        top,
+        zIndex: 6,
+        width: cardW,
+        pointerEvents: 'none',
+        padding: '8px 10px',
+        borderRadius: 8,
+        background: '#fff',
+        border: '1px solid #0f766e',
+        boxShadow: '0 8px 18px rgba(28,25,23,0.16)',
+      }}
+    >
+      <div data-testid="draw-step" style={{ fontSize: 12, fontWeight: 700, lineHeight: '17px', color: '#134e4a' }}>{step}</div>
       {showInput && (
-        <div data-testid="wall-draw-input" style={{ display: 'flex', gap: 6, marginTop: 4, pointerEvents: 'auto' }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a' }}>Pituus
-            <input ref={lengthRef} data-testid="draw-cursor-length" inputMode="decimal" value={lengthValue} style={{ ...box, display: 'block', borderColor: field === 'length' ? '#0f766e' : '#d6d3d1' }} onChange={(event) => onLength(event.target.value)} onFocus={(event) => { event.target.select(); onLength(event.target.value) }} onKeyDown={onKey} onPointerDown={(event) => event.stopPropagation()} />
+        <div data-testid="wall-draw-input" style={{ display: 'flex', gap: 8, marginTop: 6, pointerEvents: 'auto' }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a', lineHeight: '14px' }}>Pituus
+            <input ref={lengthRef} data-testid="draw-cursor-length" inputMode="decimal" value={lengthValue} style={{ ...box, display: 'block', marginTop: 2, borderColor: field === 'length' ? '#0f766e' : '#d6d3d1' }} onChange={(event) => onLength(event.target.value)} onFocus={(event) => { event.target.select(); onLength(event.target.value) }} onKeyDown={onKey} onPointerDown={(event) => event.stopPropagation()} />
           </label>
-          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a' }}>Kulma
-            <input ref={angleRef} data-testid="draw-cursor-angle" inputMode="decimal" value={angleValue} style={{ ...box, display: 'block', width: 64, borderColor: field === 'angle' ? '#0f766e' : '#d6d3d1' }} onChange={(event) => onAngle(event.target.value)} onFocus={(event) => { event.target.select(); onAngle(event.target.value) }} onKeyDown={onKey} onPointerDown={(event) => event.stopPropagation()} />
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#134e4a', lineHeight: '14px' }}>Kulma
+            <input ref={angleRef} data-testid="draw-cursor-angle" inputMode="decimal" value={angleValue} style={{ ...box, display: 'block', marginTop: 2, width: 72, borderColor: field === 'angle' ? '#0f766e' : '#d6d3d1' }} onChange={(event) => onAngle(event.target.value)} onFocus={(event) => { event.target.select(); onAngle(event.target.value) }} onKeyDown={onKey} onPointerDown={(event) => event.stopPropagation()} />
           </label>
         </div>
       )}
@@ -375,7 +433,7 @@ function SnapMark({ snap, X, Y, zoom }) {
         {snap.kind !== 'corner' && snap.kind !== 'midpoint' && !onWall && snap.kind !== 'intersection' && (
           <circle r={6} fill="#fff7ed" stroke={accent} strokeWidth={2} />
         )}
-        {label && (
+        {label && snap.kind !== 'angle' && (
           <g data-testid="snap-tooltip" transform="translate(14 -22)">
             <rect x="0" y="-12" width={label.length * 7.2 + 12} height="18" rx="3" fill="#fff" stroke={accent} strokeWidth="2" />
             <text x="6" y="1" fontSize="12" fontWeight="700" fill="#9a3412">{label}</text>
@@ -494,7 +552,7 @@ function cameraForBuilding(plan, mode, viewport) {
   const spanX = (bounds?.maxX || 0) - (bounds?.minX || 0)
   const spanZ = (bounds?.maxZ || 0) - (bounds?.minZ || 0)
   if (!Number.isFinite(spanX) || !Number.isFinite(spanZ) || (spanX < 0.2 && spanZ < 0.2)) return FIT_CAMERA
-  const padM = 0.55
+  const padM = mode === 'site' ? 0.55 : 2.35
   const box = {
     minX: bounds.minX - padM,
     maxX: bounds.maxX + padM,
@@ -510,7 +568,7 @@ function cameraForBuilding(plan, mode, viewport) {
   const top = Math.min(Yb(box.minZ), Yb(box.maxZ))
   const bottom = Math.max(Yb(box.minZ), Yb(box.maxZ))
   if (right - left < 8 || bottom - top < 8) return FIT_CAMERA
-  return fitRect({ left, top, right, bottom }, { w, h }, 28)
+  return fitRect({ left, top, right, bottom }, { w, h }, mode === 'site' ? 28 : 64)
 }
 
 function SheetRoomLabel({ label, X, Y, nameSize, areaSize }) {
@@ -1176,6 +1234,7 @@ export default function FloorPlanApp() {
     lockAngleRef.current = null
     segmentUndo.current = []
     setWallLenEdit(null)
+    setSnapVisual(null)
     trackRef.current = null
     setTrack(null)
     setDimEdit(null)
@@ -2951,6 +3010,46 @@ export default function FloorPlanApp() {
   const drawAlign = alignForReference(wallRefMode, refSide)
   const liveMm = draft && liveEnd ? Math.max(0, Math.round(segmentLength(draft, liveEnd) * 1000)) : 0
   const liveDeg = draft && liveEnd ? wallDirection({ a: draft, b: liveEnd }) : 0
+  useEffect(() => {
+    if (view !== '2d' || !drawingWalls || !draft || !liveEnd) return
+    const viewW = size.w
+    const viewH = size.h
+    if (viewW < 80 || viewH < 80) return
+    const zoom = camera.zoom || 1
+    const ax = camera.x + X(draft.x) * zoom
+    const ay = camera.y + Y(draft.z) * zoom
+    const bx = camera.x + X(liveEnd.x) * zoom
+    const by = camera.y + Y(liveEnd.z) * zoom
+    const edge = 88
+    const availW = Math.max(40, viewW - edge * 2)
+    const availH = Math.max(40, viewH - edge * 2)
+    const spanX = Math.abs(bx - ax)
+    const spanY = Math.abs(by - ay)
+    if (spanX > availW + 8 || spanY > availH + 8) {
+      const factor = Math.min(availW / Math.max(spanX, 1), availH / Math.max(spanY, 1), 0.92)
+      const nextZoom = Math.max(0.2, zoom * factor)
+      if (nextZoom < zoom - 0.01) {
+        setCamera((current) => zoomAt(current, (ax + bx) / 2, (ay + by) / 2, nextZoom / zoom))
+        return
+      }
+    }
+    const minX = Math.min(ax, bx)
+    const maxX = Math.max(ax, bx)
+    const minY = Math.min(ay, by)
+    const maxY = Math.max(ay, by)
+    const inset = edge + 18
+    let dx = 0
+    let dy = 0
+    if (spanX <= availW + 8) {
+      if (minX < edge) dx = inset - minX
+      else if (maxX > viewW - edge) dx = viewW - edge - maxX
+    }
+    if (spanY <= availH + 8) {
+      if (minY < edge) dy = inset - minY
+      else if (maxY > viewH - edge) dy = viewH - edge - maxY
+    }
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) setCamera((current) => panBy(current, dx, dy))
+  }, [view, drawingWalls, draft, liveEnd, size.w, size.h, camera, X, Y])
   trackRef.current = track
   const trackingActive = !draft && !command && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)
   const trackLive = trackingActive && track?.base && cursor
@@ -3504,10 +3603,9 @@ export default function FloorPlanApp() {
                 onCancel={cancelCommand}
               />
             ) : drawingWalls ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
-                <span data-testid="draw-status" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{activeName} · {stepText}</span>
-                <span data-testid="draw-ortho">{angleStep === 0 ? 'Vapaa' : angleStep === 90 ? 'Orto' : `${angleStep}°`}</span>
-                {liveEnd && <span data-testid="draw-readout-status">{formatMm(segmentLength(draft, liveEnd))} mm · {liveDeg}°</span>}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%', overflow: 'hidden' }}>
+                <span data-testid="draw-status" style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{activeName} · {stepText}</span>
+                <span data-testid="draw-ortho" style={{ flex: 'none' }}>{angleStep === 0 ? 'Vapaa' : angleStep === 90 ? 'Orto' : `${angleStep}°`}</span>
                 {[
                   ['outer', 'Ulkopinta', 'wall-ref-outer'],
                   ['center', 'Keskiviiva', 'wall-ref-center'],
@@ -3518,11 +3616,11 @@ export default function FloorPlanApp() {
                     type="button"
                     data-testid={testid}
                     aria-pressed={wallRefMode === id}
-                    style={{ ...statusBtn, background: wallRefMode === id ? '#134e4a' : '#fff', color: wallRefMode === id ? '#ecfdf5' : '#1c1917' }}
+                    style={{ ...statusBtn, flex: 'none', background: wallRefMode === id ? '#134e4a' : '#fff', color: wallRefMode === id ? '#ecfdf5' : '#1c1917' }}
                     onClick={() => setWallRefMode(id)}
                   >{label}</button>
                 ))}
-                <button type="button" data-testid="wall-ref-flip" style={statusBtn} onClick={() => setRefSide((side) => (side === 'left' ? 'right' : 'left'))}>Vaihda puoli</button>
+                <button type="button" data-testid="wall-ref-flip" style={{ ...statusBtn, flex: 'none' }} onClick={() => setRefSide((side) => (side === 'left' ? 'right' : 'left'))}>Vaihda puoli</button>
               </span>
             ) : (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -3563,10 +3661,17 @@ export default function FloorPlanApp() {
             />
           ) : view === '2d' ? (
             <div ref={hostRef} data-testid="plan-canvas-frame" data-active={engaged ? 'place' : 'select'} style={{ flex: 1, minHeight: 0, background: '#d6d3d1', position: 'relative', ...placeFrame(engaged) }}>
-              {drawingWalls && pointerPx && (
+              {drawingWalls && (
                 <DrawCursor
-                  x={Math.min(Math.max(pointerPx.x, 8), Math.max(8, (size.w || 800) - 220))}
-                  y={Math.min(Math.max(pointerPx.y, 8), Math.max(8, (size.h || 600) - 120))}
+                  x={pointerPx?.x ?? Math.min(120, Math.max(24, (size.w || 800) * 0.28))}
+                  y={pointerPx?.y ?? Math.min(96, Math.max(24, (size.h || 600) * 0.22))}
+                  frameW={size.w}
+                  frameH={size.h}
+                  ax={draft && liveEnd ? camera.x + X(draft.x) * (camera.zoom || 1) : null}
+                  ay={draft && liveEnd ? camera.y + Y(draft.z) * (camera.zoom || 1) : null}
+                  bx={draft && liveEnd ? camera.x + X(liveEnd.x) * (camera.zoom || 1) : null}
+                  by={draft && liveEnd ? camera.y + Y(liveEnd.z) * (camera.zoom || 1) : null}
+                  clearance={14 + (0.28 * ppm2d) / 2}
                   field={drawField}
                   step={stepText}
                   showInput={Boolean(draft)}
@@ -3632,11 +3737,11 @@ export default function FloorPlanApp() {
                     }
                   }}
                   onPointerDown={(event) => event.stopPropagation()}
-                  style={{ position: 'fixed', left: wallLenEdit.x, top: wallLenEdit.y, zIndex: 30, width: 96, padding: '4px 6px', fontSize: 16, fontWeight: 700, border: '2px solid #0f766e', borderRadius: 6 }}
+                  style={{ position: 'absolute', left: wallLenEdit.x, top: wallLenEdit.y, zIndex: 30, width: 96, height: 32, padding: '2px 8px', fontSize: 16, fontWeight: 700, color: '#134e4a', background: '#fff', border: '2px solid #0f766e', borderRadius: 6, boxShadow: '0 8px 18px rgba(28,25,23,0.18)' }}
                 />
               )}
-              <ModeChip workspace={workspaceName} name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />
-              <PlaceToast text={toast} />
+              {!drawingWalls && !wallLenEdit && <ModeChip workspace={workspaceName} name={activeName} repeat={repeatPlace && placingOne} drawing={drawingTool} />}
+              {!wallLenEdit && <PlaceToast text={toast} />}
               <svg
                 ref={svgRef}
                 data-testid="floor-plan-svg"
@@ -3862,11 +3967,22 @@ export default function FloorPlanApp() {
                           onEdit={tool === 'select' ? (item, event) => {
                             const wall = (plan.walls || []).find((entry) => entry.id === item.wallId)
                             if (!wall) return
+                            const frame = hostRef.current?.getBoundingClientRect()
+                            const width = 96
+                            const height = 32
+                            let x = event.clientX
+                            let y = event.clientY
+                            if (frame) {
+                              x = event.clientX - frame.left - width / 2
+                              y = event.clientY - frame.top - height / 2
+                              x = Math.min(Math.max(8, x), Math.max(8, frame.width - width - 8))
+                              y = Math.min(Math.max(8, y), Math.max(8, frame.height - height - 8))
+                            }
                             setWallLenEdit({
                               dim: item,
                               value: String(item.label || Math.round(segmentLength(wall.a, wall.b) * 1000)),
-                              x: event.clientX,
-                              y: event.clientY - 10,
+                              x,
+                              y,
                             })
                           } : null}
                         />
@@ -3951,11 +4067,6 @@ export default function FloorPlanApp() {
                       strokeWidth={1.6 / (camera.zoom || 1)}
                       strokeDasharray={`${7 / (camera.zoom || 1)} ${4 / (camera.zoom || 1)}`}
                     />
-                    <g data-testid="draw-readout" data-length={String(liveMm)} data-angle={String(liveDeg)} transform={`translate(${X((draft.x + liveEnd.x) / 2)} ${Y((draft.z + liveEnd.z) / 2)}) scale(${1 / (camera.zoom || 1)})`}>
-                      <rect x="-58" y="-30" width="116" height="36" rx="4" fill="#fbfaf7" stroke="#0f766e" />
-                      <text x="0" y="-14" textAnchor="middle" fontSize="13" fontWeight={700} fill="#134e4a">{formatMm(liveLength)} mm</text>
-                      <text x="0" y="2" textAnchor="middle" fontSize="12" fontWeight={700} fill="#0f766e">{liveDeg}°</text>
-                    </g>
                   </g>
                 )}
                 {chainStart && draft && drawingWalls && (
@@ -4175,8 +4286,8 @@ export default function FloorPlanApp() {
                     <SheetRoomLabel label={label} X={X} Y={Y} nameSize={paperFont(k, camera.zoom || 1, 3.5)} areaSize={paperFont(k, camera.zoom || 1, 2.5)} />
                   </g>
                 ))}
-                {plan.walls.length === 0 && (
-                  <text x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">{t('sheet.empty')}</text>
+                {plan.walls.length === 0 && !engaged && (
+                  <text data-testid="sheet-empty" x={sheet.x + sheet.w / 2} y={sheet.y + sheet.h / 2} textAnchor="middle" fontSize={15} fill="#78716c">{t('sheet.empty')}</text>
                 )}
                 {marquee && (
                   <rect
@@ -4204,7 +4315,7 @@ export default function FloorPlanApp() {
                     strokeDasharray="8 4"
                   />
                 )}
-                <SnapMark snap={snapVisual} X={X} Y={Y} zoom={camera.zoom} />
+                <SnapMark snap={tool === 'select' && !placing && !yardTool ? null : snapVisual} X={X} Y={Y} zoom={camera.zoom} />
                 {track?.base && !draft && (
                   <g data-testid="track-base" style={{ pointerEvents: 'none' }}>
                     <circle cx={X(track.base.x)} cy={Y(track.base.z)} r={8 / (camera.zoom || 1)} fill="#fff" stroke="#0f766e" strokeWidth={2 / (camera.zoom || 1)} />
