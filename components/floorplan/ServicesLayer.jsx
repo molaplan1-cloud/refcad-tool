@@ -173,19 +173,34 @@ const RUN_SHIFT = { drain: -0.22, water: -0.08, electric: 0.08, iv: 0.22 }
 function shiftPoints(points, system, multi, kind) {
   const base = points || []
   const kindShift = system === 'water' && kind === 'hot' ? 0.16 : system === 'water' && kind === 'circ' ? 0.32 : 0
-  const shifted = kindShift ? base.map((point) => ({ ...point, x: point.x + kindShift, z: point.z + kindShift })) : base
+  const shifted = kindShift ? base.map((point) => ({ ...point, x: point.x + kindShift, z: point.z + kindShift })) : base.map((point) => ({ ...point }))
   if (!multi || shifted.length < 2) return shifted
   const dist = RUN_SHIFT[system] || 0
   if (!dist) return shifted
+  const segDir = []
+  for (let i = 1; i < shifted.length; i += 1) {
+    const dx = shifted[i].x - shifted[i - 1].x
+    const dz = shifted[i].z - shifted[i - 1].z
+    const len = Math.hypot(dx, dz)
+    segDir.push(len > 0.05 ? { x: dx / len, z: dz / len } : null)
+  }
+  const offset = new Array(shifted.length).fill(null)
+  segDir.forEach((dir, index) => {
+    if (!dir) return
+    if (!offset[index]) offset[index] = dir
+    if (!offset[index + 1]) offset[index + 1] = dir
+  })
+  segDir.forEach((dir, index) => {
+    if (dir) return
+    const shared = offset[index] || offset[index + 1]
+    if (!shared) return
+    offset[index] = shared
+    offset[index + 1] = shared
+  })
   return shifted.map((point, index) => {
-    const prev = shifted[Math.max(0, index - 1)]
-    const next = shifted[Math.min(shifted.length - 1, index + 1)]
-    let dx = next.x - prev.x
-    let dz = next.z - prev.z
-    const len = Math.hypot(dx, dz) || 1
-    dx /= len
-    dz /= len
-    return { x: point.x - dz * dist, z: point.z + dx * dist }
+    const dir = offset[index]
+    if (!dir) return point
+    return { ...point, x: point.x - dir.z * dist, z: point.z + dir.x * dist }
   })
 }
 
@@ -862,9 +877,11 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
             {points.map((point, index) => {
               if (!index) return null
               const prev = points[index - 1]
-              const vertical = Math.hypot(point.x - prev.x, point.z - prev.z) < 0.05 && Math.abs((point.y || 0) - (prev.y || 0)) > 0.08
+              const src = (run.points || [])[index] || point
+              const srcPrev = (run.points || [])[index - 1] || prev
+              const vertical = Math.hypot(src.x - srcPrev.x, src.z - srcPrev.z) < 0.05 && Math.abs((src.y || 0) - (srcPrev.y || 0)) > 0.08
               if (!vertical) return null
-              const up = (point.y || 0) > (prev.y || 0)
+              const up = (src.y || 0) > (srcPrev.y || 0)
               return (
                 <g key={`riser-${run.id}-${index}`} data-testid="route-riser" style={{ pointerEvents: 'none' }}>
                   <circle cx={X(point.x)} cy={Y(point.z)} r={run.system === 'electric' ? 1.5 * unit : 5.5} fill="#fff" stroke={color} strokeWidth={run.system === 'electric' ? 0.25 * unit : 1.6} />

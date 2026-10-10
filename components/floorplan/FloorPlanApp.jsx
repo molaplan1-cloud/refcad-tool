@@ -3446,7 +3446,9 @@ export default function FloorPlanApp() {
           if (notes.length) showToast(notes.join(' · '))
           else if (changed) showToast(t('toast.routesUpdated'))
           else showToast(t('service.upToDate'))
-          if (changed) commit(syncYardServices(clean))
+          // autoRoute already joined the devices in this workspace. Yard sync
+          // would rewire every system and draw cables the user did not ask for.
+          if (changed) commit(clean)
           setSvcPoints([])
         }}
         workspace={workspace}
