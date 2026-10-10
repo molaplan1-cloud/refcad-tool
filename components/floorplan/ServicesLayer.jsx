@@ -527,11 +527,16 @@ function siteRun(plan, run) {
   return (run.points || []).some((point) => !insideHouse(plan, point.x, point.z))
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null, legendSystems = null, zoom = 1, camera = null, viewport = null, roomLabels = [], dimensions = [] }) {
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null, revealSystems = null, legendSystems = null, zoom = 1, camera = null, viewport = null, roomLabels = [], dimensions = [] }) {
   const { t } = usePlanLocale(plan)
   const services = ensureServices(plan)
-  const visibleRuns = services.runs.filter((run) => serviceItemVisible(plan, run) && (!siteMode || siteRun(plan, run)))
-  const visibleNodes = services.nodes.filter((node) => serviceItemVisible(plan, node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
+  const revealed = (item) => {
+    if (!item || item.hidden) return false
+    if (Array.isArray(revealSystems) && revealSystems.includes(item.system)) return true
+    return serviceItemVisible(plan, item)
+  }
+  const visibleRuns = services.runs.filter((run) => revealed(run) && (!siteMode || siteRun(plan, run)))
+  const visibleNodes = services.nodes.filter((node) => revealed(node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
   const manifold = visibleNodes.find((node) => node.system === 'heat' && node.kind === 'floor-manifold')
   const loopCount = services.runs.filter((run) => run.system === 'heat' && (run.kind === 'floorheat' || run.role === 'loop')).length
   const drawnNodes = visibleNodes.filter((node) => {
@@ -549,7 +554,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     .map((item) => ({ ...item.run, points: item.points })))
   const legend = SERVICE_SYSTEMS.filter((item) => (
     (!Array.isArray(legendSystems) || legendSystems.includes(item.id))
-    && layerVisible(plan, item.id)
+    && (layerVisible(plan, item.id) || (Array.isArray(revealSystems) && revealSystems.includes(item.id)))
     && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))
   )).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
   const live = (system) => !Array.isArray(activeSystems) || activeSystems.includes(system)

@@ -1875,6 +1875,8 @@ export default function HouseScene({
   onServiceDrag,
   onDropFixture,
   activeSystems = null,
+  revealSystems = null,
+  showFixtures = null,
   dimFixtures = false,
 }) {
   const controlsRef = useRef(null)
@@ -1886,6 +1888,8 @@ export default function HouseScene({
   const focusX = site ? (box.minX + box.maxX) / 2 : cx
   const focusZ = site ? (box.minZ + box.maxZ) / 2 : cz
   const span = Math.max(box.maxX - box.minX, box.maxZ - box.minZ, 8)
+  const systemShown = (id) => (Array.isArray(revealSystems) && revealSystems.includes(id)) || layerVisible(plan, id)
+  const fixturesOn = showFixtures == null ? normalizeDisplay(plan.display).fixtures : Boolean(showFixtures)
   const cameraPosition = site
     ? [focusX + span * 0.46, span * 0.58, focusZ + span * 0.62]
     : [cx, span, cz + span]
@@ -1918,17 +1922,17 @@ export default function HouseScene({
         color="#efe8d8"
         holes={sunkenTerraceRings(plan)}
         basic
-        transparent={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground')}
-        opacity={yardHasUnderground(plan.yard) && layerVisible(plan, 'ground') ? 0.35 : 1}
-        depthWrite={!(yardHasUnderground(plan.yard) && layerVisible(plan, 'ground'))}
+        transparent={yardHasUnderground(plan.yard) && systemShown('ground')}
+        opacity={yardHasUnderground(plan.yard) && systemShown('ground') ? 0.35 : 1}
+        depthWrite={!(yardHasUnderground(plan.yard) && systemShown('ground'))}
       />
       <YardScene plan={plan} selected={selected} />
       <gridHelper args={[Math.max(24, span * 2.2), Math.round(Math.max(24, span * 2.2) / (drawMode ? 0.5 : 1)), '#b7b1a4', '#e4e0d8']} position={[cx, 0, cz]} />
       {visibleRooms(plan).map((room) => {
         const runs = plan.services?.runs || []
-        const drainOn = layerVisible(plan, 'drain') && runs.some((run) => run.system === 'drain')
-        const heatOn = layerVisible(plan, 'heat') && runs.some((run) => run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor' || run.kind === 'ceiling' || run.role === 'feeder' || run.role === 'loop'))
-        const buried = layerVisible(plan, 'ground') && runs.some((run) => run.kind === 'collector' || String(run.linkedFrom || '').startsWith('yard:waste:') || String(run.linkedFrom || '').startsWith('yard:ground:'))
+        const drainOn = systemShown('drain') && runs.some((run) => run.system === 'drain')
+        const heatOn = systemShown('heat') && runs.some((run) => run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor' || run.kind === 'ceiling' || run.role === 'feeder' || run.role === 'loop'))
+        const buried = systemShown('ground') && runs.some((run) => run.kind === 'collector' || String(run.linkedFrom || '').startsWith('yard:waste:') || String(run.linkedFrom || '').startsWith('yard:ground:'))
         return (
           <FloorMesh
             key={room.id}
@@ -1946,10 +1950,10 @@ export default function HouseScene({
       ))}
       <RoofMesh plan={plan} mode={roofMode} selected={selected} hovered={hovered} />
       {wallMode !== 'hidden' && <Dressing plan={plan} />}
-      {normalizeDisplay(plan.display).fixtures && (plan.fixtures || []).map((fixture) => (
+      {fixturesOn && (plan.fixtures || []).filter((fixture) => !fixture.hidden).map((fixture) => (
         <FixtureMesh key={fixture.id} plan={plan} fixture={fixture} selected={selected} hovered={hovered} dim={dimFixtures} />
       ))}
-      <Services3D plan={plan} selected={selected} hovered={hovered} activeSystems={activeSystems} />
+      <Services3D plan={plan} selected={selected} hovered={hovered} activeSystems={activeSystems} revealSystems={revealSystems} />
       <CursorMode drawMode={drawMode} />
       {drawMode && cursor && <FloorCursor point={cursor} ppm={cursorPpm} kind={snapKind} />}
       {drawMode && placeGhost && cursor && (
