@@ -167,9 +167,12 @@ import {
   layerVisible,
   roomKind,
   removeAutoAdded,
+  rotateServiceNode,
+  snapDeviceToWall,
   snapServicePoint,
   updateServiceNode,
 } from '@/lib/services'
+import { deviceEnvelope, isWallDevice } from '@/lib/wallDevices'
 import { normalizeHeating } from '@/lib/hydronic'
 import {
   CURRENT_KEY,
@@ -1780,8 +1783,13 @@ export default function FloorPlanApp() {
     }
     if (dragNode.current && Math.hypot(world.x - dragNode.current.origin.x, world.z - dragNode.current.origin.z) > 0.02) {
       dragNode.current.moved = true
-      const snapped = altRef.current ? world : snapServicePoint(world, plan, { grid: gridStep, mode: 'free' })
-      setPlan((current) => updateServiceNode(current, dragNode.current.id, { x: snapped.x, z: snapped.z }))
+      const node = ensureServices(plan).nodes.find((item) => item.id === dragNode.current.id)
+      const seated = !altRef.current && isWallDevice(node?.kind) ? snapDeviceToWall(world, plan, node) : null
+      const snapped = seated || (altRef.current ? world : snapServicePoint(world, plan, { grid: gridStep, mode: 'free' }))
+      const patch = seated
+        ? { x: seated.x, z: seated.z, y: seated.y, rotation: seated.rotation, wallId: seated.wallId, face: seated.face, mount: seated.mount, width: seated.width, depth: seated.depth, height: seated.height }
+        : { x: snapped.x, z: snapped.z, wallId: null, face: null }
+      setPlan((current) => updateServiceNode(current, dragNode.current.id, patch))
     }
   }
 
@@ -2025,7 +2033,8 @@ export default function FloorPlanApp() {
     }
     if (svcTool) {
       const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES[0]
-      const snapped = snapServicePoint(world, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system })
+      const seated = isWallDevice(spec.kind) && !altRef.current ? snapDeviceToWall(world, plan, spec) : null
+      const snapped = seated || snapServicePoint(world, plan, { mode: spec.wall && !seated ? 'wall' : 'free', system: spec.system })
       if (svcTool === 'node') {
         const node = {
           system: spec.system,
@@ -2038,6 +2047,16 @@ export default function FloorPlanApp() {
           pointType: spec.pointType,
           x: snapped.x,
           z: snapped.z,
+          ...(seated ? {
+            y: seated.y,
+            rotation: seated.rotation,
+            wallId: seated.wallId,
+            face: seated.face,
+            mount: seated.mount,
+            width: seated.width,
+            depth: seated.depth,
+            height: seated.height,
+          } : {}),
         }
         const result = placeServiceNode(plan, node, stamp, lastPlace.current)
         if (!result.placed) {
@@ -2675,6 +2694,9 @@ export default function FloorPlanApp() {
         commit(rotateYardItem(plan, pick.collection, pick.id))
       } else if ((event.key === 'r' || event.key === 'R') && selectedFixture) {
         commit(rotateFixture(plan, selectedFixture))
+      } else if ((event.key === 'r' || event.key === 'R') && pick?.kind === 'service' && pick.service?.target === 'node') {
+        event.preventDefault()
+        commit(rotateServiceNode(plan, pick.service.id))
       } else if (event.altKey && !event.ctrlKey && !event.metaKey && ['1', '2', '3'].includes(event.key)) {
         event.preventDefault()
         const preset = event.key === '1' ? 'plain' : event.key === '2' ? 'measure' : 'all'
@@ -2842,8 +2864,13 @@ export default function FloorPlanApp() {
         if (!dragBefore.current) dragBefore.current = plan
         return
       }
-      const snapped = snapServicePoint(spot, plan, { grid: gridStep, mode: 'free' })
-      setPlan((current) => updateServiceNode(current, service.id, { x: snapped.x, z: snapped.z }))
+      const node = ensureServices(plan).nodes.find((item) => item.id === service.id)
+      const seated = !altRef.current && isWallDevice(node?.kind) ? snapDeviceToWall(spot, plan, node) : null
+      const snapped = seated || snapServicePoint(spot, plan, { grid: gridStep, mode: 'free' })
+      const patch = seated
+        ? { x: seated.x, z: seated.z, y: seated.y, rotation: seated.rotation, wallId: seated.wallId, face: seated.face, mount: seated.mount, width: seated.width, depth: seated.depth, height: seated.height }
+        : { x: snapped.x, z: snapped.z, wallId: null, face: null }
+      setPlan((current) => updateServiceNode(current, service.id, patch))
       choose({ kind: 'service', service: { target: 'node', id: service.id, system: service.system } })
       if (phase === 'end') {
         if (dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
@@ -3186,6 +3213,13 @@ export default function FloorPlanApp() {
     : t('status.select')
 
   const px = (metres) => metres * layout.scale * k
+  const servicePreview = svcTool && cursor && spec
+    ? (isWallDevice(spec.kind) && !altDown
+      ? (snapDeviceToWall(cursor, plan, spec) || snapServicePoint(cursor, plan, { mode: 'free', system: spec.system }))
+      : snapServicePoint(cursor, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system }))
+    : null
+  const previewEnvelope = servicePreview && spec?.kind === 'panel' ? deviceEnvelope({ ...spec, ...servicePreview }) : null
+  const ghostPoint = svcTool ? (servicePreview || cursor) : (snapVisual?.point || cursor)
 
   const onProjectType = (id) => {
     const current = planRef.current
@@ -4487,9 +4521,24 @@ export default function FloorPlanApp() {
                     onCancel={() => setDimEdit(null)}
                   />
                 ))}
-                {engaged && cursor && (
-                  <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${X((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).x)} ${Y((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).z)})`}>
-                    <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
+                {engaged && cursor && ghostPoint && (
+                  <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${X(ghostPoint.x)} ${Y(ghostPoint.z)})`}>
+                    {!previewEnvelope && (
+                      <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
+                    )}
+                    {previewEnvelope && (
+                      <g data-testid="panel-ghost" transform={`rotate(${servicePreview?.rotation || 0})`}>
+                        <rect
+                          x={-px(previewEnvelope.width) / 2}
+                          y={-px(previewEnvelope.depth) / 2}
+                          width={px(previewEnvelope.width)}
+                          height={px(previewEnvelope.depth)}
+                          fill="#ffffff"
+                          stroke="#1c1917"
+                          strokeWidth={1.15}
+                        />
+                      </g>
+                    )}
                     {placing && (
                       <g transform={`rotate(${Number(snapVisual?.rotation) || 0})`}>
                         <rect

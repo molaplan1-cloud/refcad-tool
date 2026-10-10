@@ -22,10 +22,13 @@ import {
   runColor,
   serviceLegend,
   serviceObjectTitle,
+  rotateServiceNode,
+  snapDeviceToWall,
   splitServiceRun,
   updateServiceNode,
   updateServiceRun,
 } from '@/lib/services'
+import { deviceEnvelope, isWallDevice } from '@/lib/wallDevices'
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
 import { houseBox } from '@/lib/yard'
 import { CAD_COMMANDS } from '@/lib/cadEdit'
@@ -199,7 +202,7 @@ function SlopeMark({ run, X, Y, show = true, size = 8 }) {
   )
 }
 
-function NodeSymbol({ node, tagSize = 8 }) {
+function NodeSymbol({ node, tagSize = 8, metre = 1 }) {
   const color = nodeColor(node)
   if (node.kind === 'ahu') {
     return (
@@ -272,10 +275,15 @@ function NodeSymbol({ node, tagSize = 8 }) {
   }
   if (node.kind === 'drain-point') return <circle r="3.5" fill="#44403c" />
   if (node.kind === 'panel') {
+    const env = deviceEnvelope(node)
+    const m = metre > 0 ? metre : 1
+    const w = env.width * m
+    const h = env.depth * m
+    const font = Math.min(tagSize, Math.max(2.4, w * 0.28))
     return (
-      <g>
-        <rect x={-11} y={-8} width={22} height={16} fill="#fff" stroke="#1c1917" strokeWidth={1.4} />
-        <text x="0" y="3.5" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">SK</text>
+      <g data-testid="panel-symbol" data-width={env.width} data-depth={env.depth}>
+        <rect x={-w / 2} y={-h / 2} width={w} height={h} fill="#fff" stroke="#1c1917" strokeWidth={1.15} />
+        <text x="0" y="0" textAnchor="middle" dominantBaseline="central" fontSize={font} fontWeight="700" fill="#1c1917">SK</text>
       </g>
     )
   }
@@ -624,8 +632,10 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     if (!live(node.system)) return
     const cx = X(node.x)
     const cy = Y(node.z)
-    const wide = node.kind === 'ahu' ? 40 : node.kind === 'hood' ? 30 : node.kind === 'silencer' ? 26 : 20
-    const tall = node.kind === 'ahu' ? 36 : 22
+    const metre = Math.abs(X((node.x || 0) + 1) - X(node.x || 0)) || 1
+    const env = node.kind === 'panel' ? deviceEnvelope(node) : null
+    const wide = env ? Math.max(8, env.width * metre) : (node.kind === 'ahu' ? 40 : node.kind === 'hood' ? 30 : node.kind === 'silencer' ? 26 : 20)
+    const tall = env ? Math.max(6, env.depth * metre) : (node.kind === 'ahu' ? 36 : 22)
     obstacles.push({ x: cx - wide / 2, y: cy - tall / 2, w: wide, h: tall, kind: 'symbol' })
     if (!node.flow || quietLabels) return
     const place = placeFlowLabel(cx, cy, `${node.flow} l/s`, flowFont, Math.max(wide, tall) / 2 + 3, obstacles)
@@ -844,15 +854,19 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           key={node.id}
           data-testid={`svc-node-${node.kind}`}
           data-service-id={node.id}
+          data-rotation={node.rotation || 0}
+          data-wall={node.wallId || ''}
           transform={`translate(${X(node.x)} ${Y(node.z)})`}
           opacity={live(node.system) ? 1 : 0.22}
           style={{ pointerEvents: interactive && live(node.system) ? 'auto' : 'none' }}
           onContextMenu={(event) => open(event, { target: 'node', id: node.id, system: node.system })}
         >
           {flashId === node.id && <circle data-testid="place-flash" r="16" fill="none" stroke="#ea580c" strokeWidth="2.4" />}
-          {node.kind === 'floor-manifold'
-            ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
-            : <NodeSymbol node={node} tagSize={tagFont} />}
+          <g transform={isWallDevice(node.kind) ? `rotate(${node.rotation || 0})` : undefined}>
+            {node.kind === 'floor-manifold'
+              ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
+              : <NodeSymbol node={node} tagSize={tagFont} metre={Math.abs(X(node.x + 1) - X(node.x)) || 1} />}
+          </g>
           {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
             <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 12} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
           ) : null}
@@ -1128,6 +1142,32 @@ function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
   )
 }
 
+function PanelSizeFields({ node, plan, onCommit }) {
+  const env = deviceEnvelope(node)
+  const seat = (patch) => {
+    const merged = { ...node, ...patch }
+    const nextEnv = deviceEnvelope(merged)
+    const y = Math.round((nextEnv.mount + nextEnv.height / 2) * 1000) / 1000
+    const pose = snapDeviceToWall({ x: node.x, z: node.z }, plan, { ...merged, ...nextEnv, y })
+    onCommit({
+      ...(pose || {}),
+      width: nextEnv.width,
+      depth: nextEnv.depth,
+      height: nextEnv.height,
+      mount: nextEnv.mount,
+      y,
+    })
+  }
+  return (
+    <div data-testid="panel-size">
+      <NumberField testid="panel-width" label="Leveys (mm)" step="10" value={Math.round(env.width * 1000)} onCommit={(mm) => seat({ width: Math.max(50, mm) / 1000 })} />
+      <NumberField testid="panel-depth" label="Syvyys (mm)" step="10" value={Math.round(env.depth * 1000)} onCommit={(mm) => seat({ depth: Math.max(20, mm) / 1000 })} />
+      <NumberField testid="panel-height" label="Korkeus (mm)" step="10" value={Math.round(env.height * 1000)} onCommit={(mm) => seat({ height: Math.max(50, mm) / 1000 })} />
+      <NumberField testid="panel-mount" label="Asennuskorkeus, alareuna (mm)" step="10" value={Math.round(env.mount * 1000)} onCommit={(mm) => seat({ mount: Math.max(0, mm) / 1000 })} />
+    </div>
+  )
+}
+
 export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperties, onRedraw, onCad, docked = false }) {
   if (!menu || menu.kind !== 'service') return null
   const services = ensureServices(plan)
@@ -1201,6 +1241,9 @@ export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperti
             </label>
           </>
         )}
+        {node && isWallDevice(node.kind) && (
+          <CadItem testid="service-rotate" shortcut="R" onClick={() => { write(rotateServiceNode(plan, node.id)); onClose() }}>Kierrä</CadItem>
+        )}
         <CadSep />
         <CadItem testid="service-delete" danger shortcut="Del" onClick={remove}>Poista</CadItem>
       </CadMenu>
@@ -1219,6 +1262,12 @@ export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperti
             Nimi
             <input data-testid="service-name" style={fieldStyle} value={node.name || ''} onChange={(event) => patchNode({ name: event.target.value })} />
           </label>
+          {node.kind === 'panel' && (
+            <PanelSizeFields node={node} plan={plan} onCommit={(patch) => (onCommit || onApply)(updateServiceNode(plan, node.id, patch))} />
+          )}
+          {isWallDevice(node.kind) && (
+            <MenuBtn testid="service-rotate" onClick={() => (onCommit || onApply)(rotateServiceNode(plan, node.id))}>Kierrä</MenuBtn>
+          )}
           {(node.kind === 'valve' || node.kind === 'hood') && (
             <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
               Ilmavirta l/s

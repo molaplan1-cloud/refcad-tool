@@ -2,6 +2,7 @@
 
 import * as THREE from 'three'
 import { ensureServices, pipeRadius, runColor, serviceItemVisible } from '@/lib/services'
+import { deviceEnvelope, isWallDevice } from '@/lib/wallDevices'
 
 function Segment({ a, b, radius, color, pick, mark }) {
   const start = new THREE.Vector3(a.x, a.y || 0, a.z)
@@ -94,12 +95,23 @@ function NodeBody({ node, y, tint }) {
       </mesh>
     )
   }
-  if (node.kind === 'panel') {
+  if (node.kind === 'panel' || (node.system === 'electric' && isWallDevice(node.kind))) {
+    const env = deviceEnvelope(node)
+    const yaw = ((node.rotation || 0) * Math.PI) / 180
+    const body = node.kind === 'panel' ? '#e7e5e4' : '#1c1917'
     return (
-      <mesh position={[node.x, y, node.z]}>
-        <boxGeometry args={[0.42, 0.62, 0.12]} />
-        <meshLambertMaterial color={color('#f8fafc')} />
-      </mesh>
+      <group position={[node.x, y, node.z]} rotation={[0, yaw, 0]}>
+        <mesh>
+          <boxGeometry args={[env.width, env.height, env.depth]} />
+          <meshLambertMaterial color={body} />
+        </mesh>
+        {tint && (
+          <mesh>
+            <boxGeometry args={[env.width + 0.015, env.height + 0.015, env.depth + 0.015]} />
+            <meshBasicMaterial color={tint} wireframe />
+          </mesh>
+        )}
+      </group>
     )
   }
   if (node.kind === 'light') {
@@ -135,7 +147,7 @@ function NodeBody({ node, y, tint }) {
 }
 
 function NodeMesh({ node, selected, hovered }) {
-  const y = node.y || 0
+  const y = Number.isFinite(node.y) ? node.y : 0
   const pick = { kind: 'service', service: { target: 'node', id: node.id, system: node.system } }
   const mark = sameService(selected, node, 'node') ? 'selected' : sameService(hovered, node, 'node') ? 'hover' : null
   const tint = mark === 'selected' ? '#0f766e' : mark === 'hover' ? '#14b8a6' : null
