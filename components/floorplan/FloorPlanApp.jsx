@@ -107,7 +107,7 @@ import { DisplayPanel } from './DisplayPanel'
 import { DoorPlaceControls, FloorMenu, HouseSettings, SelectionPanel, WallToolSettings, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ProjectInfoDialog, ProjectSettingsDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
-import { ServiceDrawing, ServiceMenu } from './ServicesLayer'
+import { ElectricGlyph, ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import { ModeChip, PlaceToast, modeChipText, placeFrame } from '@/components/mode/PlaceMode'
 import { judgePlacement, placeServiceNode, removeStacked, fixtureKey } from '@/lib/placeOnce'
 import { ElectricPanel } from './ElectricPanel'
@@ -167,9 +167,12 @@ import {
   layerVisible,
   roomKind,
   removeAutoAdded,
+  rotateServiceNode,
+  snapDeviceToWall,
   snapServicePoint,
   updateServiceNode,
 } from '@/lib/services'
+import { isWallDevice } from '@/lib/wallDevices'
 import { normalizeHeating } from '@/lib/hydronic'
 import {
   CURRENT_KEY,
@@ -1780,8 +1783,14 @@ export default function FloorPlanApp() {
     }
     if (dragNode.current && Math.hypot(world.x - dragNode.current.origin.x, world.z - dragNode.current.origin.z) > 0.02) {
       dragNode.current.moved = true
-      const snapped = altRef.current ? world : snapServicePoint(world, plan, { grid: gridStep, mode: 'free' })
-      setPlan((current) => updateServiceNode(current, dragNode.current.id, { x: snapped.x, z: snapped.z }))
+      const node = ensureServices(plan).nodes.find((item) => item.id === dragNode.current.id)
+      const seated = !altRef.current && isWallDevice(node?.kind) ? snapDeviceToWall(world, plan, node) : null
+      const snapped = seated || (altRef.current ? world : snapServicePoint(world, plan, { grid: gridStep, mode: 'free' }))
+      const patch = seated
+        ? { x: seated.x, z: seated.z, y: seated.y, rotation: seated.rotation, wallId: seated.wallId, face: seated.face, mount: seated.mount, width: seated.width, depth: seated.depth, height: seated.height }
+        : { x: snapped.x, z: snapped.z, wallId: null, face: null }
+      const draggingId = dragNode.current.id
+      setPlan((current) => updateServiceNode(current, draggingId, patch))
     }
   }
 
@@ -2025,7 +2034,8 @@ export default function FloorPlanApp() {
     }
     if (svcTool) {
       const spec = PLACEABLES.find((item) => item.id === svcKind) || PLACEABLES[0]
-      const snapped = snapServicePoint(world, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system })
+      const seated = isWallDevice(spec.kind) && !altRef.current ? snapDeviceToWall(world, plan, spec) : null
+      const snapped = seated || snapServicePoint(world, plan, { mode: spec.wall && !seated ? 'wall' : 'free', system: spec.system })
       if (svcTool === 'node') {
         const node = {
           system: spec.system,
@@ -2038,6 +2048,16 @@ export default function FloorPlanApp() {
           pointType: spec.pointType,
           x: snapped.x,
           z: snapped.z,
+          ...(seated ? {
+            y: seated.y,
+            rotation: seated.rotation,
+            wallId: seated.wallId,
+            face: seated.face,
+            mount: seated.mount,
+            width: seated.width,
+            depth: seated.depth,
+            height: seated.height,
+          } : {}),
         }
         const result = placeServiceNode(plan, node, stamp, lastPlace.current)
         if (!result.placed) {
@@ -2675,6 +2695,9 @@ export default function FloorPlanApp() {
         commit(rotateYardItem(plan, pick.collection, pick.id))
       } else if ((event.key === 'r' || event.key === 'R') && selectedFixture) {
         commit(rotateFixture(plan, selectedFixture))
+      } else if ((event.key === 'r' || event.key === 'R') && pick?.kind === 'service' && pick.service?.target === 'node') {
+        event.preventDefault()
+        commit(rotateServiceNode(plan, pick.service.id))
       } else if (event.altKey && !event.ctrlKey && !event.metaKey && ['1', '2', '3'].includes(event.key)) {
         event.preventDefault()
         const preset = event.key === '1' ? 'plain' : event.key === '2' ? 'measure' : 'all'
@@ -2842,8 +2865,13 @@ export default function FloorPlanApp() {
         if (!dragBefore.current) dragBefore.current = plan
         return
       }
-      const snapped = snapServicePoint(spot, plan, { grid: gridStep, mode: 'free' })
-      setPlan((current) => updateServiceNode(current, service.id, { x: snapped.x, z: snapped.z }))
+      const node = ensureServices(plan).nodes.find((item) => item.id === service.id)
+      const seated = !altRef.current && isWallDevice(node?.kind) ? snapDeviceToWall(spot, plan, node) : null
+      const snapped = seated || snapServicePoint(spot, plan, { grid: gridStep, mode: 'free' })
+      const patch = seated
+        ? { x: seated.x, z: seated.z, y: seated.y, rotation: seated.rotation, wallId: seated.wallId, face: seated.face, mount: seated.mount, width: seated.width, depth: seated.depth, height: seated.height }
+        : { x: snapped.x, z: snapped.z, wallId: null, face: null }
+      setPlan((current) => updateServiceNode(current, service.id, patch))
       choose({ kind: 'service', service: { target: 'node', id: service.id, system: service.system } })
       if (phase === 'end') {
         if (dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
@@ -3042,7 +3070,7 @@ export default function FloorPlanApp() {
     ratio: layout.ratio,
     showNames: display.roomNames,
     showAreas: display.areas,
-    obstacles: labelObstacles(plan, layout.scale * k),
+    obstacles: labelObstacles(plan, layout.scale * k, layout.ratio),
   })
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = sheetMode === 'site' ? t('sheet.site') : (activeSystems.length === 1 ? text(locale, `service.${activeSystems[0].id}`, activeSystems[0].title) : t('sheet.plan'))
@@ -3186,6 +3214,12 @@ export default function FloorPlanApp() {
     : t('status.select')
 
   const px = (metres) => metres * layout.scale * k
+  const servicePreview = svcTool && cursor && spec
+    ? (isWallDevice(spec.kind) && !altDown
+      ? (snapDeviceToWall(cursor, plan, spec) || snapServicePoint(cursor, plan, { mode: 'free', system: spec.system }))
+      : snapServicePoint(cursor, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system }))
+    : null
+  const ghostPoint = svcTool ? (servicePreview || cursor) : (snapVisual?.point || cursor)
 
   const onProjectType = (id) => {
     const current = planRef.current
@@ -4487,9 +4521,15 @@ export default function FloorPlanApp() {
                     onCancel={() => setDimEdit(null)}
                   />
                 ))}
-                {engaged && cursor && (
-                  <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${X((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).x)} ${Y((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).z)})`}>
-                    <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
+                {engaged && cursor && ghostPoint && (
+                  <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${X(ghostPoint.x)} ${Y(ghostPoint.z)})`}>
+                    {svcTool && spec?.system === 'electric' ? (
+                      <g data-testid={spec.kind === 'panel' ? 'panel-ghost' : 'electric-ghost'} transform={`rotate(${isWallDevice(spec.kind) ? (servicePreview?.rotation || 0) : 0})`}>
+                        <ElectricGlyph node={{ kind: spec.kind, system: 'electric', rotation: servicePreview?.rotation || 0 }} unit={k} />
+                      </g>
+                    ) : (
+                      <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
+                    )}
                     {placing && (
                       <g transform={`rotate(${Number(snapVisual?.rotation) || 0})`}>
                         <rect
