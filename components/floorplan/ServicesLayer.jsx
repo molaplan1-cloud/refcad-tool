@@ -37,13 +37,16 @@ import {
   groupCableCallouts,
   layoutDeviceTags,
   longestRunSegment,
+  runLabelText,
+  runStrokeMm,
   symbolFigures,
+  symbolInk,
   symbolSizeMm,
 } from '@/lib/electricSymbols'
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
 import { houseBox } from '@/lib/yard'
 import { CAD_COMMANDS } from '@/lib/cadEdit'
-import { annotationFont, paperFont, placeFlowLabel, placeLineLabels, routeStrokeBoxes } from '@/lib/annotations'
+import { paperFont, placeFlowLabel, placeLineLabels, routeStrokeBoxes } from '@/lib/annotations'
 import { CadItem, CadMenu, CadSep, Flyout, Segmented } from './CadMenu'
 
 const barBtn = (active) => ({
@@ -188,7 +191,7 @@ function shiftPoints(points, system, multi, kind) {
   })
 }
 
-function SlopeMark({ run, X, Y, show = true, size = 8 }) {
+function SlopeMark({ run, X, Y, show = true, unit = 1 }) {
   const pts = run.points || []
   if (!show || !run.slope || pts.length < 2) return null
   let best = null
@@ -205,12 +208,19 @@ function SlopeMark({ run, X, Y, show = true, size = 8 }) {
   const y2 = Y(lower.z)
   const ang = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI
   const label = `${Number(run.slope).toFixed(1).replace('.', ',')} %`
+  const u = unit > 0 ? unit : 1
   return (
     <g transform={`translate(${(x1 + x2) / 2} ${(y1 + y2) / 2}) rotate(${ang})`} style={{ pointerEvents: 'none' }}>
-      <polygon points="9,0 -3,-3.2 -3,3.2" fill="#44403c" />
-      <text x="12" y="-3" fontSize={size} fill="#292524">{label}</text>
+      <polygon points={`${2.2 * u},0 ${-0.7 * u},${-0.7 * u} ${-0.7 * u},${0.7 * u}`} fill="#44403c" />
+      <text x={2.6 * u} y={-0.45 * u} fontSize={1.6 * u} fill="#292524">{label}</text>
     </g>
   )
+}
+
+function figureFill(fig, ink) {
+  if (fig.fill === 'ink') return fig.stroke || ink
+  if (fig.fill) return '#fff'
+  return 'none'
 }
 
 export function ElectricGlyph({ node, unit = 1 }) {
@@ -218,28 +228,32 @@ export function ElectricGlyph({ node, unit = 1 }) {
   const rot = isWallDevice(node.kind) ? (node.rotation || 0) : 0
   const size = symbolSizeMm(node.kind)
   const env = node.kind === 'panel' ? deviceEnvelope(node) : null
-  const figures = symbolFigures(node.kind)
+  const figures = symbolFigures(node)
+  const ink = symbolInk(node)
+  const testid = node.kind === 'panel' ? 'panel-symbol' : (node.kind === 'junction' ? 'junction-symbol' : (node.kind === 'actuator' ? 'actuator-tag' : undefined))
   return (
     <g
-      data-testid={node.kind === 'panel' ? 'panel-symbol' : (node.kind === 'junction' ? 'junction-symbol' : undefined)}
+      data-testid={testid}
       data-paper-w={size.w}
       data-paper-h={size.h}
       data-width={env ? env.width : undefined}
       data-depth={env ? env.depth : undefined}
     >
-      <g transform={`scale(${u})`} fill="none" stroke="#1c1917" strokeWidth={SYMBOL_STROKE_MM} strokeLinecap="round" strokeLinejoin="round">
+      <g transform={`scale(${u})`} fill="none" stroke={ink} strokeWidth={SYMBOL_STROKE_MM} strokeLinecap="round" strokeLinejoin="round">
         {figures.filter((fig) => fig.op !== 'text').map((fig, index) => {
+          const stroke = fig.stroke || ink
+          const fill = figureFill(fig, ink)
           if (fig.op === 'circle') {
-            return <circle key={index} cx={fig.x} cy={fig.y} r={fig.r} fill={fig.fill ? '#fff' : 'none'} />
+            return <circle key={index} cx={fig.x} cy={fig.y} r={fig.r} fill={fill} stroke={stroke} />
           }
           if (fig.op === 'line') {
-            return <line key={index} x1={fig.x1} y1={fig.y1} x2={fig.x2} y2={fig.y2} />
+            return <line key={index} x1={fig.x1} y1={fig.y1} x2={fig.x2} y2={fig.y2} stroke={stroke} />
           }
           if (fig.op === 'rect') {
-            return <rect key={index} x={fig.x} y={fig.y} width={fig.w} height={fig.h} fill={fig.fill ? '#fff' : 'none'} />
+            return <rect key={index} x={fig.x} y={fig.y} width={fig.w} height={fig.h} fill={fill} stroke={stroke} />
           }
           if (fig.op === 'poly') {
-            return <polygon key={index} points={fig.points.map((point) => point.join(',')).join(' ')} fill={fig.fill ? '#fff' : 'none'} />
+            return <polygon key={index} points={fig.points.map((point) => point.join(',')).join(' ')} fill={fill} stroke={stroke} />
           }
           return null
         })}
@@ -254,7 +268,7 @@ export function ElectricGlyph({ node, unit = 1 }) {
           dominantBaseline="central"
           fontSize={fig.size * u}
           fontWeight="700"
-          fill="#1c1917"
+          fill={fig.tone || '#14120f'}
           stroke="none"
         >
           {fig.text}
@@ -264,268 +278,23 @@ export function ElectricGlyph({ node, unit = 1 }) {
   )
 }
 
-const SCHEMATIC_KINDS = new Set(['panel', 'socket', 'switch', 'light', 'junction', 'heater-control', 'data', 'antenna'])
-
-function NodeSymbol({ node, tagSize = 8, unit = 1 }) {
-  if (node.system === 'electric' || SCHEMATIC_KINDS.has(node.kind)) {
-    return <ElectricGlyph node={node} unit={unit} />
-  }
-  const color = nodeColor(node)
-  if (node.kind === 'ahu') {
-    return (
-      <g>
-        <rect x={-16} y={-10} width={32} height={20} rx={3} fill="#f8fafc" stroke={color} strokeWidth={1.6} />
-        <path d="M-8,-4 L0,4 L8,-4" fill="none" stroke="#dc2626" strokeWidth={1.2} />
-        <path d="M-8,4 L0,-4 L8,4" fill="none" stroke="#2563eb" strokeWidth={1.2} />
-        <text x="0" y="18" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">IV</text>
-      </g>
-    )
-  }
-  if (node.kind === 'hood') {
-    return (
-      <g>
-        <rect x={-12} y={-7} width={24} height={14} fill="#fff7ed" stroke={color} strokeWidth={1.4} />
-        <text x="0" y="4" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill={color}>LK</text>
-      </g>
-    )
-  }
-  if (node.kind === 'silencer') {
-    return (
-      <g>
-        <rect x={-11} y={-5} width={22} height={10} fill="#f8fafc" stroke="#334155" strokeWidth={1.2} />
-        <path d="M-8,-5 L-2,5 M-2,-5 L4,5 M4,-5 L10,5" stroke="#64748b" strokeWidth={0.8} />
-      </g>
-    )
-  }
-  if (node.kind === 'valve') {
-    return (
-      <g>
-        <circle r="7" fill="#fff" stroke={color} strokeWidth="1.6" />
-        <path d={node.role === 'poisto' ? 'M0,-4 L3.4,3 L-3.4,3 Z' : 'M0,4 L3.4,-3 L-3.4,-3 Z'} fill={color} />
-      </g>
-    )
-  }
-  if (node.kind === 'manifold') {
-    return (
-      <g>
-        <rect x={-12} y={-6} width={24} height={12} fill="#eff6ff" stroke="#1d4ed8" strokeWidth={1.3} />
-        <text x="0" y="3.5" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1d4ed8">JT</text>
-      </g>
-    )
-  }
-  if (node.kind === 'shutoff' || node.kind === 'inlet') {
-    return (
-      <g>
-        <circle r="5" fill={node.kind === 'inlet' ? '#1d4ed8' : '#fff'} stroke="#1d4ed8" strokeWidth="1.4" />
-        {node.kind === 'shutoff' && <path d="M-3,-3 L3,3 M3,-3 L-3,3" stroke="#1d4ed8" strokeWidth="1.2" />}
-      </g>
-    )
-  }
-  if (node.kind === 'outdoor-tap' || node.kind === 'fixture') {
-    return <circle r="4.5" fill="#fff" stroke={color} strokeWidth="1.5" />
-  }
-  if (node.kind === 'floor-drain') {
-    return (
-      <g>
-        <circle r="6.5" fill="#fff" stroke="#44403c" strokeWidth="1.3" />
-        <path d="M-4,0 H4 M0,-4 V4" stroke="#44403c" strokeWidth="1" />
-      </g>
-    )
-  }
-  if (node.kind === 'cleanout') {
-    return (
-      <g>
-        <rect x={-6} y={-6} width={12} height={12} fill="#fff" stroke="#44403c" strokeWidth={1.2} />
-        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#44403c">PL</text>
-      </g>
-    )
-  }
-  if (node.kind === 'drain-point') return <circle r="3.5" fill="#44403c" />
-  if (node.kind === 'stove' || node.kind === 'heater') {
-    return (
-      <g>
-        <rect x={-8} y={-6} width={16} height={12} fill="#fff" stroke="#1c1917" strokeWidth={1.2} />
-        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">{node.kind === 'heater' ? 'K' : 'L'}</text>
-      </g>
-    )
-  }
-  const badge = {
-    oven: ['U', 18],
-    radiator: ['P', 18],
-    ev: ['EV', 24],
-    heatpump: ['LP', 24],
-    'iv-unit': ['IV', 24],
-    boiler: ['V', 18],
-    washer: ['PK', 24],
-    dishwasher: ['AP', 24],
-    fridge: ['JK', 22],
-    dryer: ['KR', 22],
-    microwave: ['M', 18],
-    tv: ['TV', 22],
-    towel: ['PK', 22],
-    spa: ['PA', 22],
-  }[node.kind]
-  if (badge) {
-    const [label, width] = badge
-    return (
-      <g>
-        <rect x={-width / 2} y={-7} width={width} height={14} fill="#fff" stroke="#1c1917" strokeWidth={1.2} />
-        <text x="0" y="3.5" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">{label}</text>
-      </g>
-    )
-  }
-  if (node.kind === 'water-point') {
-    const both = node.supply !== 'cold'
-    return (
-      <g>
-        <circle r="6" fill="#fff" stroke={both ? '#dc2626' : '#1d4ed8'} strokeWidth="1.4" />
-        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1c1917">{both ? 'KL' : 'KV'}</text>
-      </g>
-    )
-  }
-  if (node.kind === 'dhw-tank' || node.kind === 'buffer-tank') {
-    return (
-      <g>
-        <rect x={-11} y={-8} width={22} height={16} rx="3" fill="#fff" stroke="#dc2626" strokeWidth="1.3" />
-        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#dc2626">{node.kind === 'buffer-tank' ? 'PV' : 'LV'}</text>
-      </g>
-    )
-  }
-  if (node.kind === 'kv-manifold' || node.kind === 'lv-manifold' || node.kind === 'floor-manifold') {
-    const label = node.kind === 'floor-manifold' ? 'LJT' : node.kind === 'lv-manifold' ? 'LV' : 'KV'
-    return (
-      <g>
-        <rect x={-12} y={-5} width={24} height={10} fill="#fff" stroke="#1d4ed8" strokeWidth="1.2" />
-        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#1d4ed8">{label}</text>
-      </g>
-    )
-  }
-  if (node.kind === 'heat-source' || node.kind === 'air-air') {
-    return (
-      <g>
-        <rect x={-12} y={-8} width={24} height={16} fill="#fff7ed" stroke="#c2410c" strokeWidth="1.3" />
-        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#c2410c">{node.kind === 'air-air' ? 'ILP' : 'LL'}</text>
-      </g>
-    )
-  }
-  if (node.kind === 'heater-rad') {
-    return (
-      <g>
-        <rect x={-9} y={-6} width={18} height={12} fill="#fff" stroke="#dc2626" strokeWidth="1.2" />
-        <path d="M-5,-6 V6 M-1,-6 V6 M3,-6 V6" stroke="#dc2626" strokeWidth="0.7" />
-      </g>
-    )
-  }
-  if (node.kind === 'actuator') {
-    return (
-      <g data-testid="actuator-tag">
-        <rect x={-3} y={-3} width={6} height={6} rx={0.8} fill="#fff" stroke="#0f766e" strokeWidth={0.7} />
-        <text x="0" y="1.7" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#0f766e">A</text>
-      </g>
-    )
-  }
-  if (node.kind === 'thermostat') {
-    return (
-      <g>
-        <rect x={-6} y={-6} width={12} height={12} fill="#fff" stroke="#0f766e" strokeWidth="1.1" />
-        <text x="0" y="3" textAnchor="middle" fontSize={tagSize} fontWeight="700" fill="#0f766e">T</text>
-      </g>
-    )
-  }
-  return <circle r="4" fill={color} />
+function NodeSymbol({ node, unit = 1 }) {
+  return <ElectricGlyph node={node} unit={unit} />
 }
 
-function cableMark(run) {
-  if (!run.marking || !run.showMark) return ''
-  if (run.system === 'electric' || run.system === 'water' || run.system === 'heat') return run.marking
-  return ''
-}
-
-function CableMark({ points, text, X, Y, show = true, side = 1, along = 0.5, gap = 0.55, size = 8 }) {
-  if (!show || !text || !points || points.length < 2) return null
-  let best = null
-  for (let i = 1; i < points.length; i += 1) {
-    const len = Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z)
-    if (!best || len > best.len) best = { len, a: points[i - 1], b: points[i] }
-  }
-  if (!best || best.len < 0.35) return null
-  const dx = best.b.x - best.a.x
-  const dz = best.b.z - best.a.z
-  const len = Math.hypot(dx, dz) || 1
-  const ox = (-dz / len) * gap * side
-  const oz = (dx / len) * gap * side
-  return (
-    <text
-      data-testid="cable-mark"
-      x={X(best.a.x + dx * along + ox)}
-      y={Y(best.a.z + dz * along + oz)}
-      textAnchor="middle"
-      fontSize={size}
-      fontWeight="650"
-      fill="#1c1917"
-      stroke="#fbfaf7"
-      strokeWidth="2.6"
-      paintOrder="stroke"
-      style={{ pointerEvents: 'none' }}
-    >
-      {text}
-    </text>
-  )
-}
-
-function Jakotukki({ node, count, X, Y }) {
-  const n = Math.max(1, count)
-  const pitch = 0.2
-  const span = pitch * Math.max(0, n - 1)
-  const bar = 0.1
-  const stub = 0.16
-  const px = (metres) => X(node.x + metres) - X(node.x)
-  const pz = (metres) => Y(node.z + metres) - Y(node.z)
-  const z0 = -span / 2
-  return (
-    <g data-testid="jakotukki">
-      <rect
-        x={px(-bar / 2)}
-        y={pz(z0 - 0.07)}
-        width={Math.abs(px(bar))}
-        height={Math.abs(pz(span + 0.14))}
-        fill="#fff"
-        stroke="#1d4ed8"
-        strokeWidth={1.15}
-      />
-      {Array.from({ length: n }, (_, index) => {
-        const z = z0 + index * pitch
-        return (
-          <g key={index}>
-            <line x1={px(bar / 2)} y1={pz(z)} x2={px(bar / 2 + stub)} y2={pz(z)} stroke="#c2410c" strokeWidth={1.15} />
-            <rect
-              data-testid="actuator-tag"
-              x={px(bar / 2 + stub) - 2.6}
-              y={pz(z) - 2.6}
-              width={5.2}
-              height={5.2}
-              rx={0.8}
-              fill="#fff"
-              stroke="#0f766e"
-              strokeWidth={0.7}
-            />
-          </g>
-        )
-      })}
-    </g>
-  )
-}
-
-function LoopTag({ points, label, X, Y, size = 8 }) {
+function LoopTag({ points, label, X, Y, unit = 1 }) {
   if (!points?.length || label == null) return null
   const cx = points.reduce((sum, point) => sum + point.x, 0) / points.length
   const cz = points.reduce((sum, point) => sum + point.z, 0) / points.length
   const text = String(label)
-  const width = Math.max(14, text.length * 6.5 + 8)
+  const u = unit > 0 ? unit : 1
+  const font = 1.6 * u
+  const width = Math.max(4.2 * u, text.length * font * 0.62 + font)
+  const height = 3.2 * u
   return (
     <g data-testid="loop-tag" transform={`translate(${X(cx)} ${Y(cz)})`} style={{ pointerEvents: 'none' }}>
-      <rect x={-width / 2} y={-7} width={width} height={12} rx={2} fill="#fff" stroke="#c2410c" strokeWidth={0.8} />
-      <text x={0} y={2.4} textAnchor="middle" fontSize={size} fontWeight="700" fill="#9a3412">{text}</text>
+      <rect x={-width / 2} y={-height / 2} width={width} height={height} rx={0.4 * u} fill="#fff" stroke="#c2410c" strokeWidth={0.2 * u} />
+      <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={font} fontWeight="700" fill="#9a3412">{text}</text>
     </g>
   )
 }
@@ -552,10 +321,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const visibleRuns = services.runs.filter((run) => revealed(run) && (!siteMode || siteRun(plan, run)))
   const visibleNodes = services.nodes.filter((node) => revealed(node) && (!siteMode || node.system === 'ground' || !insideHouse(plan, node.x, node.z)))
   const manifold = visibleNodes.find((node) => node.system === 'heat' && node.kind === 'floor-manifold')
-  const loopCount = services.runs.filter((run) => run.system === 'heat' && (run.kind === 'floorheat' || run.role === 'loop')).length
   const drawnNodes = visibleNodes.filter((node) => {
     if (!manifold || node.system !== 'heat') return true
-    if (node.kind === 'actuator') return false
     if (node.kind !== 'heat-source' && node.kind !== 'thermostat') return true
     return Math.hypot(node.x - manifold.x, node.z - manifold.z) > 1.25
   })
@@ -577,16 +344,13 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     event.stopPropagation()
     onContext(event, hit)
   }
-  const leaders = []
-  const labelFont = annotationFont(sheet?.k || 1, zoom, 2.3, 14)
-  const flowFont = annotationFont(sheet?.k || 1, zoom, 2, 11)
-  const tagFont = paperFont(sheet?.k || 1, zoom, 2.5)
   const unit = Math.max(0.2, Number(sheet?.k) || 1)
+  const ratio = Number(sheet?.layout?.ratio) || Number(plan?.drawingScale) || 50
   const cableFont = CABLE_LABEL_MM * unit
   const deviceTagFont = DEVICE_TAG_MM * unit
+  const flowFont = deviceTagFont
   const nameFont = paperFont(sheet?.k || 1, zoom, 3.5)
   const areaFont = paperFont(sheet?.k || 1, zoom, 2.5)
-  const ink = Math.min(0.45, 1.1 / Math.max(zoom, 0.2))
   const view = viewport && camera ? {
     x: (0 - (camera.x || 0)) / Math.max(zoom, 0.2),
     y: (0 - (camera.y || 0)) / Math.max(zoom, 0.2),
@@ -641,9 +405,9 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     if (!live(node.system)) return
     const cx = X(node.x)
     const cy = Y(node.z)
-    const paper = node.system === 'electric' || SCHEMATIC_KINDS.has(node.kind) ? symbolSizeMm(node.kind) : null
-    const wide = paper ? paper.w * unit : (node.kind === 'ahu' ? 40 : node.kind === 'hood' ? 30 : node.kind === 'silencer' ? 26 : 20)
-    const tall = paper ? paper.h * unit : (node.kind === 'ahu' ? 36 : 22)
+    const paper = symbolSizeMm(node.kind)
+    const wide = paper.w * unit
+    const tall = paper.h * unit
     obstacles.push({ x: cx - wide / 2, y: cy - tall / 2, w: wide, h: tall, kind: 'symbol' })
     if (!node.flow || quietLabels) return
     const place = placeFlowLabel(cx, cy, `${node.flow} l/s`, flowFont, Math.max(wide, tall) / 2 + 3, obstacles)
@@ -663,66 +427,25 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   }
   const legendScale = Math.min(1, 13 / (10 * Math.max(zoom, 0.2)))
   if (legendH > 0) obstacles.push({ x: legendX, y: legendY, w: legendW * legendScale, h: legendH * legendScale, kind: 'legend' })
-  if (!quietLabels) {
-    const segments = []
-    drawn.forEach(({ run, points }) => {
-      if (!live(run.system) || !['trunk', 'main', 'header'].includes(run.role) || !run.size || points.length < 2) return
-      let best = null
-      for (let i = 0; i < points.length - 1; i += 1) {
-        const a = points[i]
-        const b = points[i + 1]
-        const len = Math.hypot(b.x - a.x, b.z - a.z)
-        if (!best || len > best.len) best = { len, a, b, index: i }
-      }
-      if (!best || best.len < 0.7) return
-      const sizeText = run.system === 'drain' ? `DN${run.size}` : run.system === 'water' ? `PEX ${run.size}` : `Ø${run.size}`
-      const text = run.system === 'iv' && run.flow ? `${sizeText}  ${Math.round(run.flow)} l/s` : sizeText
-      segments.push({
-        key: run.id,
-        routeKey: `${run.id}:${(best.index || 0) + 1}`,
-        kind: run.kind,
-        text,
-        color: runColor(run),
-        ax: X(best.a.x),
-        ay: Y(best.a.z),
-        bx: X(best.b.x),
-        by: Y(best.b.z),
-        len: best.len,
-      })
-    })
-    const kindOrder = { tulo: 0, poisto: 1, ulko: 2, jate: 3 }
-    segments.sort((a, b) => (kindOrder[a.kind] ?? 9) - (kindOrder[b.kind] ?? 9) || b.len - a.len)
-    const labelBounds = view ? {
-      x: view.x + 4,
-      y: view.y + (chrome?.h || 0) + 2,
-      w: Math.max(40, view.w - 8),
-      h: Math.max(40, view.h - (chrome?.h || 0) - 8),
-    } : null
-    placeLineLabels(segments, obstacles, {
-      font: labelFont,
-      minLength: labelFont * 2,
-      bounds: labelBounds,
-    }).forEach((item) => {
-      leaders.push(item)
-      if (item.box) obstacles.push({ ...item.box, kind: 'label' })
-    })
-  }
   const labelBounds = view ? {
     x: view.x + 4,
     y: view.y + (chrome?.h || 0) + 2,
     w: Math.max(40, view.w - 8),
     h: Math.max(40, view.h - (chrome?.h || 0) - 8),
   } : null
-  const cableLabels = quietLabels ? [] : placeLineLabels(groupCableCallouts(drawn.flatMap(({ run, points }) => {
-    if (!live(run.system) || run.system !== 'electric') return []
-    const text = cableMark(run)
+  const routeLabels = placeLineLabels(groupCableCallouts(drawn.flatMap(({ run, points }) => {
+    if (!live(run.system)) return []
+    const picked = selected?.service?.target === 'run' && selected?.service?.id === run.id
+    if (quietLabels && !picked) return []
+    const text = runLabelText(run)
     const best = longestRunSegment(points, X, Y)
     if (!text || !best || best.len < 1) return []
     return [{
       key: run.id,
       routeKey: `${run.id}:${best.index}`,
       text,
-      color: '#1c1917',
+      system: run.system,
+      color: runColor(run),
       ax: best.ax,
       ay: best.ay,
       bx: best.bx,
@@ -734,7 +457,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     minLength: cableFont * 0.75,
     bounds: labelBounds,
   })
-  cableLabels.forEach((item) => {
+  routeLabels.forEach((item) => {
     if (item.box) obstacles.push({ ...item.box, kind: 'label' })
   })
   const deviceTags = new Map(layoutDeviceTags(drawnNodes.flatMap((node) => {
@@ -756,11 +479,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const color = runColor(run)
         const heatFloor = run.system === 'heat' && (run.dashed || run.kind === 'floorheat' || run.kind === 'efloor' || run.kind === 'ceiling' || run.kind === 'sensor' || run.kind === 'heat-zone' || run.role === 'feeder' || run.role === 'loop')
         const dashed = run.system === 'electric' || heatFloor || Boolean(run.dashed)
-        const width = run.system === 'electric'
-          ? 0.35 * unit
-          : multi
-            ? (run.system === 'iv' ? 1.15 : run.system === 'drain' ? 1.05 : 0.8)
-            : (run.system === 'iv' ? 2.05 : run.system === 'drain' ? 1.85 : dashed ? 1.15 : 1.45)
+        const width = runStrokeMm(run, ratio) * unit
         const runSelected = selected?.service?.target === 'run' && selected?.service?.id === run.id
         const showText = !quietLabels || runSelected
         return (
@@ -770,9 +489,11 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               fill="none"
               stroke={color}
               strokeWidth={width}
-              strokeDasharray={run.system === 'electric'
-                ? (run.role === 'switch-drop' || run.role === 'traveler' ? `${0.9 * unit} ${0.7 * unit}` : `${1.8 * unit} ${1.15 * unit}`)
-                : (run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : (run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? '3.2 1.8' : dashed ? '6 4' : undefined))}
+              strokeDasharray={dashed
+                ? (run.role === 'switch-drop' || run.role === 'traveler'
+                  ? `${0.9 * unit} ${0.7 * unit}`
+                  : (run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? `${1.6 * unit} ${1.1 * unit}` : `${2.2 * unit} ${1.4 * unit}`))
+                : undefined}
               data-wire-role={run.role || ''}
               data-heat-kind={run.system === 'heat' ? run.kind : undefined}
               data-testid={run.kind === 'collector' ? 'collector-pipe' : (String(run.linkedFrom || '').includes(':sewer') ? 'sewer-line' : (run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined))}
@@ -796,8 +517,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               const up = (point.y || 0) > (prev.y || 0)
               return (
                 <g key={`riser-${run.id}-${index}`} data-testid="route-riser" style={{ pointerEvents: 'none' }}>
-                  <circle cx={X(point.x)} cy={Y(point.z)} r={run.system === 'electric' ? 1.5 * unit : 5.5} fill="#fff" stroke={color} strokeWidth={run.system === 'electric' ? 0.25 * unit : 1.6} />
-                  {showText && <text x={X(point.x) + (run.system === 'electric' ? 2.2 * unit : 8)} y={Y(point.z) - (run.system === 'electric' ? 1.4 * unit : 4)} fontSize={run.system === 'electric' ? cableFont : tagFont} fontWeight="700" fill={color}>{up ? 'nousu' : 'lasku'}</text>}
+                  <circle cx={X(point.x)} cy={Y(point.z)} r={1.6 * unit} fill="#fff" stroke={color} strokeWidth={0.2 * unit} />
+                  {showText && <text x={X(point.x) + 2.2 * unit} y={Y(point.z) - 1.6 * unit} fontSize={cableFont} fontWeight="700" fill={color}>{up ? 'nousu' : 'lasku'}</text>}
                 </g>
               )
             })}
@@ -846,20 +567,9 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
                 )}
               </g>
             ))}
-            <SlopeMark run={{ ...run, points }} X={X} Y={Y} show={showText} size={tagFont} />
-            <CableMark
-              points={points}
-              text={run.system === 'electric' && !quietLabels ? '' : cableMark(run)}
-              X={X}
-              Y={Y}
-              show={showText && run.kind !== 'floorheat' && !(callouts.length && run.system === 'heat' && (run.role === 'supply' || run.role === 'return'))}
-              side={run.role === 'return' ? -1 : 1}
-              along={run.role === 'return' ? 0.18 : run.role === 'supply' ? 0.82 : 0.5}
-              gap={run.system === 'heat' ? 0.9 : 0.55}
-              size={tagFont}
-            />
+            <SlopeMark run={{ ...run, points }} X={X} Y={Y} show={showText} unit={unit} />
             {(run.kind === 'floorheat' || run.role === 'loop') && (
-              <LoopTag points={points} label={run.loopIndex || run.outlet} X={X} Y={Y} size={tagFont} />
+              <LoopTag points={points} label={run.loopIndex || run.outlet} X={X} Y={Y} unit={unit} />
             )}
           </g>
         )
@@ -869,13 +579,13 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const ay = Y(item.anchor.z)
         const tx = X(item.x)
         const ty = Y(item.z)
-        const fontSize = tagFont
-        const half = Math.max(fontSize * 2, String(item.text).length * fontSize * 0.3)
+        const fontSize = cableFont
+        const half = Math.max(fontSize * 2, String(item.text).length * fontSize * 0.55)
         const shoulder = tx >= ax ? tx - half : tx + half
         return (
           <g key={`callout-${item.role}`} data-testid="manifold-callout" data-role={item.role} style={{ pointerEvents: 'none' }}>
-            <polyline points={`${ax},${ay} ${ax},${ty} ${shoulder},${ty}`} fill="none" stroke="#9a3412" strokeWidth={0.75} />
-            <circle cx={ax} cy={ay} r={1.35} fill="#9a3412" />
+            <polyline points={`${ax},${ay} ${ax},${ty} ${shoulder},${ty}`} fill="none" stroke="#9a3412" strokeWidth={0.2 * unit} />
+            <circle cx={ax} cy={ay} r={0.55 * unit} fill="#9a3412" />
             <text
               x={tx}
               y={ty}
@@ -885,7 +595,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               fontWeight="650"
               fill="#1c1917"
               stroke="#fbfaf7"
-              strokeWidth="1.5"
+              strokeWidth={0.45 * unit}
               paintOrder="stroke"
             >
               {item.text}
@@ -893,27 +603,19 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           </g>
         )
       })}
-      {cableLabels.map((item) => (
-        <g key={`cable-${item.key || item.text}`} style={{ pointerEvents: 'none' }}>
+      {routeLabels.map((item) => (
+        <g key={`route-${item.key || item.text}`} style={{ pointerEvents: 'none' }}>
           {item.leader && (
-            <line x1={item.anchorX} y1={item.anchorY} x2={item.x} y2={item.y} stroke="#57534e" strokeWidth={0.15 * unit} />
+            <line x1={item.anchorX} y1={item.anchorY} x2={item.x} y2={item.y} stroke={item.color || '#57534e'} strokeWidth={0.15 * unit} />
           )}
-          <text data-testid="cable-mark" x={item.x} y={item.y} textAnchor="middle" dominantBaseline="central" fontSize={cableFont} fontWeight="650" fill="#1c1917" stroke="#fbfaf7" strokeWidth={0.45 * unit} paintOrder="stroke">{item.text}</text>
-        </g>
-      ))}
-      {!quietLabels && leaders.map((item) => (
-        <g key={item.key || item.text} style={{ pointerEvents: 'none' }}>
-          {item.leader && (
-            <line x1={item.anchorX} y1={item.anchorY} x2={item.x} y2={item.y} stroke={item.color} strokeWidth={ink} />
-          )}
-          <text data-testid="duct-label" x={item.x} y={item.y} textAnchor="middle" dominantBaseline="central" fontSize={labelFont} fontWeight="650" fill={item.color} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{item.text}</text>
+          <text data-testid={item.system === 'iv' ? 'duct-label' : 'cable-mark'} x={item.x} y={item.y} textAnchor="middle" dominantBaseline="central" fontSize={cableFont} fontWeight="650" fill={item.color || '#1c1917'} stroke="#fbfaf7" strokeWidth={0.45 * unit} paintOrder="stroke">{item.text}</text>
         </g>
       ))}
       {fittings.bends.map((point, index) => (
-        <circle key={`bend-${index}`} cx={X(point.x)} cy={Y(point.z)} r="2.2" fill="#fff" stroke="#1c1917" strokeWidth="0.8" style={{ pointerEvents: 'none' }} />
+        <circle key={`bend-${index}`} cx={X(point.x)} cy={Y(point.z)} r={1.15 * unit} fill="#fff" stroke={runColor(point)} strokeWidth={0.2 * unit} style={{ pointerEvents: 'none' }} />
       ))}
       {fittings.tees.map((point, index) => (
-        <circle key={`tee-${index}`} cx={X(point.x)} cy={Y(point.z)} r="3.3" fill="#1c1917" style={{ pointerEvents: 'none' }} />
+        <circle key={`tee-${index}`} cx={X(point.x)} cy={Y(point.z)} r={1.05 * unit} fill={runColor(point)} style={{ pointerEvents: 'none' }} />
       ))}
       {drawnNodes.map((node) => {
         const tag = deviceTags.get(node.id)
@@ -933,12 +635,10 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         >
           {flashId === node.id && <circle data-testid="place-flash" r="16" fill="none" stroke="#ea580c" strokeWidth="2.4" />}
           <g transform={isWallDevice(node.kind) ? `rotate(${node.rotation || 0})` : undefined}>
-            {node.kind === 'floor-manifold'
-              ? <Jakotukki node={node} count={loopCount || 1} X={X} Y={Y} />
-              : <NodeSymbol node={node} tagSize={tagFont} unit={unit} />}
+            <NodeSymbol node={node} unit={unit} />
           </g>
           {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
-            <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 12} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
+            <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 0} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={0.4 * unit} paintOrder="stroke">{node.flow} l/s</text>
           ) : null}
           {tag ? (
             <g style={{ pointerEvents: 'none' }}>

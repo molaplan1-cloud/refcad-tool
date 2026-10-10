@@ -4523,9 +4523,9 @@ export default function FloorPlanApp() {
                 ))}
                 {engaged && cursor && ghostPoint && (
                   <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${X(ghostPoint.x)} ${Y(ghostPoint.z)})`}>
-                    {svcTool && spec?.system === 'electric' ? (
-                      <g data-testid={spec.kind === 'panel' ? 'panel-ghost' : 'electric-ghost'} transform={`rotate(${isWallDevice(spec.kind) ? (servicePreview?.rotation || 0) : 0})`}>
-                        <ElectricGlyph node={{ kind: spec.kind, system: 'electric', rotation: servicePreview?.rotation || 0 }} unit={k} />
+                    {svcTool === 'node' && spec ? (
+                      <g data-testid={spec.kind === 'panel' ? 'panel-ghost' : 'device-ghost'} transform={`rotate(${isWallDevice(spec.kind) ? (servicePreview?.rotation || 0) : 0})`}>
+                        <ElectricGlyph node={{ kind: spec.kind, system: spec.system, role: spec.role, supply: spec.supply, rotation: servicePreview?.rotation || 0 }} unit={k} />
                       </g>
                     ) : (
                       <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
