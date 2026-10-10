@@ -580,6 +580,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const leaders = []
   const labelFont = annotationFont(sheet?.k || 1, zoom, 2.3, 14)
   const flowFont = annotationFont(sheet?.k || 1, zoom, 2, 11)
+  const ivFont = paperFont(sheet?.k || 1, zoom, 2.2)
   const tagFont = paperFont(sheet?.k || 1, zoom, 2.5)
   const unit = Math.max(0.2, Number(sheet?.k) || 1)
   const cableFont = CABLE_LABEL_MM * unit
@@ -646,7 +647,16 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     const tall = paper ? paper.h * unit : (node.kind === 'ahu' ? 36 : 22)
     obstacles.push({ x: cx - wide / 2, y: cy - tall / 2, w: wide, h: tall, kind: 'symbol' })
     if (!node.flow || quietLabels) return
-    const place = placeFlowLabel(cx, cy, `${node.flow} l/s`, flowFont, Math.max(wide, tall) / 2 + 3, obstacles)
+    const ivFlow = node.system === 'iv'
+    const place = placeFlowLabel(
+      cx,
+      cy,
+      `${node.flow} l/s`,
+      ivFlow ? ivFont : flowFont,
+      ivFlow ? 12 : Math.max(wide, tall) / 2 + 3,
+      ivFlow ? obstacles.filter((block) => block.kind !== 'route') : obstacles,
+      ivFlow ? { tight: true } : undefined,
+    )
     flowAnchor.set(node.id, place)
     obstacles.push({ ...place.box, kind: 'label' })
   })
@@ -663,10 +673,41 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   }
   const legendScale = Math.min(1, 13 / (10 * Math.max(zoom, 0.2)))
   if (legendH > 0) obstacles.push({ x: legendX, y: legendY, w: legendW * legendScale, h: legendH * legendScale, kind: 'legend' })
+  const ivLabels = []
   if (!quietLabels) {
+    drawn.forEach(({ run, points }) => {
+      if (!live(run.system) || run.system !== 'iv' || !run.size || points.length < 2) return
+      let best = null
+      for (let i = 0; i < points.length - 1; i += 1) {
+        const a = points[i]
+        const b = points[i + 1]
+        const len = Math.hypot(X(b.x) - X(a.x), Y(b.z) - Y(a.z))
+        if (!best || len > best.len) best = { len, a, b }
+      }
+      if (!best) return
+      const text = `Ø${run.size}${run.flow ? `  ${Math.round(run.flow)} l/s` : ''}`
+      const textW = Math.max(ivFont * 2.4, text.length * ivFont * 0.56)
+      if (best.len < textW * 0.72) return
+      const ax = X(best.a.x)
+      const ay = Y(best.a.z)
+      const bx = X(best.b.x)
+      const by = Y(best.b.z)
+      const span = Math.hypot(bx - ax, by - ay) || 1
+      const nx = -(by - ay) / span
+      const ny = (bx - ax) / span
+      const side = run.kind === 'poisto' || run.kind === 'jate' ? -1 : 1
+      const gap = ivFont * 0.9
+      ivLabels.push({
+        key: run.id,
+        text,
+        color: runColor(run),
+        x: (ax + bx) / 2 + nx * gap * side,
+        y: (ay + by) / 2 + ny * gap * side,
+      })
+    })
     const segments = []
     drawn.forEach(({ run, points }) => {
-      if (!live(run.system) || !['trunk', 'main', 'header'].includes(run.role) || !run.size || points.length < 2) return
+      if (!live(run.system) || run.system === 'iv' || !['trunk', 'main', 'header'].includes(run.role) || !run.size || points.length < 2) return
       let best = null
       for (let i = 0; i < points.length - 1; i += 1) {
         const a = points[i]
@@ -909,6 +950,9 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           <text data-testid="duct-label" x={item.x} y={item.y} textAnchor="middle" dominantBaseline="central" fontSize={labelFont} fontWeight="650" fill={item.color} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{item.text}</text>
         </g>
       ))}
+      {!quietLabels && ivLabels.map((item) => (
+        <text key={`iv-${item.key}`} data-testid="duct-label" x={item.x} y={item.y} textAnchor="middle" dominantBaseline="central" fontSize={ivFont} fontWeight="650" fill={item.color} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke" style={{ pointerEvents: 'none' }}>{item.text}</text>
+      ))}
       {fittings.bends.map((point, index) => (
         <circle key={`bend-${index}`} cx={X(point.x)} cy={Y(point.z)} r="2.2" fill="#fff" stroke="#1c1917" strokeWidth="0.8" style={{ pointerEvents: 'none' }} />
       ))}
@@ -938,7 +982,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               : <NodeSymbol node={node} tagSize={tagFont} unit={unit} />}
           </g>
           {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
-            <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 12} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
+            <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 12} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={node.system === 'iv' ? ivFont : flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={ink} paintOrder="stroke">{node.flow} l/s</text>
           ) : null}
           {tag ? (
             <g style={{ pointerEvents: 'none' }}>
