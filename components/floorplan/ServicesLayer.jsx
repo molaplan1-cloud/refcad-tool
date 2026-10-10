@@ -456,7 +456,10 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     font: cableFont,
     minLength: cableFont * 0.75,
     bounds: labelBounds,
-  })
+  }).map((item) => ({
+    ...item,
+    system: drawn.find(({ run }) => run.id === item.key)?.run.system,
+  }))
   routeLabels.forEach((item) => {
     if (item.box) obstacles.push({ ...item.box, kind: 'label' })
   })
