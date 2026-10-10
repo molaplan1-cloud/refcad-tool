@@ -3070,7 +3070,7 @@ export default function FloorPlanApp() {
     ratio: layout.ratio,
     showNames: display.roomNames,
     showAreas: display.areas,
-    obstacles: labelObstacles(plan, layout.scale * k),
+    obstacles: labelObstacles(plan, layout.scale * k, layout.ratio),
   })
   const activeSystems = SERVICE_SYSTEMS.filter((item) => layerVisible(plan, item.id) && ensureServices(plan).runs.some((run) => run.system === item.id))
   const sheetTitle = sheetMode === 'site' ? t('sheet.site') : (activeSystems.length === 1 ? text(locale, `service.${activeSystems[0].id}`, activeSystems[0].title) : t('sheet.plan'))
