@@ -12,7 +12,7 @@ function useInk(color) {
   return { stroke, sw, paper, line }
 }
 
-export function FixtureSymbol({ symbol, w, d, color, flues = 1 }) {
+export function FixtureSymbol({ symbol, w, d, color, flues = 1, stand = false }) {
   const clipId = `hatch${useId().replace(/:/g, '')}`
   const { stroke, sw, paper, line } = useInk(color)
   const left = -w / 2
@@ -389,6 +389,18 @@ export function FixtureSymbol({ symbol, w, d, color, flues = 1 }) {
       <g>
         <rect x={left} y={top} width={w} height={d} {...paper} />
         <rect x={left + 2} y={top + 1.5} width={Math.max(2, w - 4)} height={Math.max(2, d - 3)} {...line} />
+      </g>
+    )
+  }
+  if (mark === 'wall-tv') {
+    const panel = stand ? Math.min(Math.max(d, 4), 8) : Math.max(d, 4)
+    const bulge = 9
+    return (
+      <g data-symbol="wall-tv">
+        {stand && <rect x={left} y={top} width={w} height={d} {...paper} />}
+        <rect x={left} y={top} width={w} height={panel} {...paper} />
+        <line x1={left + 3} y1={top + panel - 1.5} x2={w / 2 - 3} y2={top + panel - 1.5} stroke={stroke} strokeWidth={Math.max(sw, 1.5)} />
+        <path d={`M ${-w * 0.22} ${top + panel} Q 0 ${top + panel + bulge} ${w * 0.22} ${top + panel}`} {...line} />
       </g>
     )
   }

@@ -57,6 +57,7 @@ import {
   rotateFixture,
   segmentLength,
   viewLayout,
+  WALL_MOUNT_REACH,
   wallDirection,
   visibleRooms,
   wallQuads,
@@ -1375,7 +1376,8 @@ export default function FloorPlanApp() {
     }
     if (placing) {
       const tpl = FIXTURES.find((item) => item.id === placing)
-      const placed = snapFixturePoint(world, walls, { radius: Math.max(radius, 0.45), enabled, grid: gridStep, depth: tpl?.d || 0.6 })
+      const reach = tpl?.wallMount ? Math.max(radius, WALL_MOUNT_REACH) : Math.max(radius, 0.45)
+      const placed = snapFixturePoint(world, walls, { radius: reach, enabled, grid: gridStep, depth: tpl?.d || 0.6 })
       return { point: { x: placed.x, z: placed.z }, kind: placed.kind, guides: [], rotation: placed.rotation }
     }
     if (yardTool) {
@@ -2996,7 +2998,8 @@ export default function FloorPlanApp() {
   const setDisplay = (patch) => setPlan((current) => applyDisplay(current, patch, sheetKey))
   const rows = materialsList(plan)
   const query = fixtureQuery.trim().toLowerCase()
-  const matchesQuery = (item) => !query || item.name.toLowerCase().includes(query) || item.group.toLowerCase().includes(query)
+  const fixtureName = (item) => (item?.nameKey ? t(item.nameKey) : item?.name || '')
+  const matchesQuery = (item) => !query || item.name.toLowerCase().includes(query) || fixtureName(item).toLowerCase().includes(query) || item.group.toLowerCase().includes(query)
   const roomKindId = room ? roomKind(room) : ''
   const suggested = suggestionsFor(roomKindId).filter(matchesQuery)
   const groups = FURNITURE_GROUPS.filter((id) => fixtureGroup === 'Kaikki' || fixtureGroup === id).map((id) => ({
@@ -3143,7 +3146,7 @@ export default function FloorPlanApp() {
   const drawingTool = Boolean(!placingOne && (tool === 'exterior' || tool === 'interior' || tool === 'room' || tool === 'detect' || svcTool === 'run' || (yardTool && !yardPlacesOne(yardTool))))
   const toolLabel = tool === 'detect' ? t('tool.detectRoom') : (t(`tool.${tool}`) === `tool.${tool}` ? null : t(`tool.${tool}`))
   const activeName = placing
-    ? (FIXTURES.find((item) => item.id === placing)?.name || t('furniture.item'))
+    ? (fixtureName(FIXTURES.find((item) => item.id === placing)) || t('furniture.item'))
     : svcTool
       ? (spec?.name || t('service.device'))
       : yardTool
@@ -3608,8 +3611,8 @@ export default function FloorPlanApp() {
                     setPlacing(item.id); setTool('select'); setSvcTool(null); setYardTool(null); setDraft(null)
                   }}
                 >
-                  {item.name}
-                  <span style={{ display: 'block', fontWeight: 500, color: '#78716c', fontSize: 11 }}>{Math.round(item.w * 1000)} × {Math.round(item.d * 1000)} mm</span>
+                  {fixtureName(item)}
+                  <span style={{ display: 'block', fontWeight: 500, color: '#78716c', fontSize: 11 }}>{Math.round(item.w * 1000)} × {Math.round(item.d * 1000)} mm{item.wallMount && item.variants?.length ? ` · ${item.variants[0].inches}–${item.variants[item.variants.length - 1].inches}"` : ''}</span>
                 </button>
               ))}
             </div>
@@ -3635,8 +3638,8 @@ export default function FloorPlanApp() {
                     setPlacing(item.id); setTool('select'); setSvcTool(null); setYardTool(null); setDraft(null)
                   }}
                 >
-                  {item.name}
-                  <span style={{ display: 'block', fontWeight: 500, color: '#78716c', fontSize: 11 }}>{Math.round(item.w * 1000)} × {Math.round(item.d * 1000)} mm</span>
+                  {fixtureName(item)}
+                  <span style={{ display: 'block', fontWeight: 500, color: '#78716c', fontSize: 11 }}>{Math.round(item.w * 1000)} × {Math.round(item.d * 1000)} mm{item.wallMount && item.variants?.length ? ` · ${item.variants[0].inches}–${item.variants[item.variants.length - 1].inches}"` : ''}</span>
                 </button>
               ))}
             </div>
@@ -3651,12 +3654,17 @@ export default function FloorPlanApp() {
           {schedule.length > 0 && (
             <div data-testid="furniture-schedule" style={{ marginTop: 12, borderTop: '1px solid #e7e5e4', paddingTop: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '0 4px 6px' }}>{t('furniture.schedule')}</div>
-              {schedule.map((row) => (
-                <div key={row.key} style={{ fontSize: 11, padding: '3px 4px', borderBottom: '1px solid #f5f5f4' }}>
-                  <div style={{ fontWeight: 700 }}>{row.count} × {row.name}{row.variant ? ` ${row.variant}` : ''}</div>
-                  <div style={{ color: '#78716c' }}>{row.room} · {Math.round(row.w * 1000)} × {Math.round(row.d * 1000)} mm</div>
-                </div>
-              ))}
+              {schedule.map((row) => {
+                const rowName = row.nameKey ? t(row.nameKey) : row.name
+                const rowVariant = row.variantKey ? t(row.variantKey, { n: row.inches }) : row.variant
+                const rowStand = row.stand ? t('furniture.wallTv.stand') : ''
+                return (
+                  <div key={row.key} data-testid={row.nameKey ? `schedule-${row.nameKey.split('.').pop()}` : undefined} style={{ fontSize: 11, padding: '3px 4px', borderBottom: '1px solid #f5f5f4' }}>
+                    <div style={{ fontWeight: 700 }}>{row.count} × {rowName}{rowVariant ? ` ${rowVariant}` : ''}{rowStand ? ` · ${rowStand}` : ''}</div>
+                    <div style={{ color: '#78716c' }}>{row.room} · {Math.round(row.w * 1000)} × {Math.round(row.d * 1000)}{row.nameKey ? ` × ${Math.round(row.h * 1000)}` : ''} mm</div>
+                  </div>
+                )
+              })}
             </div>
           )}
           </>
@@ -3993,7 +4001,7 @@ export default function FloorPlanApp() {
                           strokeWidth={0.8}
                         />
                       )}
-                      <FixtureSymbol symbol={spec.symbol} w={w} d={d} color={fixture.color} flues={draw.flues} />
+                      <FixtureSymbol symbol={spec.symbol} w={w} d={d} color={fixture.color} flues={draw.flues} stand={spec.stand} />
                       {draw.shield && (
                         <rect
                           data-testid="heat-shield"
@@ -4448,15 +4456,17 @@ export default function FloorPlanApp() {
                   <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${X((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).x)} ${Y((svcTool ? snapServicePoint(cursor, plan, { mode: spec?.wall ? 'wall' : 'free', system: spec?.system }) : (snapVisual?.point || cursor)).z)})`}>
                     <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
                     {placing && (
-                      <rect
-                        x={-px((FIXTURES.find((item) => item.id === placing)?.w || 0.6)) / 2}
-                        y={-px((FIXTURES.find((item) => item.id === placing)?.d || 0.6)) / 2}
-                        width={px(FIXTURES.find((item) => item.id === placing)?.w || 0.6)}
-                        height={px(FIXTURES.find((item) => item.id === placing)?.d || 0.6)}
-                        fill="#ea580c22"
-                        stroke="#ea580c"
-                        strokeWidth={1 / Math.max(camera.zoom, 0.2)}
-                      />
+                      <g transform={`rotate(${Number(snapVisual?.rotation) || 0})`}>
+                        <rect
+                          x={-px((FIXTURES.find((item) => item.id === placing)?.w || 0.6)) / 2}
+                          y={-px((FIXTURES.find((item) => item.id === placing)?.d || 0.6)) / 2}
+                          width={px(FIXTURES.find((item) => item.id === placing)?.w || 0.6)}
+                          height={px(FIXTURES.find((item) => item.id === placing)?.d || 0.6)}
+                          fill="#ea580c22"
+                          stroke="#ea580c"
+                          strokeWidth={1 / Math.max(camera.zoom, 0.2)}
+                        />
+                      </g>
                     )}
                   </g>
                 )}

@@ -32,6 +32,7 @@ import {
   deleteOpening,
   deleteRoom,
   applyFixtureVariant,
+  setWallTvStand,
   deleteWall,
   duplicateFixture,
   fixtureTemplate,
@@ -573,7 +574,9 @@ export function selectionLabel(plan, selection) {
   }
   if (selection.kind === 'fixture') {
     const fixture = (plan.fixtures || []).find((item) => item.id === selection.id)
-    return text(locale, 'select.fixture', `Kaluste: ${fixtureTemplate(fixture?.type).name}`).replace('{name}', fixtureTemplate(fixture?.type).name)
+    const tpl = fixtureTemplate(fixture?.type)
+    const name = tpl.nameKey ? text(locale, tpl.nameKey) : tpl.name
+    return text(locale, 'select.fixture', `Kaluste: ${name}`).replace('{name}', name)
   }
   if (selection.kind === 'roof') return tr('select.roof')
   if (selection.kind === 'zone') return tr('select.zone')
@@ -1521,7 +1524,13 @@ export function ColorSwatches({ value, onChange, testid = 'fixture-color', custo
   )
 }
 
+function variantLabel(t, item) {
+  if (item?.nameKey) return t(item.nameKey, { n: item.inches })
+  return item?.name || ''
+}
+
 function FixtureFields({ plan, id, onApply, onCommit }) {
+  const { t } = usePlanLocale(plan)
   const fixture = (plan.fixtures || []).find((item) => item.id === id)
   if (!fixture) return null
   const spec = resolveFixture(fixture)
@@ -1534,7 +1543,7 @@ function FixtureFields({ plan, id, onApply, onCommit }) {
   return (
     <div>
       {variants.length > 0 && (
-        <Field label="Malli">
+        <Field label={spec.wallMount ? t('furniture.wallTv.model') : 'Malli'}>
           <select
             data-testid="fixture-variant"
             style={inputStyle}
@@ -1544,9 +1553,33 @@ function FixtureFields({ plan, id, onApply, onCommit }) {
               else onCommit(applyFixtureVariant(plan, id, event.target.value))
             }}
           >
-            {variants.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            {variants.map((item) => <option key={item.id} value={item.id}>{variantLabel(t, item)}</option>)}
           </select>
         </Field>
+      )}
+      {spec.wallMount && (
+        <>
+          <Field label={t('furniture.wallTv.mount')} testid="fixture-mount-field">
+            <input
+              data-testid="fixture-mount"
+              style={inputStyle}
+              type="number"
+              min="200"
+              step="10"
+              value={mm(spec.mount ?? 1.2)}
+              onChange={(event) => onApply(updateFixture(plan, id, { mount: fromMm(event.target.value) || 1.2 }))}
+            />
+          </Field>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+            <input
+              data-testid="fixture-stand"
+              type="checkbox"
+              checked={fixture.stand === true}
+              onChange={(event) => onCommit(setWallTvStand(plan, id, event.target.checked))}
+            />
+            {t('furniture.wallTv.stand')}
+          </label>
+        </>
       )}
       {chimney && (
         <>
@@ -1797,12 +1830,13 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
   } else if (menu.kind === 'fixture' && fixture) {
     const spec = resolveFixture(fixture)
     const variants = spec.template.variants || []
-    title = `Kaluste: ${spec.name}`
+    const fixtureName = spec.nameKey ? t(spec.nameKey) : spec.name
+    title = t('select.fixture', { name: fixtureName })
     body = (
       <>
         {variants.length > 0 && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, fontWeight: 650 }}>
-            Malli
+            {spec.wallMount ? t('furniture.wallTv.model') : 'Malli'}
             <select
               data-testid="ctx-fixture-variant"
               value={fixture.variant || variants[0].id}
@@ -1812,7 +1846,7 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
               }}
               style={{ flex: 1, padding: '4px 6px', borderRadius: 6, border: '1px solid #d6d3d1' }}
             >
-              {variants.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              {variants.map((item) => <option key={item.id} value={item.id}>{variantLabel(t, item)}</option>)}
             </select>
           </label>
         )}
