@@ -6,6 +6,9 @@ node_modules_v3bak/
 node_modules.vite-backup/
 **/node_modules/
 
+# Copied from pdfjs-dist on postinstall
+public/pdf.worker.min.mjs
+
 # Build outputs
 .next/
 .vercel/
