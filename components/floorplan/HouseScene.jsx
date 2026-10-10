@@ -1537,7 +1537,8 @@ function FixtureMark({ bounds, mark }) {
     [-x, y1, -z], [x, y1, -z], [x, y1, z], [-x, y1, z],
   ]
   const pairs = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
-  const ox = x + 0.1
+  const ox = x + 0.06
+  const oz = z
   return (
     <group>
       {pairs.map(([a, b], index) => (
@@ -1545,10 +1546,10 @@ function FixtureMark({ bounds, mark }) {
       ))}
       {mark === 'selected' && (
         <group>
-          <Line points={[[ox, y0, 0], [ox, y1, 0]]} color={color} lineWidth={2} raycast={noopRaycast} />
-          <Line points={[[ox - 0.045, y0, 0], [ox + 0.045, y0, 0]]} color={color} lineWidth={2} raycast={noopRaycast} />
-          <Line points={[[ox - 0.045, y1, 0], [ox + 0.045, y1, 0]]} color={color} lineWidth={2} raycast={noopRaycast} />
-          <Html position={[ox + 0.04, bounds.centerY, 0]} center zIndexRange={[40, 0]} style={{ pointerEvents: 'none' }}>
+          <Line points={[[ox, y0, oz], [ox, y1, oz]]} color={color} lineWidth={2} raycast={noopRaycast} />
+          <Line points={[[ox - 0.05, y0, oz], [ox + 0.04, y0, oz]]} color={color} lineWidth={2} raycast={noopRaycast} />
+          <Line points={[[ox - 0.05, y1, oz], [ox + 0.04, y1, oz]]} color={color} lineWidth={2} raycast={noopRaycast} />
+          <Html position={[ox + 0.08, bounds.centerY, oz]} center zIndexRange={[40, 0]} style={{ pointerEvents: 'none' }}>
             <div data-testid="fixture-bbox-mm" style={{ color, fontWeight: 700, fontSize: 14, background: 'rgba(255,255,255,0.94)', border: `1px solid ${color}`, borderRadius: 4, padding: '2px 6px', whiteSpace: 'nowrap', fontFamily: 'sans-serif' }}>
               {Math.round(bounds.height * 1000)} mm
             </div>
