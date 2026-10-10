@@ -11,11 +11,13 @@ import {
   openingColour,
   doorLeafPose,
   doorStyleOf,
+  CLADDING_LEAF_M,
   extendFacadeSkin,
   facadeCells,
   facadeFlashings,
   facadeOuterReach,
   facadeWorld,
+  claddingLeafCenter,
   mergedFacadeSkins,
   roomLabelsInView,
   surfaceLook,
@@ -510,7 +512,7 @@ function facadeFrame(plan, item, offset) {
 
 function CellOutline({ plan, cell, skins }) {
   const skin = skins.find((item) => item.side === cell.side && Math.abs((item.plane || 0) - (cell.plane || 0)) < 0.04 && cell.u0 >= item.u0 - 0.03 && cell.u1 <= item.u1 + 0.03)
-  const frame = facadeFrame(plan, { ...cell, plane: skin?.plane ?? cell.plane, nx: skin?.nx ?? cell.nx, nz: skin?.nz ?? cell.nz }, skinOffset(plan, cell.side) + 0.012)
+  const frame = facadeFrame(plan, { ...cell, plane: skin?.plane ?? cell.plane, nx: skin?.nx ?? cell.nx, nz: skin?.nz ?? cell.nz }, skinOffset(plan, cell.side) + CLADDING_LEAF_M / 2 + 0.01)
   const height = Math.max(0.05, cell.y1 - cell.y0)
   const y = (cell.y0 + cell.y1) / 2
   const t = 0.014
@@ -533,7 +535,122 @@ function CellOutline({ plan, cell, skins }) {
 }
 
 function skinOffset(plan, side) {
-  return facadeOuterReach(plan, side) + 0.022
+  return claddingLeafCenter(facadeOuterReach(plan, side))
+}
+
+const CLADDING_CORNER_LAP = 0.008
+
+function buildLeafGeometry(plan, skin, centerOffset, thickness) {
+  const half = thickness / 2
+  const u0 = skin.u0
+  const u1 = skin.u1
+  const y0 = skin.y0
+  const y1 = skin.y1
+  const span = Math.max(0.02, u1 - u0)
+  const height = Math.max(0.02, y1 - y0)
+  const outerOff = centerOffset + half
+  const innerOff = centerOffset - half
+  const uOuter0 = skin.miter0 ? u0 - half - CLADDING_CORNER_LAP : u0
+  const uInner0 = skin.miter0 ? u0 + half : u0
+  const uOuter1 = skin.miter1 ? u1 + half + CLADDING_CORNER_LAP : u1
+  const uInner1 = skin.miter1 ? u1 - half : u1
+  const at = (u, off, y) => {
+    const p = facadeWorld(plan, skin.side, u, skin.plane, skin.nx, skin.nz, off)
+    return { x: p.x, y, z: p.z, u }
+  }
+  const o0b = at(uOuter0, outerOff, y0)
+  const o1b = at(uOuter1, outerOff, y0)
+  const o1t = at(uOuter1, outerOff, y1)
+  const o0t = at(uOuter0, outerOff, y1)
+  const i0b = at(uInner0, innerOff, y0)
+  const i1b = at(uInner1, innerOff, y0)
+  const i1t = at(uInner1, innerOff, y1)
+  const i0t = at(uInner0, innerOff, y1)
+  const positions = []
+  const normals = []
+  const uvs = []
+  const addTri = (a, b, c, want) => {
+    const ax = b.x - a.x
+    const ay = b.y - a.y
+    const az = b.z - a.z
+    const bx = c.x - a.x
+    const by = c.y - a.y
+    const bz = c.z - a.z
+    let nx = ay * bz - az * by
+    let ny = az * bx - ax * bz
+    let nz = ax * by - ay * bx
+    const len = Math.hypot(nx, ny, nz)
+    if (len < 1e-8) return
+    let p0 = a
+    let p1 = b
+    let p2 = c
+    if (nx * want.x + ny * want.y + nz * want.z < 0) {
+      p1 = c
+      p2 = b
+      nx = -nx
+      ny = -ny
+      nz = -nz
+    }
+    nx /= len
+    ny /= len
+    nz /= len
+    for (const p of [p0, p1, p2]) {
+      positions.push(p.x, p.y, p.z)
+      normals.push(nx, ny, nz)
+      uvs.push((p.u - u0) / span, (p.y - y0) / height)
+    }
+  }
+  const outward = { x: skin.nx || 0, y: 0, z: skin.nz || 0 }
+  const inward = { x: -outward.x, y: 0, z: -outward.z }
+  addTri(o0b, o1b, o1t, outward)
+  addTri(o0b, o1t, o0t, outward)
+  addTri(i0b, i0t, i1t, inward)
+  addTri(i0b, i1t, i1b, inward)
+  addTri(o0b, i0b, i1b, { x: 0, y: -1, z: 0 })
+  addTri(o0b, i1b, o1b, { x: 0, y: -1, z: 0 })
+  addTri(o0t, o1t, i1t, { x: 0, y: 1, z: 0 })
+  addTri(o0t, i1t, i0t, { x: 0, y: 1, z: 0 })
+  const along = facadeWorld(plan, skin.side, u0 + 0.25, skin.plane, skin.nx, skin.nz, 0)
+  const back = facadeWorld(plan, skin.side, u0, skin.plane, skin.nx, skin.nz, 0)
+  const tx = along.x - back.x
+  const tz = along.z - back.z
+  if (!skin.miter0) addTri(o0b, o0t, i0t, { x: -tx, y: 0, z: -tz })
+  if (!skin.miter0) addTri(o0b, i0t, i0b, { x: -tx, y: 0, z: -tz })
+  if (!skin.miter1) addTri(o1b, i1b, i1t, { x: tx, y: 0, z: tz })
+  if (!skin.miter1) addTri(o1b, i1t, o1t, { x: tx, y: 0, z: tz })
+  const geom = new THREE.BufferGeometry()
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
+  geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  return geom
+}
+
+function LeafMesh({ plan, skin, offset, thickness, maps, color, roughness, metalness, opacity = 1 }) {
+  const geom = useMemo(
+    () => buildLeafGeometry(plan, skin, offset, thickness),
+    [plan, skin, offset, thickness],
+  )
+  useLayoutEffect(() => () => geom.dispose(), [geom])
+  const ghost = opacity < 0.98
+  return (
+    <mesh geometry={geom} raycast={noopRaycast} castShadow={!ghost} receiveShadow={!ghost}>
+      <meshStandardMaterial
+        color={maps ? '#ffffff' : color}
+        map={maps?.map || null}
+        bumpMap={maps?.bump || null}
+        bumpScale={maps?.bump ? 0.012 : 0}
+        roughness={roughness}
+        metalness={metalness}
+        transparent={ghost}
+        opacity={opacity}
+        depthWrite={!ghost}
+        polygonOffset
+        polygonOffsetFactor={-2}
+        polygonOffsetUnits={-2}
+        side={THREE.FrontSide}
+      />
+    </mesh>
+  )
 }
 
 function FacadeSkins({ plan, mode, selected, hovered }) {
@@ -549,39 +666,55 @@ function FacadeSkins({ plan, mode, selected, hovered }) {
     const skin = skins.find((item) => item.side === side && cell.u0 >= item.u0 - 0.04 && cell.u1 <= item.u1 + 0.04 && cell.y0 >= item.y0 - 0.04 && cell.y1 <= item.y1 + 0.04)
     return { ...cell, plane: skin?.plane ?? 0, nx: skin?.nx ?? 0, nz: skin?.nz ?? 1 }
   }))
-  const flashings = facadeFlashings(plan).map((joint) => extendFacadeSkin(plan, joint))
+  const flashings = facadeFlashings(plan).map((joint) => {
+    const skin = extendFacadeSkin(plan, joint)
+    const extra = CLADDING_LEAF_M / 2
+    return {
+      ...skin,
+      y0: joint.y - 0.014,
+      y1: joint.y + 0.014,
+      u0: skin.miter0 ? skin.u0 - extra : skin.u0,
+      u1: skin.miter1 ? skin.u1 + extra : skin.u1,
+    }
+  })
+  const leafOpacity = mode === 'ghost' ? 0.14 : 1
   const active = selected?.kind === 'zone' ? selected : null
   return (
     <group>
       {skins.map((skin) => {
         const look = surfaceLook(plan, skin.materialId, { color: skin.color, colorCode: skin.colorCode })
         const height = Math.max(0.05, skin.y1 - skin.y0)
-        const frame = facadeFrame(plan, skin, skinOffset(plan, skin.side))
-        const maps = realistic ? skinMaps(look, skin.u0, skin.y0, frame.span, height, frame.flipU) : null
+        const spanU = Math.max(0.05, skin.u1 - skin.u0)
+        const maps = realistic ? skinMaps(look, skin.u0, skin.y0, spanU, height, false) : null
         return (
-          <mesh key={`skin-${skin.side}-${skin.plane}-${skin.u0}-${skin.y0}-${skin.materialId}`} position={[frame.position[0], (skin.y0 + skin.y1) / 2, frame.position[2]]} rotation={[0, frame.yaw, 0]} raycast={noopRaycast} castShadow={realistic} receiveShadow={realistic}>
-            <boxGeometry args={[frame.span, height, 0.02]} />
-            <meshStandardMaterial
-              color={maps ? '#ffffff' : look.color}
-              map={maps?.map || null}
-              bumpMap={maps?.bump || null}
-              bumpScale={maps?.bump ? 0.012 : 0}
-              roughness={look.pattern === 'brick' ? 0.86 : 0.72}
-              metalness={0.02}
-              side={THREE.DoubleSide}
-            />
-          </mesh>
+          <LeafMesh
+            key={`skin-${skin.side}-${skin.plane}-${skin.u0}-${skin.y0}-${skin.materialId}`}
+            plan={plan}
+            skin={skin}
+            offset={skinOffset(plan, skin.side)}
+            thickness={CLADDING_LEAF_M}
+            maps={maps}
+            color={look.color}
+            roughness={look.pattern === 'brick' ? 0.86 : 0.72}
+            metalness={0.02}
+            opacity={leafOpacity}
+          />
         )
       })}
-      {flashings.filter((joint) => joint.y > plinthH + 0.02).map((joint) => {
-        const frame = facadeFrame(plan, { ...joint, u0: joint.u0, u1: joint.u1 }, skinOffset(plan, joint.side) + 0.016)
-        return (
-          <mesh key={`flash-${joint.side}-${joint.y}-${joint.u0}`} position={[frame.position[0], joint.y, frame.position[2]]} rotation={[0, frame.yaw, 0]} raycast={noopRaycast} castShadow>
-            <boxGeometry args={[Math.max(0.05, frame.span), 0.028, 0.02]} />
-            <meshStandardMaterial color="#6e6862" roughness={0.45} metalness={0.35} />
-          </mesh>
-        )
-      })}
+      {flashings.filter((joint) => (joint.y0 + joint.y1) / 2 > plinthH + 0.02).map((joint) => (
+        <LeafMesh
+          key={`flash-${joint.side}-${joint.y0}-${joint.u0}`}
+          plan={plan}
+          skin={joint}
+          offset={skinOffset(plan, joint.side) + CLADDING_LEAF_M / 2 + 0.008}
+          thickness={0.012}
+          maps={null}
+          color="#6e6862"
+          roughness={0.45}
+          metalness={0.35}
+          opacity={leafOpacity}
+        />
+      ))}
       {cells.map((cell) => {
         const frame = facadeFrame(plan, cell, skinOffset(plan, cell.side) + 0.008)
         const height = Math.max(0.05, cell.y1 - cell.y0)
@@ -635,10 +768,28 @@ function WallMesh({ plan, mode, selected, hovered }) {
           ]
         })
         return slices.map((piece) => {
-          const span = piece.to - piece.from
-          const mid = pointAt(wall, (piece.from + piece.to) / 2)
-          const placeX = mid.x + nx * bodyShift
-          const placeZ = mid.z + nz * bodyShift
+          const cladLeaf = wall.kind === 'exterior' && !piece.plinthBand
+          const from = cladLeaf && piece.from < -0.001 ? 0.04 : piece.from
+          const to = cladLeaf && piece.to > len + 0.001 ? len - 0.04 : piece.to
+          const span = to - from
+          if (span < 0.02) return null
+          const mid = pointAt(wall, (from + to) / 2)
+          const faceFrom = piece.from < 0 ? 0 : piece.from
+          const faceTo = piece.to > len ? len : piece.to
+          const faceSpan = faceTo - faceFrom
+          const faceMid = pointAt(wall, (faceFrom + faceTo) / 2)
+          const tuck = cladLeaf ? 0.03 : 0
+          let ox = nx
+          let oz = nz
+          const bounds = planBounds(plan)
+          const wmx = (wall.a.x + wall.b.x) / 2
+          const wmz = (wall.a.z + wall.b.z) / 2
+          if (ox * (wmx - (bounds.minX + bounds.maxX) / 2) + oz * (wmz - (bounds.minZ + bounds.maxZ) / 2) < 0) {
+            ox = -ox
+            oz = -oz
+          }
+          const placeX = mid.x + nx * bodyShift - ox * (tuck / 2)
+          const placeZ = mid.z + nz * bodyShift - oz * (tuck / 2)
           const y = (piece.y0 + piece.y1) / 2
           const height = piece.y1 - piece.y0
           const cladding = wall.kind === 'exterior' && !piece.plinthBand
@@ -662,7 +813,7 @@ function WallMesh({ plan, mode, selected, hovered }) {
           return (
             <group key={faceKey}>
               <Solid
-                args={[span, height, piece.plinthBand ? thick + 0.02 : thick]}
+                args={[span, height, (piece.plinthBand ? thick + 0.02 : thick) - tuck]}
                 position={[placeX, y, placeZ]}
                 rotation={[0, yaw, 0]}
                 color={faceColor}
@@ -684,13 +835,13 @@ function WallMesh({ plan, mode, selected, hovered }) {
                 return (
                   <mesh
                     key={`${faceKey}-${side}`}
-                    position={[mid.x + nx * dist, y, mid.z + nz * dist]}
+                    position={[faceMid.x + nx * dist, y, faceMid.z + nz * dist]}
                     rotation={[0, yaw, 0]}
                     raycast={noopRaycast}
                     castShadow={realistic}
                     receiveShadow={realistic}
                   >
-                    <boxGeometry args={[Math.max(0.05, span - 0.02), height, 0.036]} />
+                    <boxGeometry args={[Math.max(0.05, faceSpan - 0.02), height, 0.036]} />
                     <meshStandardMaterial
                       color={skin ? '#ffffff' : item.color}
                       map={skin}
@@ -1887,7 +2038,7 @@ function Dressing({ plan }) {
     const reach = Math.max(facadeOuterReach(plan, 'north'), facadeOuterReach(plan, 'south'), facadeOuterReach(plan, 'east'), facadeOuterReach(plan, 'west'))
     return {
       key: `down-${index}`,
-      position: [x - sx * 0.72, model.wallHeight / 2, z + sz * (reach + 0.06)],
+      position: [x - sx * 0.9, model.wallHeight / 2, z + sz * (reach + 0.08)],
       rotation: [0, 0, 0],
       args: [0.07, model.wallHeight, 0.07],
       color: gutter,
