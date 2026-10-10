@@ -2718,7 +2718,7 @@ export default function FloorPlanApp() {
     const onPointer = (event) => {
       const target = event.target
       if (!(target instanceof Element)) return
-      if (target.closest('[data-testid="display-panel"]') || target.closest('[data-testid="open-display"]')) return
+      if (target.closest('[data-testid="display-panel"]') || target.closest('[data-testid="open-display"]') || target.closest('[data-testid="menu-bar"]')) return
       setDisplayOpen(false)
     }
     document.addEventListener('pointerdown', onPointer, true)
