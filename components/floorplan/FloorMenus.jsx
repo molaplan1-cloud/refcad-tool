@@ -66,7 +66,8 @@ import { addChimneyFor, chimneyKind, defaultFlue, flueOptions, withChimneyFields
 import { ServiceMenu } from './ServicesLayer'
 import { YardFields, YardMenuBody } from './YardPanel'
 import { yardTitle } from '@/lib/yard'
-import { addServiceNode, applyHeating, applyLocation, ensureServices, refreshHeat, serviceObjectTitle, suggestFloorManifold } from '@/lib/services'
+import { addServiceNode, applyHeating, applyLocation, ensureServices, refreshHeat, serviceObjectTitle, setProjectIvZone, suggestFloorManifold } from '@/lib/services'
+import { IV_ZONES, projectIvZone } from '@/lib/ivZone'
 import { HEAT_SOURCES, HEATING_METHODS, LOOP_SPACINGS, normalizeHeating, normalizeRoomHeating } from '@/lib/hydronic'
 import { formatRoomInfo, roomReport, thermalOf } from '@/lib/roominfo'
 import { normalizeGround } from '@/lib/groundworks'
@@ -339,6 +340,13 @@ export function HouseSettings({ plan, onApply }) {
       <Field label={t('house.floorHeight')}>
         <input style={inputStyle} type="number" min="2200" max="4000" value={mm(plan.floorHeight || 2.6)} onChange={(event) => onApply(updateHouse(plan, { floorHeight: fromMm(event.target.value) || 2.6 }))} />
       </Field>
+      <div style={{ fontSize: 12, fontWeight: 700, margin: '10px 0 6px' }}>{t('iv.settings')}</div>
+      <Field label={t('iv.zone')}>
+        <select data-testid="iv-zone-default" style={inputStyle} value={projectIvZone(plan)} onChange={(event) => onApply(setProjectIvZone(plan, event.target.value))}>
+          {IV_ZONES.map((id) => <option key={id} value={id}>{t(`iv.zone.${id}`)}</option>)}
+        </select>
+      </Field>
+      <div data-testid="iv-zone-hint" style={{ fontSize: 12, color: '#57534e', margin: '-2px 0 8px', lineHeight: 1.4 }}>{t('iv.zone.hint')}</div>
       <ThermalFields plan={plan} onApply={onApply} />
       <Field label={t('house.legacyWall')}>
         <select style={inputStyle} value={plan.exteriorStructure || 'puuranka'} onChange={(event) => onApply(updateHouse(plan, { exteriorStructure: event.target.value }))}>

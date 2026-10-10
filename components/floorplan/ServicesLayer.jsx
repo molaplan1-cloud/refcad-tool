@@ -41,6 +41,7 @@ import {
   symbolSizeMm,
 } from '@/lib/electricSymbols'
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
+import { IV_ZONES, insulationMessageKey, segmentDashed, segmentZone } from '@/lib/ivZone'
 import { houseBox } from '@/lib/yard'
 import { CAD_COMMANDS } from '@/lib/cadEdit'
 import { annotationFont, paperFont, placeFlowLabel, placeLineLabels, routeStrokeBoxes } from '@/lib/annotations'
@@ -806,21 +807,45 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const showText = !quietLabels || runSelected
         return (
           <g key={run.id} opacity={live(run.system) ? 1 : 0.22} style={{ pointerEvents: live(run.system) ? 'auto' : 'none' }}>
-            <polyline
-              points={pointsOf(points, X, Y)}
-              fill="none"
-              stroke={color}
-              strokeWidth={width}
-              strokeDasharray={run.system === 'electric'
-                ? (run.role === 'switch-drop' || run.role === 'traveler' ? `${0.9 * unit} ${0.7 * unit}` : `${1.8 * unit} ${1.15 * unit}`)
-                : (run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : (run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? '3.2 1.8' : dashed ? '6 4' : undefined))}
-              data-wire-role={run.role || ''}
-              data-heat-kind={run.system === 'heat' ? run.kind : undefined}
-              data-testid={run.kind === 'collector' ? 'collector-pipe' : (String(run.linkedFrom || '').includes(':sewer') ? 'sewer-line' : (run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined))}
-              strokeLinejoin="round"
-              strokeLinecap={run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? 'butt' : 'round'}
-              style={{ pointerEvents: 'none' }}
-            />
+            {run.system === 'iv' ? points.slice(1).map((point, index) => {
+              const prev = points[index]
+              const zone = segmentZone(run, index, plan)
+              const attic = segmentDashed(prev, point, zone, plan)
+              if (Math.hypot(point.x - prev.x, point.z - prev.z) < 0.02 && Math.abs((point.y || 0) - (prev.y || 0)) < 0.02) return null
+              return (
+                <line
+                  key={`iv-seg-${run.id}-${index}`}
+                  data-testid="duct-segment"
+                  data-zone={zone}
+                  data-above={attic ? '1' : '0'}
+                  x1={X(prev.x)}
+                  y1={Y(prev.z)}
+                  x2={X(point.x)}
+                  y2={Y(point.z)}
+                  stroke={color}
+                  strokeWidth={width}
+                  strokeDasharray={attic ? `${7 * (multi ? 0.7 : 1)} ${4 * (multi ? 0.7 : 1)}` : undefined}
+                  strokeLinecap="round"
+                  style={{ pointerEvents: 'none' }}
+                />
+              )
+            }) : (
+              <polyline
+                points={pointsOf(points, X, Y)}
+                fill="none"
+                stroke={color}
+                strokeWidth={width}
+                strokeDasharray={run.system === 'electric'
+                  ? (run.role === 'switch-drop' || run.role === 'traveler' ? `${0.9 * unit} ${0.7 * unit}` : `${1.8 * unit} ${1.15 * unit}`)
+                  : (run.role === 'switch-drop' || run.role === 'traveler' ? '2 2' : (run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? '3.2 1.8' : dashed ? '6 4' : undefined))}
+                data-wire-role={run.role || ''}
+                data-heat-kind={run.system === 'heat' ? run.kind : undefined}
+                data-testid={run.kind === 'collector' ? 'collector-pipe' : (String(run.linkedFrom || '').includes(':sewer') ? 'sewer-line' : (run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined))}
+                strokeLinejoin="round"
+                strokeLinecap={run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? 'butt' : 'round'}
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
             <polyline
               points={pointsOf(points, X, Y)}
               fill="none"
@@ -1175,6 +1200,7 @@ function MenuBtn({ children, onClick, testid }) {
 }
 
 function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
+  const { t } = usePlanLocale(plan)
   const metres = routeLength(run.points)
   const materials = materialOptions(run.system)
   const insulations = insulationOptions(run.system)
@@ -1185,12 +1211,46 @@ function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
   const a = run.points?.[segment]
   const b = run.points?.[segment + 1]
   const segmentMetres = a && b ? Math.hypot(b.x - a.x, b.z - a.z) : metres
+  const branchZone = IV_ZONES.includes(run.zone) ? run.zone : ''
+  const segmentPicked = segmentZone(run, segment, plan)
+  const segmentOwn = IV_ZONES.includes(run.segmentZone?.[segment]) || IV_ZONES.includes(a?.zone) || IV_ZONES.includes(b?.zone)
+    ? (IV_ZONES.includes(a?.zone) && a.zone === b?.zone ? a.zone : (IV_ZONES.includes(run.segmentZone?.[segment]) ? run.segmentZone[segment] : (a?.zone || b?.zone || '')))
+    : ''
   return (
     <div data-testid="route-fields">
       <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>
         {`Pituus ${metres.toFixed(1).replace('.', ',')} m`}
         {run.locked ? ' · manuaalinen' : ''}
       </div>
+      {run.system === 'iv' && (
+        <>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+            {t('iv.zone.branch')}
+            <select
+              data-testid="iv-zone-run"
+              style={fieldStyle}
+              value={branchZone}
+              onChange={(event) => onCommit(updateServiceRun(plan, run.id, { zone: event.target.value }))}
+            >
+              <option value="">{t('iv.zone.inherit')}</option>
+              {IV_ZONES.map((id) => <option key={id} value={id}>{t(`iv.zone.${id}`)}</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+            {t('iv.zone.segment')}
+            <select
+              data-testid="iv-zone-segment"
+              style={fieldStyle}
+              value={segmentOwn || ''}
+              onChange={(event) => onCommit(updateServiceRun(plan, run.id, { segmentZone: { index: segment, zone: event.target.value } }))}
+            >
+              <option value="">{t('iv.zone.inherit')}</option>
+              {IV_ZONES.map((id) => <option key={id} value={id}>{t(`iv.zone.${id}`)}</option>)}
+            </select>
+          </label>
+          <div data-testid="iv-zone-effective" style={{ fontSize: 11, color: '#78716c', marginBottom: 8 }}>{t(`iv.zone.${segmentPicked}`)}</div>
+        </>
+      )}
       <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
         Nimi
         <input data-testid="route-label" style={fieldStyle} defaultValue={run.label || ''} onBlur={(event) => onPatch({ label: event.target.value })} />
@@ -1253,6 +1313,9 @@ function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
         Eristys
         <select data-testid="route-insulation" style={fieldStyle} value={run.insulation || ''} onChange={(event) => onCommit(updateServiceRun(plan, run.id, { insulation: event.target.value }))}>
           <option value="">—</option>
+          {run.system === 'iv' && ['wool-100', 'condensate'].map((id) => (
+            <option key={id} value={id}>{t(insulationMessageKey(id))}</option>
+          ))}
           {insulations.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
       </label>

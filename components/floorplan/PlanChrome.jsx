@@ -299,6 +299,7 @@ export function PlanChrome({
           <button type="button" data-testid="view-site" disabled={access && !access.workspaces.includes('piha')} style={{ ...modeTab(mode === 'site'), minHeight: 44 }} onClick={() => { if (!access || access.workspaces.includes('piha')) onMode('site') }}>{t('view.site')}</button>
           <button type="button" data-testid="view-floor-3d" style={{ ...modeTab(mode === '3d'), minHeight: 44 }} onClick={() => onMode('3d')}>3D</button>
           <button type="button" data-testid="view-facade" style={{ ...modeTab(mode === 'facade'), minHeight: 44 }} onClick={() => onMode('facade')}>{t('view.facade')}</button>
+          <button type="button" data-testid="view-section" style={{ ...modeTab(mode === 'section'), minHeight: 44 }} onClick={() => onMode('section')}>{t('view.section')}</button>
         </div>
         <div className="workspace-scroll" data-testid="workspace-tabs" style={{ background: '#1c212b' }}>
           {WORKSPACES.map((item) => {
@@ -319,7 +320,7 @@ export function PlanChrome({
             <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
           </div>
         )}
-        {toolsOpen && mode !== 'facade' && (
+        {toolsOpen && mode !== 'facade' && mode !== 'section' && (
           <div className="tool-sheet" data-testid="tool-sheet">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
               {workspace === 'rakenne' && (onPlan || mode === '3d') && drawTools(hit)}
@@ -366,6 +367,7 @@ export function PlanChrome({
           <button type="button" data-testid="view-site" disabled={access && !access.workspaces.includes('piha')} style={modeTab(mode === 'site')} onClick={() => { if (!access || access.workspaces.includes('piha')) onMode('site') }}>{t('view.site')}</button>
           <button type="button" data-testid="view-floor-3d" style={modeTab(mode === '3d')} onClick={() => onMode('3d')}>3D</button>
           <button type="button" data-testid="view-facade" style={modeTab(mode === 'facade')} onClick={() => onMode('facade')}>{t('view.facade')}</button>
+          <button type="button" data-testid="view-section" style={modeTab(mode === 'section')} onClick={() => onMode('section')}>{t('view.section')}</button>
         </div>
         <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
       </header>
@@ -458,7 +460,7 @@ export function PlanChrome({
         <button type="button" title={t('edit.undo')} onClick={onUndo} style={rib(false)}>↶</button>
         <button type="button" title={t('edit.redo')} onClick={onRedo} style={rib(false)}>↷</button>
       </div>
-      {mode !== 'facade' && (
+      {mode !== 'facade' && mode !== 'section' && (
         <div data-testid="tool-ribbon" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '4px 8px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto' }}>
             {workspace === 'rakenne' && (onPlan || mode === '3d') && (

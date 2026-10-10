@@ -2,9 +2,10 @@
 
 import * as THREE from 'three'
 import { ensureServices, pipeRadius, runColor, serviceItemVisible } from '@/lib/services'
+import { segmentInsulation } from '@/lib/ivZone'
 import { deviceEnvelope, isWallDevice } from '@/lib/wallDevices'
 
-function Segment({ a, b, radius, color, pick, mark }) {
+function Segment({ a, b, radius, color, pick, mark, insulated }) {
   const start = new THREE.Vector3(a.x, a.y || 0, a.z)
   const end = new THREE.Vector3(b.x, b.y || 0, b.z)
   const length = start.distanceTo(end)
@@ -20,6 +21,12 @@ function Segment({ a, b, radius, color, pick, mark }) {
         emissive={mark === 'selected' ? '#042f2e' : '#000000'}
         emissiveIntensity={mark === 'selected' ? 0.6 : 0}
       />
+      {insulated && (
+        <mesh>
+          <cylinderGeometry args={[radius + 0.1, radius + 0.1, length, 10]} />
+          <meshLambertMaterial color="#d6d3d1" transparent opacity={0.42} depthWrite={false} />
+        </mesh>
+      )}
     </mesh>
   )
 }
@@ -28,7 +35,7 @@ function sameService(item, run, target) {
   return item?.kind === 'service' && item.service?.target === target && item.service?.id === (target === 'run' ? run.id : run.id)
 }
 
-function RunMesh({ run, selected, hovered }) {
+function RunMesh({ run, plan, selected, hovered }) {
   const radius = pipeRadius(run)
   const color = runColor(run)
   const points = run.points || []
@@ -45,6 +52,7 @@ function RunMesh({ run, selected, hovered }) {
           color={color}
           pick={{ kind: 'service', service: { target: 'segment', id: run.id, system: run.system, index } }}
           mark={mark}
+          insulated={run.system === 'iv' && ['wool-100', 'condensate'].includes(segmentInsulation(run, index, plan))}
         />
       ))}
       {activeId && mark === 'selected' && points.map((point, index) => (
@@ -172,7 +180,7 @@ export default function Services3D({ plan, selected = null, hovered = null, acti
     <group>
       {runs.map((run) => (
         <group key={run.id} opacity={live(run.system) ? 1 : 0.22}>
-          <RunMesh run={run} selected={selected} hovered={hovered} />
+          <RunMesh run={run} plan={plan} selected={selected} hovered={hovered} />
         </group>
       ))}
       {nodes.map((node) => (
