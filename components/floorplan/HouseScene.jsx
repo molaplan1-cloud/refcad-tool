@@ -38,6 +38,7 @@ import { yardHasUnderground } from '@/lib/groundworks'
 import { layerVisible } from '@/lib/services'
 import { labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { chimneyKind, chimneyTop, drawingOf } from '@/lib/chimney'
+import { fixtureBounds } from '@/lib/furniture'
 import { faceOffsets } from '@/lib/wall-outline'
 
 const textureCache = new Map()
@@ -1069,6 +1070,61 @@ function RoofMesh({ plan, mode, selected, hovered }) {
   )
 }
 
+const BODY_ALIAS = {
+  hob: 'stove',
+  'base-cab': 'cabinet',
+  appliance: 'dishwasher',
+  vanity: 'basin',
+  desk: 'table',
+  coffee: 'table',
+  night: 'cabinet',
+  dresser: 'cabinet',
+  low: 'cabinet',
+  freezer: 'fridge',
+  washer: 'dishwasher',
+}
+
+const HUNG_BODIES = new Set(['wall-cab', 'tv', 'wall-tv', 'mirror', 'mirror-cab', 'hood', 'towel-rad'])
+
+// Unscaled vertical extent of stylized meshes. One Y fit maps this onto the entered height.
+const MODEL_SPAN = {
+  bed: [0.08, 0.46],
+  sofa: [0.12, 0.73],
+  table: [0.01, 0.77],
+  chair: [0, 0.9],
+  toilet: [0.08, 0.6],
+  basin: [0.01, 0.9],
+  sink: [0.01, 0.9],
+  stove: [0, 0.92],
+  bench: [0, 0.7425],
+  heater: [0.005, 0.71],
+  'sauna-bench': [0, 0.92],
+  'sauna-bench-3': [0, 1.17],
+  car: [0, 0.775],
+  armchair: [0.18, 0.73],
+  'sofa-corner': [0.18, 0.73],
+  divan: [0.18, 0.73],
+  bunk: [0, 1.4],
+  lamp: [0.005, 1.51],
+  'heater-wood': [0, 0.82],
+  insert: [0.01, 0.63],
+  kamiina: [0, 0.99],
+  puuhella: [0, 0.83],
+  'office-chair': [0.04, 0.98],
+}
+
+function FittedFixture({ body, h = 0.8, base = 0, children }) {
+  const type = BODY_ALIAS[body] || body || 'box'
+  if (HUNG_BODIES.has(type)) return children
+  const height = Number(h) > 0 ? Number(h) : 0.8
+  const baseY = Number.isFinite(Number(base)) ? Number(base) : 0
+  const span = MODEL_SPAN[type]
+  if (!span) return baseY ? <group position={[0, baseY, 0]}>{children}</group> : children
+  const [from, to] = span
+  const sy = height / Math.max(1e-6, to - from)
+  return <group position={[0, baseY - from * sy, 0]} scale={[1, sy, 1]}>{children}</group>
+}
+
 function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
   const box = (size, position, color, opacity = 1) => (
     <mesh position={position}>
@@ -1083,20 +1139,7 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
       <meshLambertMaterial color={color} />
     </mesh>
   )
-  const alias = {
-    hob: 'stove',
-    'base-cab': 'cabinet',
-    appliance: 'dishwasher',
-    vanity: 'basin',
-    desk: 'table',
-    coffee: 'table',
-    night: 'cabinet',
-    dresser: 'cabinet',
-    low: 'cabinet',
-    freezer: 'fridge',
-    washer: 'dishwasher',
-  }
-  const type = alias[body] || body || 'box'
+  const type = BODY_ALIAS[body] || body || 'box'
   if (type === 'bed') {
     return (
       <group>
@@ -1150,7 +1193,7 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
     return (
       <group>
         {box([w, 0.08, d], [0, 0.86, 0], '#f8fafc')}
-        {box([w, 0.04, 0.028], [0, 0.835, d * 0.48], '#94a3b8')}
+        {box([w, 0.04, 0.028], [0, 0.835, d / 2 - 0.014], '#94a3b8')}
         {box([w * 0.55, 0.07, d * 0.42], [0, 0.8, 0.01], '#cbd5e1')}
         {box([0.08, 0.82, d * 0.72], [-w * 0.42, 0.42, 0], '#e7e5e4')}
         {box([0.08, 0.82, d * 0.72], [w * 0.42, 0.42, 0], '#e7e5e4')}
@@ -1170,18 +1213,23 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
       </group>
     )
   }
-  if (type === 'fridge') return box([w, Math.max(h, 1.7), d], [0, Math.max(h, 1.7) / 2, 0], '#f8fafc')
-  if (type === 'dishwasher') return box([w, 0.86, d], [0, 0.43, 0], '#e2e8f0')
+  if (type === 'fridge') return box([w, h || 1.75, d], [0, (h || 1.75) / 2, 0], '#f8fafc')
+  if (type === 'dishwasher') return box([w, h || 0.86, d], [0, (h || 0.86) / 2, 0], '#e2e8f0')
   if (type === 'cabinet' || type === 'island') {
+    const height = h > 0 ? h : 0.9
+    const topT = Math.min(0.045, Math.max(0.008, height * 0.08))
+    const bodyH = Math.max(0.01, height - topT)
+    const lipH = Math.min(0.02, bodyH * 0.25)
+    const lipD = Math.min(0.02, d * 0.08)
     return (
       <group>
-        {box([w * 0.96, 0.78, d * 0.92], [0, 0.39, 0.02], '#f5f5f4')}
-        {box([w, 0.045, d], [0, 0.84, 0], '#e7e5e4')}
-        {box([w, 0.028, 0.035], [0, 0.8, d * 0.48], '#a8a29e')}
+        {box([w, bodyH, d], [0, bodyH / 2, 0], '#f5f5f4')}
+        {box([w, topT, d], [0, height - topT / 2, 0], '#d6d3d1')}
+        {box([Math.min(w * 0.55, w - 0.04), lipH, lipD], [0, bodyH * 0.55, d / 2 - lipD / 2], '#a8a29e')}
       </group>
     )
   }
-  if (type === 'bath') return box([w, 0.5, d], [0, 0.28, 0], '#f8fafc')
+  if (type === 'bath') return box([w, h || 0.58, d], [0, (h || 0.58) / 2, 0], '#f8fafc')
   if (type === 'bench') {
     return (
       <group>
@@ -1216,7 +1264,7 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
         {box([w, 0.08, d], [0, 0.04, 0], '#e2e8f0')}
         {box([w * 0.92, h || 1.9, 0.02], [0, (h || 1.9) / 2, -d * 0.46], '#e0f2fe', 0.35)}
         {type !== 'shower-screen' && box([0.02, h || 1.9, d * 0.9], [-w * 0.46, (h || 1.9) / 2, 0], '#e0f2fe', 0.35)}
-        {cyl(0.03, 0.16, [w * 0.2, 1.85, -d * 0.15], '#94a3b8')}
+        {cyl(0.03, 0.16, [w * 0.2, Math.max(0.2, (h || 1.9) - 0.1), -d * 0.15], '#94a3b8')}
       </group>
     )
   }
@@ -1235,12 +1283,12 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
     return (
       <group>
         {box([w, h || 2.1, d], [0, (h || 2.1) / 2, 0], '#e7e5e4')}
-        {box([0.02, (h || 2.1) * 0.92, 0.015], [0, (h || 2.1) / 2, d * 0.5], '#a8a29e')}
+        {box([0.02, (h || 2.1) * 0.92, 0.015], [0, (h || 2.1) / 2, d / 2 - 0.008], '#a8a29e')}
       </group>
     )
   }
   if (type === 'wall-cab') return box([w, h || 0.7, d], [0, 1.55, 0], '#f5f5f4')
-  if (type === 'tv') return box([w, h || 0.65, Math.max(d, 0.04)], [0, 1.15, 0], '#1c1917')
+  if (type === 'tv') return box([w, h || 0.65, d], [0, 1.15, 0], '#1c1917')
   if (type === 'wall-tv') {
     const centre = Number.isFinite(Number(mount)) ? Number(mount) : 1.2
     const panelDepth = stand ? Math.min(0.07, Math.max(d, 0.04)) : Math.max(d, 0.04)
@@ -1256,12 +1304,12 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
           </group>
         )}
         {box([w, h, panelDepth], [0, centre, panelZ], '#292524')}
-        {box([Math.max(0.2, w - 0.04), Math.max(0.16, h - 0.04), 0.006], [0, centre, face + 0.001], '#0c0a09')}
-        {!stand && box([Math.min(w * 0.42, 0.28), 0.035, 0.018], [0, centre, panelZ - panelDepth / 2 - 0.006], '#57534e')}
+        {box([Math.max(0.2, w - 0.04), Math.max(0.16, h - 0.04), 0.006], [0, centre, face - 0.004], '#0c0a09')}
+        {!stand && box([Math.min(w * 0.42, 0.28), 0.035, 0.018], [0, centre, panelZ - panelDepth / 2 + 0.01], '#57534e')}
       </group>
     )
   }
-  if (type === 'rug') return box([w, 0.02, d], [0, 0.01, 0], '#b08968')
+  if (type === 'rug') return box([w, h || 0.02, d], [0, (h || 0.02) / 2, 0], '#b08968')
   if (type === 'car') {
     return (
       <group>
@@ -1312,14 +1360,18 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
       </group>
     )
   }
-  if (type === 'hood') return box([w, 0.12, Math.min(d, 0.45)], [0, 1.55, -d * 0.05], '#e7e5e4')
+  if (type === 'hood') return box([w, h || 0.4, d], [0, 1.55, 0], '#e7e5e4')
   if (type === 'towel-rad') {
+    const height = h || 1.1
+    const centre = Math.max(height / 2, 0.9)
+    const bottom = centre - height / 2
+    const railX = Math.max(0.02, w / 2 - 0.015)
     return (
       <group>
-        {box([0.03, h || 1.1, 0.03], [-w * 0.4, 0.9, 0], '#cbd5e1')}
-        {box([0.03, h || 1.1, 0.03], [w * 0.4, 0.9, 0], '#cbd5e1')}
+        {box([0.03, height, d], [-railX, centre, 0], '#cbd5e1')}
+        {box([0.03, height, d], [railX, centre, 0], '#cbd5e1')}
         {[0, 1, 2, 3, 4].map((index) => (
-          <group key={index}>{box([w * 0.8, 0.02, 0.02], [0, 0.55 + index * 0.16, 0], '#e2e8f0')}</group>
+          <group key={index}>{box([Math.max(0.04, w - 0.06), 0.02, Math.min(d, 0.02)], [0, bottom + height * (0.22 + index * 0.14), 0], '#e2e8f0')}</group>
         ))}
       </group>
     )
@@ -1329,7 +1381,7 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
       <group>
         {box([w, 0.7, d], [0, 0.35, 0], '#44403c')}
         {box([w * 0.7, 0.08, d * 0.15], [0, 0.78, d * 0.1], '#292524')}
-        {box([w * 0.55, 0.22, 0.04], [0, 0.32, d * 0.48], '#1c1917')}
+        {box([w * 0.55, 0.22, 0.04], [0, 0.32, d / 2 - 0.02], '#1c1917')}
       </group>
     )
   }
@@ -1361,7 +1413,7 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
     return (
       <group>
         {box([w, h || 1.4, d], [0, (h || 1.4) / 2, 0], '#e7e5e4')}
-        {box([w * 0.4, 0.22, 0.06], [0, 0.55, d * 0.48], '#292524')}
+        {box([w * 0.4, 0.22, 0.06], [0, 0.55, d / 2 - 0.03], '#292524')}
       </group>
     )
   }
@@ -1386,7 +1438,7 @@ function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
       </group>
     )
   }
-  if (type === 'mirror' || type === 'mirror-cab') return box([w, h || 0.7, Math.max(d, 0.04)], [0, 1.45, 0], '#e2e8f0')
+  if (type === 'mirror' || type === 'mirror-cab') return box([w, h || 0.7, d], [0, 1.45, 0], '#e2e8f0')
   if (type === 'office-chair') {
     return (
       <group>
@@ -1473,6 +1525,40 @@ function ChimneyShaft({ fixture, plan, w, d }) {
   )
 }
 
+function FixtureMark({ bounds, mark }) {
+  if (!mark || !(bounds.width > 0) || !(bounds.height > 0) || !(bounds.depth > 0)) return null
+  const color = mark === 'selected' ? '#0f766e' : '#14b8a6'
+  const x = bounds.width / 2
+  const z = bounds.depth / 2
+  const y0 = bounds.baseY
+  const y1 = bounds.baseY + bounds.height
+  const corners = [
+    [-x, y0, -z], [x, y0, -z], [x, y0, z], [-x, y0, z],
+    [-x, y1, -z], [x, y1, -z], [x, y1, z], [-x, y1, z],
+  ]
+  const pairs = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
+  const ox = x + 0.1
+  return (
+    <group>
+      {pairs.map(([a, b], index) => (
+        <Line key={index} points={[corners[a], corners[b]]} color={color} lineWidth={2} raycast={noopRaycast} />
+      ))}
+      {mark === 'selected' && (
+        <group>
+          <Line points={[[ox, y0, 0], [ox, y1, 0]]} color={color} lineWidth={2} raycast={noopRaycast} />
+          <Line points={[[ox - 0.045, y0, 0], [ox + 0.045, y0, 0]]} color={color} lineWidth={2} raycast={noopRaycast} />
+          <Line points={[[ox - 0.045, y1, 0], [ox + 0.045, y1, 0]]} color={color} lineWidth={2} raycast={noopRaycast} />
+          <Html position={[ox + 0.04, bounds.centerY, 0]} center zIndexRange={[40, 0]} style={{ pointerEvents: 'none' }}>
+            <div data-testid="fixture-bbox-mm" style={{ color, fontWeight: 700, fontSize: 14, background: 'rgba(255,255,255,0.94)', border: `1px solid ${color}`, borderRadius: 4, padding: '2px 6px', whiteSpace: 'nowrap', fontFamily: 'sans-serif' }}>
+              {Math.round(bounds.height * 1000)} mm
+            </div>
+          </Html>
+        </group>
+      )}
+    </group>
+  )
+}
+
 function FixtureMesh({ fixture, plan, selected, hovered, dim = false }) {
   const tpl = fixtureTemplate(fixture.type)
   const variant = (tpl.variants || []).find((entry) => entry.id === fixture.variant) || tpl.variants?.[0]
@@ -1486,6 +1572,10 @@ function FixtureMesh({ fixture, plan, selected, hovered, dim = false }) {
   const hearth = draw.hearth
   const plateW = hearth ? w + (hearth.side || 0) * 2 : 0
   const plateD = hearth ? d + (hearth.front || 0) : 0
+  const shaft = draw.chimney ? Math.max(0.8, chimneyTop(plan, fixture).top) : 0
+  const bounds = draw.chimney
+    ? { width: w, depth: d, height: shaft, centerY: shaft / 2, baseY: 0 }
+    : fixtureBounds({ body, w, d, h, mount: fixture.mount, stand: fixture.stand === true, base: fixture.base })
   return (
     <group position={[fixture.x, 0, fixture.z]} rotation={[0, ((fixture.rotation || 0) * Math.PI) / 180, 0]} scale={[fixture.mirror ? -1 : 1, 1, 1]} userData={dim ? undefined : { pick }}>
       {hearth && (
@@ -1500,13 +1590,12 @@ function FixtureMesh({ fixture, plan, selected, hovered, dim = false }) {
           <meshLambertMaterial color="#e7e5e4" />
         </mesh>
       )}
-      {draw.chimney ? <ChimneyShaft fixture={fixture} plan={plan} w={w} d={d} /> : <FixtureBody body={body} w={w} d={d} h={h} mount={fixture.mount} stand={fixture.stand === true} />}
-      {mark && (
-        <mesh position={[0, body === 'wall-tv' ? (Number(fixture.mount) || 1.2) : 0.45, 0]}>
-          <boxGeometry args={[w + (mark === 'selected' ? 0.14 : 0.07), 0.95, d + (mark === 'selected' ? 0.14 : 0.07)]} />
-          <meshBasicMaterial color={mark === 'selected' ? '#0f766e' : '#14b8a6'} wireframe />
-        </mesh>
+      {draw.chimney ? <ChimneyShaft fixture={fixture} plan={plan} w={w} d={d} /> : (
+        <FittedFixture body={body} h={h} base={fixture.base}>
+          <FixtureBody body={body} w={w} d={d} h={h} mount={fixture.mount} stand={fixture.stand === true} />
+        </FittedFixture>
       )}
+      <FixtureMark bounds={bounds} mark={mark} />
     </group>
   )
 }
