@@ -1789,7 +1789,8 @@ export default function FloorPlanApp() {
       const patch = seated
         ? { x: seated.x, z: seated.z, y: seated.y, rotation: seated.rotation, wallId: seated.wallId, face: seated.face, mount: seated.mount, width: seated.width, depth: seated.depth, height: seated.height }
         : { x: snapped.x, z: snapped.z, wallId: null, face: null }
-      setPlan((current) => updateServiceNode(current, dragNode.current.id, patch))
+      const draggingId = dragNode.current.id
+      setPlan((current) => updateServiceNode(current, draggingId, patch))
     }
   }
 
