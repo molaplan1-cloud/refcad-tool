@@ -4670,12 +4670,12 @@ export default function FloorPlanApp() {
           {pick?.kind === 'room' && room && (
             <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>
           )}
-          {partsList(plan, 'iv').some((row) => row.key) && (
-            <div data-testid="iv-bom" style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>{t('iv.bom')}</div>
-              {partsList(plan, 'iv').filter((row) => row.key).map((row) => (
+          {partsList(plan).some((row) => row.key) && (
+            <div data-testid="zone-bom" style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>{t('zone.bom')}</div>
+              {partsList(plan).filter((row) => row.key).map((row) => (
                 <div key={row.code || row.key} data-testid="iv-bom-line" data-code={row.code || ''} style={{ display: 'flex', gap: 8, marginBottom: 4, fontSize: 12 }}>
-                  <span style={{ flex: 1 }}>{t(row.key)}</span>
+                  <span style={{ flex: 1 }}>{row.key ? t(row.key) : row.name}</span>
                   <span style={{ color: '#78716c' }}>{num(row.qty, 1)} {row.unit}</span>
                 </div>
               ))}

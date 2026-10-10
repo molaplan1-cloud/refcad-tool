@@ -58,7 +58,8 @@ export default function SectionView({ plan }) {
           />
         ))}
         {section.ducts.map((duct, index) => {
-          const color = runColor({ system: 'iv', kind: duct.kind })
+          const color = runColor({ system: duct.system || 'iv', kind: duct.kind })
+          const dash = duct.dash || (duct.above ? '7 4' : undefined)
           if (duct.mode === 'cut') {
             return (
               <circle
@@ -67,13 +68,14 @@ export default function SectionView({ plan }) {
                 data-zone={duct.zone}
                 data-above={duct.above ? '1' : '0'}
                 data-kind={duct.kind}
+                data-system={duct.system || 'iv'}
                 cx={X(duct.u0)}
                 cy={Y(duct.y0)}
                 r={5}
                 fill="none"
                 stroke={color}
                 strokeWidth={1.6}
-                strokeDasharray={duct.above ? '3 2' : undefined}
+                strokeDasharray={duct.above ? '3 2' : (duct.dash || undefined)}
               />
             )
           }
@@ -84,13 +86,14 @@ export default function SectionView({ plan }) {
               data-zone={duct.zone}
               data-above={duct.above ? '1' : '0'}
               data-kind={duct.kind}
+              data-system={duct.system || 'iv'}
               x1={X(duct.u0)}
               y1={Y(duct.y0)}
               x2={X(duct.u1)}
               y2={Y(duct.y1)}
               stroke={color}
               strokeWidth={2.4}
-              strokeDasharray={duct.above ? '7 4' : undefined}
+              strokeDasharray={dash}
               strokeLinecap="round"
             />
           )

@@ -20,7 +20,7 @@ import {
   rerouteRun,
   rerouteSystem,
   runColor,
-  serviceLegend,
+  serviceLegendRows,
   serviceObjectTitle,
   rotateServiceNode,
   snapDeviceToWall,
@@ -41,7 +41,7 @@ import {
   symbolSizeMm,
 } from '@/lib/electricSymbols'
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
-import { IV_ZONES, insulationMessageKey, segmentDashed, segmentZone } from '@/lib/ivZone'
+import { insulationMessageKey, routeExempt, segmentStyle, segmentZone, zoneAllowed, zoneLabelKey, zonesFor } from '@/lib/ivZone'
 import { houseBox } from '@/lib/yard'
 import { CAD_COMMANDS } from '@/lib/cadEdit'
 import { annotationFont, paperFont, placeFlowLabel, placeLineLabels, routeStrokeBoxes } from '@/lib/annotations'
@@ -571,7 +571,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     (!Array.isArray(legendSystems) || legendSystems.includes(item.id))
     && (layerVisible(plan, item.id) || (Array.isArray(revealSystems) && revealSystems.includes(item.id)))
     && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))
-  )).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
+  )).flatMap((item) => serviceLegendRows(plan, item.id).map((row) => ({ ...row, system: item.id })))
   const live = (system) => !Array.isArray(activeSystems) || activeSystems.includes(system)
   const open = (event, hit) => {
     event.preventDefault()
@@ -807,24 +807,29 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const showText = !quietLabels || runSelected
         return (
           <g key={run.id} opacity={live(run.system) ? 1 : 0.22} style={{ pointerEvents: live(run.system) ? 'auto' : 'none' }}>
-            {run.system === 'iv' ? points.slice(1).map((point, index) => {
+            {zonesFor(run.system).length && !routeExempt(run) ? points.slice(1).map((point, index) => {
               const prev = points[index]
               const zone = segmentZone(run, index, plan)
-              const attic = segmentDashed(prev, point, zone, plan)
+              const style = segmentStyle(zone, prev, point, plan)
               if (Math.hypot(point.x - prev.x, point.z - prev.z) < 0.02 && Math.abs((point.y || 0) - (prev.y || 0)) < 0.02) return null
+              const roleDash = run.role === 'switch-drop' || run.role === 'traveler'
+              const dash = roleDash
+                ? `${0.9 * unit} ${0.7 * unit}`
+                : (style.dash || undefined)
               return (
                 <line
-                  key={`iv-seg-${run.id}-${index}`}
-                  data-testid="duct-segment"
+                  key={`route-seg-${run.id}-${index}`}
+                  data-testid={run.system === 'iv' ? 'duct-segment' : 'route-segment'}
                   data-zone={zone}
-                  data-above={attic ? '1' : '0'}
+                  data-above={style.above ? '1' : '0'}
+                  data-system={run.system}
                   x1={X(prev.x)}
                   y1={Y(prev.z)}
                   x2={X(point.x)}
                   y2={Y(point.z)}
                   stroke={color}
-                  strokeWidth={width}
-                  strokeDasharray={attic ? `${7 * (multi ? 0.7 : 1)} ${4 * (multi ? 0.7 : 1)}` : undefined}
+                  strokeWidth={width * (style.weight || 1)}
+                  strokeDasharray={dash}
                   strokeLinecap="round"
                   style={{ pointerEvents: 'none' }}
                 />
@@ -1045,8 +1050,12 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
             const y = legendTitle + legendStep * (index + 1)
             const label = item.key && t(item.key) !== item.key ? t(item.key) : item.name
             return (
-              <g key={`${item.system}-${item.key || item.name}`}>
-                <rect x={8} y={y - legendFont * 0.72} width="12" height={legendFont * 0.7} fill={item.color} stroke="#44403c" strokeWidth="0.5" />
+              <g key={`${item.system}-${item.zoneId || item.key || item.name}`} data-testid={item.zone ? 'legend-zone' : undefined} data-zone={item.zoneId || undefined}>
+                {item.zone ? (
+                  <line x1={8} y1={y - legendFont * 0.28} x2={22} y2={y - legendFont * 0.28} stroke={item.color} strokeWidth={1.6} strokeDasharray={item.dash || undefined} />
+                ) : (
+                  <rect x={8} y={y - legendFont * 0.72} width="12" height={legendFont * 0.7} fill={item.color} stroke="#44403c" strokeWidth="0.5" />
+                )}
                 <text x={26} y={y} fontSize={legendFont} fill="#1c1917">{label}</text>
               </g>
             )
@@ -1211,10 +1220,11 @@ function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
   const a = run.points?.[segment]
   const b = run.points?.[segment + 1]
   const segmentMetres = a && b ? Math.hypot(b.x - a.x, b.z - a.z) : metres
-  const branchZone = IV_ZONES.includes(run.zone) ? run.zone : ''
+  const zones = zonesFor(run.system)
+  const branchZone = zoneAllowed(run.zone, run.system) ? run.zone : ''
   const segmentPicked = segmentZone(run, segment, plan)
-  const segmentOwn = IV_ZONES.includes(run.segmentZone?.[segment]) || IV_ZONES.includes(a?.zone) || IV_ZONES.includes(b?.zone)
-    ? (IV_ZONES.includes(a?.zone) && a.zone === b?.zone ? a.zone : (IV_ZONES.includes(run.segmentZone?.[segment]) ? run.segmentZone[segment] : (a?.zone || b?.zone || '')))
+  const segmentOwn = zoneAllowed(run.segmentZone?.[segment], run.system) || zoneAllowed(a?.zone, run.system) || zoneAllowed(b?.zone, run.system)
+    ? (zoneAllowed(a?.zone, run.system) && a.zone === b?.zone ? a.zone : (zoneAllowed(run.segmentZone?.[segment], run.system) ? run.segmentZone[segment] : (zoneAllowed(a?.zone, run.system) ? a.zone : (zoneAllowed(b?.zone, run.system) ? b.zone : ''))))
     : ''
   return (
     <div data-testid="route-fields">
@@ -1222,33 +1232,33 @@ function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
         {`Pituus ${metres.toFixed(1).replace('.', ',')} m`}
         {run.locked ? ' · manuaalinen' : ''}
       </div>
-      {run.system === 'iv' && (
+      {zones.length > 0 && (
         <>
           <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
             {t('iv.zone.branch')}
             <select
-              data-testid="iv-zone-run"
+              data-testid={run.system === 'iv' ? 'iv-zone-run' : 'route-zone'}
               style={fieldStyle}
               value={branchZone}
               onChange={(event) => onCommit(updateServiceRun(plan, run.id, { zone: event.target.value }))}
             >
               <option value="">{t('iv.zone.inherit')}</option>
-              {IV_ZONES.map((id) => <option key={id} value={id}>{t(`iv.zone.${id}`)}</option>)}
+              {zones.map((id) => <option key={id} value={id}>{t(zoneLabelKey(run.system, id))}</option>)}
             </select>
           </label>
           <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
             {t('iv.zone.segment')}
             <select
-              data-testid="iv-zone-segment"
+              data-testid={run.system === 'iv' ? 'iv-zone-segment' : 'route-zone-segment'}
               style={fieldStyle}
               value={segmentOwn || ''}
               onChange={(event) => onCommit(updateServiceRun(plan, run.id, { segmentZone: { index: segment, zone: event.target.value } }))}
             >
               <option value="">{t('iv.zone.inherit')}</option>
-              {IV_ZONES.map((id) => <option key={id} value={id}>{t(`iv.zone.${id}`)}</option>)}
+              {zones.map((id) => <option key={id} value={id}>{t(zoneLabelKey(run.system, id))}</option>)}
             </select>
           </label>
-          <div data-testid="iv-zone-effective" style={{ fontSize: 11, color: '#78716c', marginBottom: 8 }}>{t(`iv.zone.${segmentPicked}`)}</div>
+          <div data-testid={run.system === 'iv' ? 'iv-zone-effective' : 'route-zone-effective'} style={{ fontSize: 11, color: '#78716c', marginBottom: 8 }}>{segmentPicked ? t(zoneLabelKey(run.system, segmentPicked)) : ''}</div>
         </>
       )}
       <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>

@@ -2,10 +2,10 @@
 
 import * as THREE from 'three'
 import { ensureServices, pipeRadius, runColor, serviceItemVisible } from '@/lib/services'
-import { segmentInsulation } from '@/lib/ivZone'
+import { segmentParts } from '@/lib/ivZone'
 import { deviceEnvelope, isWallDevice } from '@/lib/wallDevices'
 
-function Segment({ a, b, radius, color, pick, mark, insulated }) {
+function Segment({ a, b, radius, color, pick, mark, sleeve }) {
   const start = new THREE.Vector3(a.x, a.y || 0, a.z)
   const end = new THREE.Vector3(b.x, b.y || 0, b.z)
   const length = start.distanceTo(end)
@@ -21,14 +21,33 @@ function Segment({ a, b, radius, color, pick, mark, insulated }) {
         emissive={mark === 'selected' ? '#042f2e' : '#000000'}
         emissiveIntensity={mark === 'selected' ? 0.6 : 0}
       />
-      {insulated && (
+      {sleeve === 'insulation' && (
         <mesh>
           <cylinderGeometry args={[radius + 0.1, radius + 0.1, length, 10]} />
           <meshLambertMaterial color="#d6d3d1" transparent opacity={0.42} depthWrite={false} />
         </mesh>
       )}
+      {sleeve === 'conduit' && (
+        <mesh>
+          <cylinderGeometry args={[radius + 0.018, radius + 0.018, length, 8]} />
+          <meshLambertMaterial color="#a8a29e" transparent opacity={0.55} depthWrite={false} />
+        </mesh>
+      )}
+      {sleeve === 'tray' && (
+        <mesh>
+          <boxGeometry args={[Math.max(0.08, radius * 4), length, 0.028]} />
+          <meshLambertMaterial color="#78716c" transparent opacity={0.7} depthWrite={false} />
+        </mesh>
+      )}
     </mesh>
   )
+}
+
+function sleeveKind(codes) {
+  if (codes.includes('wool-100') || codes.includes('condensate') || codes.includes('eristys')) return 'insulation'
+  if (codes.includes('kaapelikouru')) return 'tray'
+  if (codes.includes('suojaputki')) return 'conduit'
+  return ''
 }
 
 function sameService(item, run, target) {
@@ -52,7 +71,7 @@ function RunMesh({ run, plan, selected, hovered }) {
           color={color}
           pick={{ kind: 'service', service: { target: 'segment', id: run.id, system: run.system, index } }}
           mark={mark}
-          insulated={run.system === 'iv' && ['wool-100', 'condensate'].includes(segmentInsulation(run, index, plan))}
+          sleeve={sleeveKind(segmentParts(run, index, plan))}
         />
       ))}
       {activeId && mark === 'selected' && points.map((point, index) => (
