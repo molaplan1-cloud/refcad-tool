@@ -42,14 +42,45 @@ const inputStyle = {
   color: '#1c1917',
 }
 
-function patternNode(look) {
+function shadeHex(hex, tone) {
+  const raw = String(hex || '#d2a24c').replace('#', '')
+  const full = raw.length === 3 ? raw.split('').map((ch) => ch + ch).join('') : raw.padEnd(6, '0')
+  const channel = (index) => Math.max(0, Math.min(255, Math.round(parseInt(full.slice(index, index + 2), 16) * tone)))
+  return `#${[0, 2, 4].map((index) => channel(index).toString(16).padStart(2, '0')).join('')}`
+}
+
+function patternNode(look, pxPerMetre = 8, originX = 0, originY = 0) {
   const line = look.painted ? 'rgba(70,50,40,0.32)' : 'rgba(40,24,16,0.45)'
   const pid = `clad-${look.key}`
   if (look.pattern === 'brick') {
+    const modW = Math.max(1.5, 0.267 * pxPerMetre)
+    const modH = Math.max(0.8, 0.095 * pxPerMetre)
+    const joint = Math.max(0.35, 0.01 * pxPerMetre)
+    const bw = Math.max(0.8, modW - joint)
+    const bh = Math.max(0.4, modH - joint)
+    const inset = joint / 2
+    const tileW = modW * 2
+    const tileH = modH * 2
+    const tones = [1, 0.95, 1.05, 0.97]
+    const bricks = []
+    for (let row = 0; row < 2; row += 1) {
+      const shift = row === 0 ? modW / 2 : 0
+      const localY = row === 0 ? 0 : modH
+      for (let col = -1; col < 3; col += 1) {
+        bricks.push({
+          key: `${row}-${col}`,
+          x: col * modW + shift + inset,
+          y: localY + inset,
+          fill: shadeHex(look.color, tones[(row + col + 4) % tones.length]),
+        })
+      }
+    }
     return (
-      <pattern key={look.key} id={pid} width="16" height="8" patternUnits="userSpaceOnUse">
-        <rect width="16" height="8" fill={look.color} />
-        <path d="M0 4 H16 M0 0 V4 M8 4 V8 M0 8 H16" fill="none" stroke={look.mortar || line} strokeWidth={look.painted ? '0.45' : '0.7'} />
+      <pattern key={look.key} id={pid} x={originX} y={originY - tileH} width={tileW} height={tileH} patternUnits="userSpaceOnUse">
+        <rect width={tileW} height={tileH} fill={look.mortar || '#D5CBBA'} />
+        {bricks.map((brick) => (
+          <rect key={brick.key} x={brick.x} y={brick.y} width={bw} height={bh} fill={brick.fill} />
+        ))}
       </pattern>
     )
   }
@@ -521,7 +552,7 @@ export default function FacadeView({ plan, side, onSide, onApply, onCommit, onSe
           }}
           style={{ display: 'block', background: '#d6d3d1', touchAction: 'none', cursor: tool === 'rect' ? 'crosshair' : 'default' }}
         >
-          <defs>{patternLooks.map((look) => patternNode(realistic ? look : { ...look, color: '#f8fafc', painted: false }))}</defs>
+          <defs>{patternLooks.map((look) => patternNode(realistic ? look : { ...look, color: '#f8fafc', painted: false }, metres(1), X(0), Y(0)))}</defs>
           <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.3} />
           <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
           <line x1={X(-overhang - 0.8)} y1={Y(-0.06)} x2={X(layout.length + overhang + 1.1)} y2={Y(-0.06)} stroke="#44403c" strokeWidth={2.4} />

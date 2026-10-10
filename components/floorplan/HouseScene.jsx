@@ -1,21 +1,25 @@
 'use client'
 
-import { useLayoutEffect, useMemo, useRef } from 'react'
-import { Canvas, useThree } from '@react-three/fiber'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { ContactShadows, Edges, Html, Line, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
-import { finishesOf } from '@/lib/finishes'
+import { BRICK_MODULE_M, finishesOf } from '@/lib/finishes'
 import {
   fixtureTemplate,
   materialOf,
   openingColour,
   doorLeafPose,
   doorStyleOf,
+  extendFacadeSkin,
   facadeCells,
   facadeFlashings,
+  facadeOuterReach,
   facadeWorld,
   mergedFacadeSkins,
+  roomLabelsInView,
   surfaceLook,
+  wallCladdingId,
   planBounds,
   plinthLook,
   pointInPolygon,
@@ -218,38 +222,39 @@ function bindTexture(tex, { color = false, anisotropy = 16 } = {}) {
 }
 
 function brickMaps(look) {
-  const moduleW = 0.285
-  const moduleH = 0.085
-  const cols = 4
+  const moduleW = BRICK_MODULE_M.w
+  const moduleH = BRICK_MODULE_M.h
+  const cols = 6
   const rows = 8
   const worldW = cols * moduleW
   const worldH = rows * moduleH
-  const width = 1024
+  const width = 1152
   const height = Math.round(width * (worldH / worldW))
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')
-  ctx.fillStyle = '#322f2c'
+  const mortar = look.mortar || '#D5CBBA'
+  ctx.fillStyle = mortar
   ctx.fillRect(0, 0, width, height)
   const stepX = width / cols
   const stepY = height / rows
-  const brickW = stepX * (275 / 285)
-  const brickH = stepY * (70 / 85)
+  const brickW = stepX * (257 / 267)
+  const brickH = stepY * (85 / 95)
   const ox = (stepX - brickW) / 2
   const oy = (stepY - brickH) / 2
   const bump = document.createElement('canvas')
   bump.width = width
   bump.height = height
   const bctx = bump.getContext('2d')
-  bctx.fillStyle = '#2a2a2a'
+  bctx.fillStyle = '#6e6a64'
   bctx.fillRect(0, 0, width, height)
-  bctx.fillStyle = '#d8d8d8'
+  bctx.fillStyle = '#f2f2f2'
   for (let row = 0; row < rows; row += 1) {
     const shift = row % 2 ? stepX / 2 : 0
     for (let col = -1; col <= cols; col += 1) {
-      const tone = 0.93 + ((row * 5 + col * 3) % 7) * 0.018
-      ctx.fillStyle = shadeHex(look.color || '#9c341f', tone)
+      const tone = 0.93 + ((row * 5 + col * 3) % 7) * 0.02
+      ctx.fillStyle = shadeHex(look.color || '#d2a24c', tone)
       const x = col * stepX + shift + ox
       const y = row * stepY + oy
       ctx.fillRect(x, y, brickW, brickH)
@@ -272,8 +277,8 @@ function shadeHex(hex, tone) {
 function repeatedCladding(look, span, height) {
   const board = Math.max(0.07, (look.boardWidthMm || 145) / 1000)
   const brick = look.pattern === 'brick'
-  const unitX = brick ? 1.14 : look.pattern === 'boards-v' || look.pattern === 'batten' ? board * 4 : look.pattern === 'seam' || look.pattern === 'corrugated' ? 0.8 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.64 : 0.6
-  const unitY = brick ? 0.68 : look.pattern === 'boards-h' ? board * 4 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.36 : look.pattern === 'seam' ? 0.8 : 0.4
+  const unitX = brick ? BRICK_MODULE_M.w * 6 : look.pattern === 'boards-v' || look.pattern === 'batten' ? board * 4 : look.pattern === 'seam' || look.pattern === 'corrugated' ? 0.8 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.64 : 0.6
+  const unitY = brick ? BRICK_MODULE_M.h * 8 : look.pattern === 'boards-h' ? board * 4 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.36 : look.pattern === 'seam' ? 0.8 : 0.4
   const rx = Math.max(0.5, Math.round((span / unitX) * 4) / 4)
   const ry = Math.max(0.5, Math.round((height / unitY) * 4) / 4)
   const key = `clad-repeat:${look.pattern}:${look.color}:${look.mortar}:${look.painted ? 1 : 0}:${look.boardWidthMm}:${rx}:${ry}`
@@ -438,16 +443,31 @@ function Solid({ args, position, rotation, color, map, bump = null, opacity = 1,
   )
 }
 
-function skinMaps(look, u0, y0, span, height, flipU) {
+function claddingUnits(look, base) {
   const board = Math.max(0.07, (look.boardWidthMm || 145) / 1000)
+  if (look.pattern === 'brick') {
+    return {
+      x: base?.userData?.worldW || BRICK_MODULE_M.w * 6,
+      y: base?.userData?.worldH || BRICK_MODULE_M.h * 8,
+    }
+  }
+  if (look.pattern === 'boards-v' || look.pattern === 'batten') return { x: board * 4, y: 0.4 }
+  if (look.pattern === 'boards-h') return { x: 0.6, y: board * 4 }
+  if (look.pattern === 'seam' || look.pattern === 'corrugated') return { x: 0.8, y: look.pattern === 'seam' ? 0.8 : 0.4 }
+  if (look.pattern === 'tile' || look.pattern === 'tile-metal') return { x: 0.64, y: 0.36 }
+  return { x: 0.6, y: 0.4 }
+}
+
+function skinMaps(look, u0, y0, span, height, flipU) {
   const brick = look.pattern === 'brick'
-  const unitX = brick ? 1.14 : look.pattern === 'boards-v' || look.pattern === 'batten' ? board * 4 : look.pattern === 'seam' || look.pattern === 'corrugated' ? 0.8 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.64 : 0.6
-  const unitY = brick ? 0.68 : look.pattern === 'boards-h' ? board * 4 : look.pattern === 'tile' || look.pattern === 'tile-metal' ? 0.36 : look.pattern === 'seam' ? 0.8 : 0.4
-  const key = `skin:${look.pattern}:${look.color}:${look.mortar || ''}:${look.painted ? 1 : 0}:${look.boardWidthMm || 0}:${u0.toFixed(3)}:${y0.toFixed(3)}:${span.toFixed(3)}:${height.toFixed(3)}:${flipU ? 1 : 0}`
+  const key = `skin:${look.pattern}:${look.color}:${look.mortar || ''}:${look.painted ? 1 : 0}:${look.boardWidthMm || 0}:${BRICK_MODULE_M.w}:${u0.toFixed(3)}:${y0.toFixed(3)}:${span.toFixed(3)}:${height.toFixed(3)}:${flipU ? 1 : 0}`
   if (textureCache.has(key)) return textureCache.get(key)
-  const baseKey = `skin-base:${look.pattern}:${look.color}:${look.mortar || ''}:${look.painted ? 1 : 0}:${look.boardWidthMm || 0}`
+  const baseKey = `skin-base:${look.pattern}:${look.color}:${look.mortar || ''}:${look.painted ? 1 : 0}:${look.boardWidthMm || 0}:${BRICK_MODULE_M.w}`
   if (!textureCache.has(baseKey)) textureCache.set(baseKey, brick ? brickMaps(look) : paintCanvas(look))
   const base = textureCache.get(baseKey)
+  const units = claddingUnits(look, base)
+  const unitX = units.x
+  const unitY = units.y
   const map = base.clone()
   map.wrapS = THREE.RepeatWrapping
   map.wrapT = THREE.RepeatWrapping
@@ -490,7 +510,7 @@ function facadeFrame(plan, item, offset) {
 
 function CellOutline({ plan, cell, skins }) {
   const skin = skins.find((item) => item.side === cell.side && Math.abs((item.plane || 0) - (cell.plane || 0)) < 0.04 && cell.u0 >= item.u0 - 0.03 && cell.u1 <= item.u1 + 0.03)
-  const frame = facadeFrame(plan, { ...cell, plane: skin?.plane ?? cell.plane, nx: skin?.nx ?? cell.nx, nz: skin?.nz ?? cell.nz }, (thicknessOf({ kind: 'exterior' }, plan) / 2) + 0.03)
+  const frame = facadeFrame(plan, { ...cell, plane: skin?.plane ?? cell.plane, nx: skin?.nx ?? cell.nx, nz: skin?.nz ?? cell.nz }, skinOffset(plan, cell.side) + 0.012)
   const height = Math.max(0.05, cell.y1 - cell.y0)
   const y = (cell.y0 + cell.y1) / 2
   const t = 0.014
@@ -512,6 +532,10 @@ function CellOutline({ plan, cell, skins }) {
   )
 }
 
+function skinOffset(plan, side) {
+  return facadeOuterReach(plan, side) + 0.022
+}
+
 function FacadeSkins({ plan, mode, selected, hovered }) {
   if (mode === 'hidden') return null
   const realistic = finishesOf(plan).sceneStyle !== 'technical' && mode === 'solid'
@@ -519,25 +543,24 @@ function FacadeSkins({ plan, mode, selected, hovered }) {
   const skins = mergedFacadeSkins(plan).flatMap((skin) => {
     const y0 = Math.max(skin.y0, plinthH)
     if (skin.y1 - y0 < 0.02) return []
-    return [{ ...skin, y0 }]
+    return [extendFacadeSkin(plan, { ...skin, y0 })]
   })
   const cells = ['north', 'east', 'south', 'west'].flatMap((side) => facadeCells(plan, side).map((cell) => {
     const skin = skins.find((item) => item.side === side && cell.u0 >= item.u0 - 0.04 && cell.u1 <= item.u1 + 0.04 && cell.y0 >= item.y0 - 0.04 && cell.y1 <= item.y1 + 0.04)
     return { ...cell, plane: skin?.plane ?? 0, nx: skin?.nx ?? 0, nz: skin?.nz ?? 1 }
   }))
-  const half = thicknessOf({ kind: 'exterior' }, plan) / 2
-  const flashings = facadeFlashings(plan)
+  const flashings = facadeFlashings(plan).map((joint) => extendFacadeSkin(plan, joint))
   const active = selected?.kind === 'zone' ? selected : null
   return (
     <group>
       {skins.map((skin) => {
         const look = surfaceLook(plan, skin.materialId, { color: skin.color, colorCode: skin.colorCode })
         const height = Math.max(0.05, skin.y1 - skin.y0)
-        const frame = facadeFrame(plan, skin, half + 0.012)
+        const frame = facadeFrame(plan, skin, skinOffset(plan, skin.side))
         const maps = realistic ? skinMaps(look, skin.u0, skin.y0, frame.span, height, frame.flipU) : null
         return (
           <mesh key={`skin-${skin.side}-${skin.plane}-${skin.u0}-${skin.y0}-${skin.materialId}`} position={[frame.position[0], (skin.y0 + skin.y1) / 2, frame.position[2]]} rotation={[0, frame.yaw, 0]} raycast={noopRaycast} castShadow={realistic} receiveShadow={realistic}>
-            <planeGeometry args={[frame.span, height]} />
+            <boxGeometry args={[frame.span, height, 0.02]} />
             <meshStandardMaterial
               color={maps ? '#ffffff' : look.color}
               map={maps?.map || null}
@@ -551,7 +574,7 @@ function FacadeSkins({ plan, mode, selected, hovered }) {
         )
       })}
       {flashings.filter((joint) => joint.y > plinthH + 0.02).map((joint) => {
-        const frame = facadeFrame(plan, { ...joint, u0: joint.u0, u1: joint.u1 }, half + 0.028)
+        const frame = facadeFrame(plan, { ...joint, u0: joint.u0, u1: joint.u1 }, skinOffset(plan, joint.side) + 0.016)
         return (
           <mesh key={`flash-${joint.side}-${joint.y}-${joint.u0}`} position={[frame.position[0], joint.y, frame.position[2]]} rotation={[0, frame.yaw, 0]} raycast={noopRaycast} castShadow>
             <boxGeometry args={[Math.max(0.05, frame.span), 0.028, 0.02]} />
@@ -560,7 +583,7 @@ function FacadeSkins({ plan, mode, selected, hovered }) {
         )
       })}
       {cells.map((cell) => {
-        const frame = facadeFrame(plan, cell, half + 0.02)
+        const frame = facadeFrame(plan, cell, skinOffset(plan, cell.side) + 0.008)
         const height = Math.max(0.05, cell.y1 - cell.y0)
         const pick = { kind: 'zone', id: cell.id, side: cell.side, u0: cell.u0, u1: cell.u1, y0: cell.y0, y1: cell.y1, materialId: cell.materialId, zoneId: cell.zoneId }
         const on = active && (active.id === cell.id || (active.side === cell.side && Math.abs(active.u0 - cell.u0) < 0.03 && Math.abs(active.y0 - cell.y0) < 0.03))
@@ -1511,8 +1534,15 @@ function FixtureMesh({ fixture, plan, selected, hovered, dim = false }) {
   )
 }
 
-function RoomLabels({ plan }) {
+function RoomLabels({ plan, wallMode }) {
+  const camera = useThree((state) => state.camera)
+  const [show, setShow] = useState(() => roomLabelsInView(plan, camera.position, wallMode))
+  useFrame(() => {
+    const next = roomLabelsInView(plan, camera.position, wallMode)
+    setShow((prev) => (prev === next ? prev : next))
+  })
   const display = normalizeDisplay(plan.display)
+  if (!show || (!display.roomNames && !display.areas)) return null
   const labels = layoutRoomLabels(visibleRooms(plan), {
     ratio: 100,
     showNames: display.roomNames,
@@ -1520,8 +1550,9 @@ function RoomLabels({ plan }) {
     obstacles: labelObstacles(plan, 22),
   })
   const halo = { textShadow: '0 0 2px #fbfaf7, 0 0 2px #fbfaf7, 0 0 3px #fbfaf7' }
+  const occlude = wallMode === 'solid'
   return labels.map((label) => (
-    <Html key={label.id} position={[label.x, 0.12, label.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+    <Html key={label.id} position={[label.x, 0.12, label.z]} center occlude={occlude} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
       <div style={{ textAlign: 'center', color: '#1c1917', fontFamily: 'sans-serif', whiteSpace: 'nowrap' }}>
         {label.text && <div style={{ fontWeight: 700, fontSize: 12, ...(label.halo ? halo : {}) }}>{label.text}</div>}
         {label.area && <div style={{ fontSize: 10, color: '#44403c', ...(label.halo ? halo : {}) }}>{label.area}</div>}
@@ -1792,6 +1823,8 @@ function Dressing({ plan }) {
         else angled = true
       })
       if (colinear && !angled) return
+      const clad = surfaceLook(plan, wallCladdingId(wall, plan))
+      if (clad.pattern === 'brick') return
       const key = `${Math.round(at.x * 20)}:${Math.round(at.z * 20)}`
       if (trims.some((item) => item.key === `corner-${key}`)) return
       trims.push({
@@ -1848,13 +1881,18 @@ function Dressing({ plan }) {
         },
       ]
     })
-  const downs = [[box.minX, box.minZ], [box.maxX, box.minZ], [box.minX, box.maxZ], [box.maxX, box.maxZ]].map(([x, z], index) => ({
-    key: `down-${index}`,
-    position: [x + Math.sign(x - cx || 1) * 0.22, model.wallHeight / 2, z + Math.sign(z - cz || 1) * 0.22],
-    rotation: [0, 0, 0],
-    args: [0.07, model.wallHeight, 0.07],
-    color: gutter,
-  }))
+  const downs = [[box.minX, box.minZ], [box.maxX, box.minZ], [box.minX, box.maxZ], [box.maxX, box.maxZ]].map(([x, z], index) => {
+    const sx = Math.sign(x - cx || 1)
+    const sz = Math.sign(z - cz || 1)
+    const reach = Math.max(facadeOuterReach(plan, 'north'), facadeOuterReach(plan, 'south'), facadeOuterReach(plan, 'east'), facadeOuterReach(plan, 'west'))
+    return {
+      key: `down-${index}`,
+      position: [x - sx * 0.72, model.wallHeight / 2, z + sz * (reach + 0.06)],
+      rotation: [0, 0, 0],
+      args: [0.07, model.wallHeight, 0.07],
+      color: gutter,
+    }
+  })
   return (
     <group>
       {[...trims.map((item) => ({ ...item, color: trim })), ...gutters.flat(), ...downs].map((item) => (
@@ -1963,7 +2001,7 @@ export default function HouseScene({
           />
         )
       })}
-      {roofMode !== 'solid' && <RoomLabels plan={plan} />}
+      {roofMode !== 'solid' && <RoomLabels plan={plan} wallMode={wallMode} />}
       <WallMesh plan={plan} mode={wallMode} selected={selected} hovered={hovered} />
       {(plan.openings || []).map((opening) => (
         <OpeningMesh key={opening.id} plan={plan} opening={opening} selected={selected} hovered={hovered} />
