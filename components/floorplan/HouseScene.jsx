@@ -1069,7 +1069,7 @@ function RoofMesh({ plan, mode, selected, hovered }) {
   )
 }
 
-function FixtureBody({ body, w, d, h = 0.8 }) {
+function FixtureBody({ body, w, d, h = 0.8, mount = null, stand = false }) {
   const box = (size, position, color, opacity = 1) => (
     <mesh position={position}>
       <boxGeometry args={size} />
@@ -1241,6 +1241,26 @@ function FixtureBody({ body, w, d, h = 0.8 }) {
   }
   if (type === 'wall-cab') return box([w, h || 0.7, d], [0, 1.55, 0], '#f5f5f4')
   if (type === 'tv') return box([w, h || 0.65, Math.max(d, 0.04)], [0, 1.15, 0], '#1c1917')
+  if (type === 'wall-tv') {
+    const centre = Number.isFinite(Number(mount)) ? Number(mount) : 1.2
+    const panelDepth = stand ? Math.min(0.07, Math.max(d, 0.04)) : Math.max(d, 0.04)
+    const panelZ = stand ? (-d / 2 + panelDepth / 2) : 0
+    const face = panelZ + panelDepth / 2
+    return (
+      <group>
+        {stand && (
+          <group>
+            {box([w * 0.96, 0.45, d * 0.94], [0, 0.225, 0.01], '#e7e5e4')}
+            {box([w * 0.9, 0.016, d * 0.86], [0, 0.458, 0.02], '#d6d3d1')}
+            {box([0.012, 0.3, 0.012], [0, 0.22, d * 0.42], '#a8a29e')}
+          </group>
+        )}
+        {box([w, h, panelDepth], [0, centre, panelZ], '#292524')}
+        {box([Math.max(0.2, w - 0.04), Math.max(0.16, h - 0.04), 0.006], [0, centre, face + 0.001], '#0c0a09')}
+        {!stand && box([Math.min(w * 0.42, 0.28), 0.035, 0.018], [0, centre, panelZ - panelDepth / 2 - 0.006], '#57534e')}
+      </group>
+    )
+  }
   if (type === 'rug') return box([w, 0.02, d], [0, 0.01, 0], '#b08968')
   if (type === 'car') {
     return (
@@ -1480,9 +1500,9 @@ function FixtureMesh({ fixture, plan, selected, hovered, dim = false }) {
           <meshLambertMaterial color="#e7e5e4" />
         </mesh>
       )}
-      {draw.chimney ? <ChimneyShaft fixture={fixture} plan={plan} w={w} d={d} /> : <FixtureBody body={body} w={w} d={d} h={h} />}
+      {draw.chimney ? <ChimneyShaft fixture={fixture} plan={plan} w={w} d={d} /> : <FixtureBody body={body} w={w} d={d} h={h} mount={fixture.mount} stand={fixture.stand === true} />}
       {mark && (
-        <mesh position={[0, 0.45, 0]}>
+        <mesh position={[0, body === 'wall-tv' ? (Number(fixture.mount) || 1.2) : 0.45, 0]}>
           <boxGeometry args={[w + (mark === 'selected' ? 0.14 : 0.07), 0.95, d + (mark === 'selected' ? 0.14 : 0.07)]} />
           <meshBasicMaterial color={mark === 'selected' ? '#0f766e' : '#14b8a6'} wireframe />
         </mesh>
