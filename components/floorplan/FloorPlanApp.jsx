@@ -107,7 +107,7 @@ import { DisplayPanel } from './DisplayPanel'
 import { DoorPlaceControls, FloorMenu, HouseSettings, SelectionPanel, WallToolSettings, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ProjectInfoDialog, ProjectSettingsDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
-import { ServiceDrawing, ServiceMenu } from './ServicesLayer'
+import { ElectricGlyph, ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import { ModeChip, PlaceToast, modeChipText, placeFrame } from '@/components/mode/PlaceMode'
 import { judgePlacement, placeServiceNode, removeStacked, fixtureKey } from '@/lib/placeOnce'
 import { ElectricPanel } from './ElectricPanel'
@@ -172,7 +172,7 @@ import {
   snapServicePoint,
   updateServiceNode,
 } from '@/lib/services'
-import { deviceEnvelope, isWallDevice } from '@/lib/wallDevices'
+import { isWallDevice } from '@/lib/wallDevices'
 import { normalizeHeating } from '@/lib/hydronic'
 import {
   CURRENT_KEY,
@@ -3219,7 +3219,6 @@ export default function FloorPlanApp() {
       ? (snapDeviceToWall(cursor, plan, spec) || snapServicePoint(cursor, plan, { mode: 'free', system: spec.system }))
       : snapServicePoint(cursor, plan, { mode: spec.wall ? 'wall' : 'free', system: spec.system }))
     : null
-  const previewEnvelope = servicePreview && spec?.kind === 'panel' ? deviceEnvelope({ ...spec, ...servicePreview }) : null
   const ghostPoint = svcTool ? (servicePreview || cursor) : (snapVisual?.point || cursor)
 
   const onProjectType = (id) => {
@@ -4524,21 +4523,12 @@ export default function FloorPlanApp() {
                 ))}
                 {engaged && cursor && ghostPoint && (
                   <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${X(ghostPoint.x)} ${Y(ghostPoint.z)})`}>
-                    {!previewEnvelope && (
-                      <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
-                    )}
-                    {previewEnvelope && (
-                      <g data-testid="panel-ghost" transform={`rotate(${servicePreview?.rotation || 0})`}>
-                        <rect
-                          x={-px(previewEnvelope.width) / 2}
-                          y={-px(previewEnvelope.depth) / 2}
-                          width={px(previewEnvelope.width)}
-                          height={px(previewEnvelope.depth)}
-                          fill="#ffffff"
-                          stroke="#1c1917"
-                          strokeWidth={1.15}
-                        />
+                    {svcTool && spec?.system === 'electric' ? (
+                      <g data-testid={spec.kind === 'panel' ? 'panel-ghost' : 'electric-ghost'} transform={`rotate(${isWallDevice(spec.kind) ? (servicePreview?.rotation || 0) : 0})`}>
+                        <ElectricGlyph node={{ kind: spec.kind, system: 'electric', rotation: servicePreview?.rotation || 0 }} unit={k} />
                       </g>
+                    ) : (
+                      <circle r={12 / Math.max(camera.zoom, 0.2)} fill="#fff7ed" fillOpacity="0.55" stroke="#ea580c" strokeWidth={1.6 / Math.max(camera.zoom, 0.2)} strokeDasharray={`${4 / Math.max(camera.zoom, 0.2)} ${3 / Math.max(camera.zoom, 0.2)}`} />
                     )}
                     {placing && (
                       <g transform={`rotate(${Number(snapVisual?.rotation) || 0})`}>
