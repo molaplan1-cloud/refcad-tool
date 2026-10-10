@@ -95,11 +95,12 @@ import {
   ungroupSelection,
 } from '@/lib/cadEdit'
 import { CadPrompt } from './CadTools'
-import { LayerDock, PlanChrome } from './PlanChrome'
+import { LayerBar, PlanChrome } from './PlanChrome'
 import { buildPlanPdf } from '@/lib/roominfo'
 import { accessFor } from '@/lib/access'
 import { stampDemoWatermark } from '@/lib/watermark'
-import { applyDisplay, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { applyDisplay, displayCommand, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
+import { layerEyeOn, revealedSystems, setEveryLayer, setLayerEye } from '@/lib/layers'
 import { blockHeightForLines, dimensionFont, fitLines, LINE_LEADING, paperFont, placeDimensionText } from '@/lib/annotations'
 import { DisplayPanel } from './DisplayPanel'
 import { DoorPlaceControls, FloorMenu, HouseSettings, SelectionPanel, WallToolSettings, selectionLabel } from './FloorMenus'
@@ -164,7 +165,6 @@ import {
   hitService,
   layerVisible,
   roomKind,
-  setServiceLayer,
   removeAutoAdded,
   snapServicePoint,
   updateServiceNode,
@@ -1024,6 +1024,8 @@ export default function FloorPlanApp() {
   const [ghosts, setGhosts] = useState([])
   const [fixtureGroup, setFixtureGroup] = useState('Kaikki')
   const [displayOpen, setDisplayOpen] = useState(false)
+  const displayOpenRef = useRef(false)
+  displayOpenRef.current = displayOpen
   const [showClearances, setShowClearances] = useState(false)
   const [layersOpen, setLayersOpen] = useState(true)
   const [yardTool, setYardTool] = useState(null)
@@ -2393,7 +2395,19 @@ export default function FloorPlanApp() {
   useEffect(() => {
     const onKey = (event) => {
       const tag = event.target?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      const textEntry = tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable
+        || (tag === 'INPUT' && !['checkbox', 'radio', 'button'].includes(event.target?.type))
+      if (event.key === 'Escape' && displayOpenRef.current) {
+        event.preventDefault()
+        setDisplayOpen(false)
+        return
+      }
+      if (!textEntry && displayCommand(displayOpenRef.current, { key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey }) === 'toggle') {
+        event.preventDefault()
+        setDisplayOpen((open) => !open)
+        return
+      }
+      if (textEntry) return
       if (event.key === 'Shift') {
         shiftRef.current = true
         return
@@ -2667,10 +2681,6 @@ export default function FloorPlanApp() {
       } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'f' && !command && picks.length > 0 && picks.every((item) => item.kind === 'opening') && picks.every((item) => (plan.openings || []).find((opening) => opening.id === item.id)?.kind === 'door')) {
         event.preventDefault()
         commit(mirrorOpenings(plan, picks, { direction: Boolean(event.shiftKey) }))
-      } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'v') {
-        event.preventDefault()
-        if (engaged) exitToSelect()
-        else if (!command && tool === 'select') setDisplayOpen((open) => !open)
       } else if (!event.ctrlKey && !event.metaKey && !event.altKey && !command && tool === 'select') {
         const key = event.key.toLowerCase()
         const shortcut = { m: 'move', c: 'copy', e: 'rotate', s: 'scale', f: 'mirror', b: 'array', o: 'offset', t: 'stretch', n: 'align', d: 'measure' }[key]
@@ -2702,6 +2712,18 @@ export default function FloorPlanApp() {
       window.removeEventListener('keyup', onKeyUp)
     }
   }, [commit, plan, selectedFixture, undo, redoChange, tool, placing, poly, pick, picks, command, cursor, partitions, svcTool, svcPoints, svcKind, view, yardTool, yardPoints, sheetMode, exitToSelect, requestFit, doorHand, repeatPlace])
+
+  useEffect(() => {
+    if (!displayOpen) return undefined
+    const onPointer = (event) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('[data-testid="display-panel"]') || target.closest('[data-testid="open-display"]') || target.closest('[data-testid="menu-bar"]')) return
+      setDisplayOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointer, true)
+    return () => document.removeEventListener('pointerdown', onPointer, true)
+  }, [displayOpen])
 
   const loadHouse = (house, roomName, panel) => {
     const next = { ...house, services: ensureServices(house) }
@@ -2961,7 +2983,10 @@ export default function FloorPlanApp() {
   }
 
   const exportPdf = () => {
-    savePdf(buildPlanPdf(plan), `${(plan.name || 'pohjakuva').replace(/\s+/g, '-')}.pdf`)
+    savePdf(buildPlanPdf(plan, {
+      forceSystems: workspaceSystems(workspace),
+      forceFixtures: workspace === 'kalusteet',
+    }), `${(plan.name || 'pohjakuva').replace(/\s+/g, '-')}.pdf`)
   }
 
   const exportPng = () => {
@@ -3513,6 +3538,15 @@ export default function FloorPlanApp() {
           showToast(t('toast.straightened'))
         }}
       />
+      <LayerBar
+        plan={plan}
+        workspace={workspace}
+        sheet={sheetKey}
+        t={t}
+        onToggle={(id, visible) => setPlan((current) => setLayerEye(current, id, visible, workspace, sheetKey))}
+        onShowAll={() => setPlan((current) => setEveryLayer(current, true, workspace, sheetKey))}
+        onHideAll={() => setPlan((current) => setEveryLayer(current, false, workspace, sheetKey))}
+      />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
         {compact && drawer && (
@@ -3945,7 +3979,7 @@ export default function FloorPlanApp() {
                 })}
                 </g>
                 <g data-testid="fixture-layer" opacity={workspace === 'kalusteet' ? 1 : 0.28} style={{ pointerEvents: workspace === 'kalusteet' ? 'auto' : 'none' }}>
-                {sheetMode !== 'site' && display.fixtures && (plan.fixtures || []).filter((fixture) => !fixture.hidden).map((fixture) => {
+                {sheetMode !== 'site' && layerEyeOn(plan, 'fixtures', workspace, sheetKey) && (plan.fixtures || []).filter((fixture) => !fixture.hidden).map((fixture) => {
                   const spec = resolveFixture(fixture)
                   const draw = drawingOf(fixture)
                   const w = px(spec.w)
@@ -4327,6 +4361,7 @@ export default function FloorPlanApp() {
                   onContext={openServiceMenu}
                   flashId={flashId}
                   activeSystems={workspace === 'sahko' || workspace === 'iv' || workspace === 'lvi' ? workspaceSystems(workspace) : []}
+                  revealSystems={revealedSystems(plan, workspace)}
                   zoom={camera.zoom || 1}
                   camera={camera}
                   viewport={size}
@@ -4467,8 +4502,11 @@ export default function FloorPlanApp() {
                 <DisplayPanel
                   plan={plan}
                   display={display}
+                  workspace={workspace}
+                  sheet={sheetKey}
                   onChange={setDisplay}
-                  onLayer={(id, visible) => setPlan((current) => setServiceLayer(current, id, visible))}
+                  onLayer={(id, visible) => setPlan((current) => setLayerEye(current, id, visible, workspace, sheetKey))}
+                  onClose={() => setDisplayOpen(false)}
                 />
               )}
             </div>
@@ -4504,6 +4542,8 @@ export default function FloorPlanApp() {
                 onServiceDrag={onServiceDrag3d}
                 onDropFixture={onDropFixture3d}
                 activeSystems={workspace === 'sahko' || workspace === 'iv' || workspace === 'lvi' ? workspaceSystems(workspace) : []}
+                revealSystems={revealedSystems(plan, workspace)}
+                showFixtures={layerEyeOn(plan, 'fixtures', workspace, sheetKey)}
                 dimFixtures={workspace !== 'kalusteet'}
               />
             </div>

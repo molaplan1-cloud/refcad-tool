@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { COVER_TYPES } from '@/lib/covers'
 import { GROUND_TOOLS } from '@/lib/groundworks'
+import { LAYER_EYES, layerEyeOn, pinnedLayers } from '@/lib/layers'
 import { PLACEABLES, SERVICE_SYSTEMS, airflowBalance, ensureServices, layerVisible } from '@/lib/services'
 import { WORKSPACES, workspaceSystems } from '@/lib/workspaces'
 import { BUILDINGS, OBJECTS, PLANTS } from '@/lib/yard'
@@ -93,6 +94,43 @@ function Menu({ id, label, open, setOpen, children, dock = false }) {
 
 function Group({ children }) {
   return <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>{children}</div>
+}
+
+function EyeIcon({ on }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style={{ flex: 'none' }}>
+      <path d="M1.5 8s2.2-4 6.5-4 6.5 4 6.5 4-2.2 4-6.5 4S1.5 8 1.5 8z" fill="none" stroke={on ? '#0f766e' : '#a8a29e'} strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="1.7" fill={on ? '#0f766e' : 'none'} stroke={on ? '#0f766e' : '#a8a29e'} strokeWidth="1.2" />
+      {!on && <path d="M3 13 L13 3" stroke="#a8a29e" strokeWidth="1.4" />}
+    </svg>
+  )
+}
+
+export function LayerBar({ plan, workspace, sheet = 'plan', t, onToggle, onShowAll, onHideAll }) {
+  return (
+    <div data-testid="layer-bar" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4', flexWrap: 'wrap', flexShrink: 0 }}>
+      {LAYER_EYES.map((item) => {
+        const on = layerEyeOn(plan, item.id, workspace, sheet)
+        const pinned = pinnedLayers(workspace).includes(item.id)
+        return (
+          <button
+            key={item.id}
+            type="button"
+            data-testid={`layer-eye-${item.id}`}
+            aria-pressed={on}
+            title={pinned ? t('layer.pinned') : t(item.key)}
+            onClick={() => onToggle(item.id, !on)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 28, padding: '0 8px', borderRadius: 7, border: '1px solid #e7e5e4', background: on ? '#f0fdfa' : '#fff', color: on ? '#134e4a' : '#78716c', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+          >
+            <EyeIcon on={on} />
+            {t(item.key)}
+          </button>
+        )
+      })}
+      <button type="button" data-testid="layers-show-all" onClick={onShowAll} style={{ height: 28, padding: '0 8px', borderRadius: 7, border: '1px solid #d6d3d1', background: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{t('layer.showAll')}</button>
+      <button type="button" data-testid="layers-hide-all" onClick={onHideAll} style={{ height: 28, padding: '0 8px', borderRadius: 7, border: '1px solid #d6d3d1', background: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{t('layer.hideAll')}</button>
+    </div>
+  )
 }
 
 export function LayerDock({ plan, open, onToggle, onLayer, t }) {

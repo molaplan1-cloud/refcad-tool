@@ -146,10 +146,15 @@ function NodeMesh({ node, selected, hovered }) {
   )
 }
 
-export default function Services3D({ plan, selected = null, hovered = null, activeSystems = null }) {
+export default function Services3D({ plan, selected = null, hovered = null, activeSystems = null, revealSystems = null }) {
   const services = ensureServices(plan)
-  const runs = services.runs.filter((run) => serviceItemVisible(plan, run))
-  const nodes = services.nodes.filter((node) => serviceItemVisible(plan, node))
+  const revealed = (item) => {
+    if (!item || item.hidden) return false
+    if (Array.isArray(revealSystems) && revealSystems.includes(item.system)) return true
+    return serviceItemVisible(plan, item)
+  }
+  const runs = services.runs.filter(revealed)
+  const nodes = services.nodes.filter(revealed)
   const live = (system) => !Array.isArray(activeSystems) || activeSystems.includes(system)
   return (
     <group>

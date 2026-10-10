@@ -1,7 +1,8 @@
 'use client'
 
 import { dimensionsFromMode, dimensionMode } from '@/lib/display'
-import { SERVICE_SYSTEMS, layerVisible, setServiceLayer } from '@/lib/services'
+import { layerEyeOn } from '@/lib/layers'
+import { SERVICE_SYSTEMS } from '@/lib/services'
 import { usePlanLocale } from '@/components/i18n/Locale'
 import { text } from '@/lib/i18n'
 
@@ -26,7 +27,7 @@ function Check({ testid, label, checked, onChange }) {
   )
 }
 
-export function DisplayPanel({ plan, display, onChange, onLayer }) {
+export function DisplayPanel({ plan, display, workspace = 'rakenne', sheet = 'plan', onChange, onLayer, onClose }) {
   const { t, locale } = usePlanLocale(plan)
   const mode = dimensionMode(display)
   const setMode = (value) => {
@@ -35,7 +36,10 @@ export function DisplayPanel({ plan, display, onChange, onLayer }) {
   }
   return (
     <div data-testid="display-panel" style={{ position: 'absolute', left: 12, top: 8, zIndex: 25, width: 248, background: '#fbfaf7', border: '1px solid #1c1917', borderRadius: 10, padding: '12px 12px 14px', boxShadow: '0 10px 28px rgba(0,0,0,0.16)' }}>
-      <div style={{ fontSize: 14, fontWeight: 750, marginBottom: 8 }}>{t('display.title')}</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 750 }}>{t('display.title')}</div>
+        <button type="button" data-testid="display-close" aria-label={t('display.close')} onClick={onClose} style={{ width: 28, height: 28, border: '1px solid #d6d3d1', borderRadius: 7, background: '#fff', color: '#1c1917', fontSize: 16, lineHeight: 1, cursor: 'pointer' }}>×</button>
+      </div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
         <button type="button" data-testid="preset-plain" style={btn(display.preset === 'plain')} onClick={() => onChange({ preset: 'plain' })}>{t('preset.plain')}</button>
         <button type="button" data-testid="preset-measure" style={btn(display.preset === 'measure')} onClick={() => onChange({ preset: 'measure' })}>{t('preset.measure')}</button>
@@ -64,7 +68,7 @@ export function DisplayPanel({ plan, display, onChange, onLayer }) {
         <Check testid="show-areas" label={t('display.areas')} checked={display.areas} onChange={(areas) => onChange({ areas })} />
         <Check testid="show-opening-sizes" label={t('display.openingSizes')} checked={display.openingSizes} onChange={(openingSizes) => onChange({ openingSizes })} />
         <Check testid="show-structures" label={t('display.structures')} checked={display.structures} onChange={(structures) => onChange({ structures })} />
-        <Check testid="show-fixtures" label={t('display.fixtures')} checked={display.fixtures} onChange={(fixtures) => onChange({ fixtures })} />
+        <Check testid="show-fixtures" label={t('display.fixtures')} checked={layerEyeOn(plan, 'fixtures', workspace, sheet)} onChange={(visible) => onLayer('fixtures', visible)} />
       </div>
       <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 4px' }}>{t('display.services')}</div>
       {SERVICE_SYSTEMS.map((item) => (
@@ -72,8 +76,8 @@ export function DisplayPanel({ plan, display, onChange, onLayer }) {
           key={item.id}
           testid={`show-layer-${item.id}`}
           label={text(locale, `service.${item.id}`, item.title)}
-          checked={layerVisible(plan, item.id)}
-          onChange={(visible) => onLayer(setServiceLayer(plan, item.id, visible))}
+          checked={layerEyeOn(plan, item.id, workspace, sheet)}
+          onChange={(visible) => onLayer(item.id, visible)}
         />
       ))}
       <div style={{ fontSize: 11, color: '#78716c', marginTop: 6 }}>{t('display.hint')}</div>
