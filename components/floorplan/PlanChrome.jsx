@@ -317,9 +317,7 @@ export function PlanChrome({
               </button>
             )
           })}
-          {access?.workspaces.includes('kylma') && (
-            <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), minHeight: 44, display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}>{t('workspace.cold')}</a>
-          )}
+          {access?.workspaces.includes('kylma') && <ColdTab t={t} compact />}
         </div>
         {open === 'root' && (
           <div className="compact-menu" data-testid="chrome-menu-panel" style={{ background: '#fff', color: '#1c1917', maxHeight: '46vh', overflow: 'auto', padding: 8 }}>
@@ -377,7 +375,7 @@ export function PlanChrome({
         </div>
         <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
       </header>
-      <div data-testid="workspace-tabs" style={{ display: 'flex', alignItems: 'center', gap: 4, height: 36, padding: '0 8px', background: '#14181f' }}>
+      <div className="workspace-tabs" data-testid="workspace-tabs" style={{ display: 'flex', alignItems: 'center', gap: 4, height: 36, padding: '0 8px', background: '#14181f' }}>
         {WORKSPACES.map((item) => {
           const allowed = !access || access.workspaces.includes(item.id)
           return (
@@ -386,9 +384,7 @@ export function PlanChrome({
             </button>
           )
         })}
-        {access?.workspaces.includes('kylma') && (
-          <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), textDecoration: 'none' }}>{t('workspace.cold')}</a>
-        )}
+        {access?.workspaces.includes('kylma') && <ColdTab t={t} />}
       </div>
       <div data-testid="menu-bar" style={{ display: 'flex', alignItems: 'center', gap: 2, height: 32, padding: '0 6px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
         <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen}>
@@ -521,6 +517,30 @@ export function PlanChrome({
       )}
       <CadToolbar active={command?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onCadLayer} />
     </div>
+  )
+}
+
+function ColdTab({ t, compact = false }) {
+  return (
+    <a
+      data-testid="workspace-kylma"
+      href="/suunnittelu"
+      className="workspace-tab"
+      style={{
+        ...workspaceTab(false),
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box',
+        fontFamily: 'inherit',
+        lineHeight: 1,
+        textDecoration: 'none',
+        flexShrink: 0,
+        minHeight: compact ? 44 : undefined,
+      }}
+    >
+      {t('workspace.cold')}
+    </a>
   )
 }
 
