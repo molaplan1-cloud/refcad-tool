@@ -141,15 +141,16 @@ export function ShellDialog({ title, onCancel, onCreate, onExample }) {
   )
 }
 
-export function ProjectInfoDialog({ projectType, onCancel, onConfirm }) {
+export function ProjectInfoDialog({ projectType, onCancel, onConfirm, scope = 'house' }) {
   const { t } = useLocale()
-  const [next, setNext] = useState(projectType || 'omakotitalo')
+  const types = scope === 'cold' ? PROJECT_TYPES.filter((type) => type.id === 'kylmio') : PROJECT_TYPES
+  const [next, setNext] = useState(scope === 'cold' ? 'kylmio' : (projectType || 'omakotitalo'))
   return (
     <Overlay testid="project-info-dialog" title={t('file.projectInfo')} onClose={onCancel}>
       <p style={{ fontSize: 13, margin: '0 0 12px', color: '#44403c', lineHeight: 1.45 }}>{t('project.changeWarn')}</p>
       <Field label={t('project.changeType')}>
         <select data-testid="project-type-change" style={inputStyle} value={next} onChange={(event) => setNext(event.target.value)}>
-          {PROJECT_TYPES.map((type) => <option key={type.id} value={type.id}>{t(`type.${type.id}.name`)}</option>)}
+          {types.map((type) => <option key={type.id} value={type.id}>{t(`type.${type.id}.name`)}</option>)}
         </select>
       </Field>
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>

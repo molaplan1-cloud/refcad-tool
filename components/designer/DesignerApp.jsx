@@ -9,8 +9,11 @@ import { SideRail } from '@/components/floorplan/SideRail'
 import { SelectionActions } from '@/components/floorplan/CadTools'
 import { applyPanelCommand, panelCommand, readPanels, writePanels } from '@/lib/panels'
 import PlanView from './PlanView'
-import HeatLoadPanel from './HeatLoadPanel'
-import { ROOM_TYPES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
+import HeatLoadPanel, { DutyTypeSelect } from './HeatLoadPanel'
+import { TEMPLATES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
+import { PANEL_MM, commitPanel, emptyPanelPlan, extendPanel, joinPanelCorner, roomsFromPanels, setPanelEnd, snapDoorToPanel } from '@/lib/coldPanels'
+import { applyUnitChoice, assignRooms, groupUnits } from '@/lib/coldUnits'
+import { formatDeviceLink, isColdDevice, removalPrompt } from '@/lib/coldDevices'
 import { ProjectInfoDialog, ProjectSettingsDialog } from '@/components/floorplan/ProjectDialogs'
 import ColdChrome from './ColdChrome'
 import { stampDemoWatermark } from '@/lib/watermark'
@@ -34,12 +37,9 @@ import { heightMetres, insertRisers, moveVertexPoints, riseMetres, setRunMount, 
 import {
   defaultElevation,
   doorOnWall,
-  insideRefrigerated,
-  isOutdoorCategory,
   outlinePoints,
   pointInOutline,
   rotateDoorWall,
-  snapOutdoorUnit,
 } from '@/lib/placement'
 import { judgePlacement, removeStackedEquipment } from '@/lib/placeOnce'
 import { ModeChip, PlaceToast, modeChipText, placeFrame } from '@/components/mode/PlaceMode'
@@ -60,7 +60,7 @@ import { useViewport } from '@/components/useViewport'
 import { CadPrompt, MultiProperties } from '../floorplan/CadTools'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
 import { panelSchedule } from '@/lib/sharedWalls'
-import { doorChoices, doorEquipmentPatch, doorSchedule, doorTypeById } from '@/lib/doors'
+import { doorChoices, doorEquipmentPatch, doorOpensOut, doorSchedule, doorTypeById } from '@/lib/doors'
 import { buildDxf, dxfFilename } from '@/lib/dxf'
 import { buildPdf, pdfFilename } from '@/lib/pdfExport'
 import SchematicView from './SchematicView'
@@ -191,6 +191,54 @@ function TemplateThumb({ item }) {
   )
 }
 
+function UnitBoard({ t, rooms, result, diversity, onDiversity, onAssign, onPick }) {
+  const board = groupUnits(rooms, result, { diversity })
+  const machines = board.groups.filter((group) => group.machine)
+  const combos = TEMPLATES.filter((item) => item.category === 'combo')
+  return (
+    <div data-testid="unit-board" style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+        <strong style={{ fontSize: 12 }}>{t('cold.unitTitle')}</strong>
+        <label style={{ fontSize: 11, color: '#57534e' }}>
+          {t('cold.diversity')}
+          <input data-testid="unit-diversity" aria-label={t('cold.diversity')} type="number" min="0.5" max="1" step="0.05" value={diversity ?? 0.85} onChange={(event) => onDiversity(Number(event.target.value) || 0.85)} style={{ width: 64, marginLeft: 6, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
+        </label>
+      </div>
+      {board.groups.filter((group) => group.rooms.length).map((group) => (
+        <div key={group.id} data-testid={`unit-group-${group.id}`} style={{ marginTop: 8, fontSize: 12, lineHeight: 1.45 }}>
+          <div style={{ fontWeight: 750 }}>{group.machine?.name || t('cold.unassigned')}</div>
+          <div data-testid={`unit-total-${group.id}`}>{t('cold.totalKw', { kw: group.totalKw.toFixed(2) })}</div>
+          <div>{t('cold.suctionPlus')} {group.plusKw.toFixed(2)} kW · {t('cold.suctionMinus')} {group.minusKw.toFixed(2)} kW</div>
+          <div>{t('cold.suggest')}: {group.suggested?.name || '—'}</div>
+          {group.machine && (
+            <select data-testid={`unit-pick-${group.id}`} aria-label={t('cold.pickUnit')} value={group.machine.catalogId || ''} onChange={(event) => onPick(group.machine.id, event.target.value)} style={{ width: '100%', marginTop: 4, height: 28, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+              {combos.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          )}
+          {group.rooms.map((room) => {
+            const full = rooms.find((item) => item.id === room.id)
+            const linked = (full?.equipment || []).filter((eq) => isColdDevice(eq))
+            return (
+            <div key={room.id} data-testid={`unit-room-${room.id}`} style={{ marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span>{room.label} {room.name} · {room.kw.toFixed(2)} kW · {t('cold.evap')} {room.evapKw.toFixed(2)} kW</span>
+                <select data-testid={`unit-assign-${room.id}`} aria-label={t('cold.assign')} value={full?.unitId || ''} onChange={(event) => onAssign(room.id, event.target.value || null)} style={{ maxWidth: 140, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                  <option value="">{t('cold.unassigned')}</option>
+                  {machines.map((item) => <option key={item.id} value={item.id}>{item.machine.name}</option>)}
+                </select>
+              </div>
+              {linked.map((eq) => (
+                <div key={eq.id} data-testid={`device-link-${eq.id}`} style={{ fontSize: 11, color: '#44403c', marginTop: 2 }}>{formatDeviceLink(t, full, eq, rooms)}</div>
+              ))}
+            </div>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function DesignerApp({
   initialName = 'Uusi projekti',
   initialRooms = [],
@@ -198,6 +246,7 @@ export default function DesignerApp({
   initialPipes = [],
   initialCables = [],
   initialSchematic = null,
+  initialPanels = null,
   onPersist,
   user = null,
   watermark = false,
@@ -213,6 +262,9 @@ export default function DesignerApp({
   const [drawer, setDrawer] = useState(null)
   const [name, setName] = useState(initialName || 'Uusi projekti')
   const [rooms, setRooms] = useState(() => normalizeRooms(initialRooms))
+  const [panelPlan, setPanelPlan] = useState(() => initialPanels?.walls ? { ...emptyPanelPlan(), ...initialPanels } : emptyPanelPlan())
+  const [panelMm, setPanelMm] = useState(initialPanels?.panelMm || 100)
+  const [selectedWalls, setSelectedWalls] = useState([])
   const [pipes, setPipes] = useState(initialPipes || [])
   const [cables, setCables] = useState(initialCables || [])
   const [schematic, setSchematic] = useState(() => ({
@@ -270,6 +322,9 @@ export default function DesignerApp({
   const [roomsOpen, setRoomsOpen] = useState(true)
   const [templatesOpen, setTemplatesOpen] = useState(true)
   const roomsRef = useRef(rooms)
+  const panelRef = useRef(panelPlan)
+  const panelMmRef = useRef(panelMm)
+  const drawTypeRef = useRef('chilled')
   const pipesRef = useRef(pipes)
   const cablesRef = useRef(cables)
   const selectedRef = useRef(selectedIds)
@@ -280,6 +335,9 @@ export default function DesignerApp({
   const editSnap = useRef(null)
   const fileRef = useRef(null)
   roomsRef.current = rooms
+  panelRef.current = panelPlan
+  panelMmRef.current = panelMm
+  drawTypeRef.current = drawType
   pipesRef.current = pipes
   cablesRef.current = cables
   selectedRef.current = selectedIds
@@ -462,6 +520,7 @@ export default function DesignerApp({
       onPersist({
         name: nameRef.current,
         rooms: roomsRef.current,
+        panels: panelRef.current,
         unitSystem: unitRef.current,
         pipes: pipesRef.current,
         cables: cablesRef.current,
@@ -475,7 +534,7 @@ export default function DesignerApp({
     setSaveState('saving')
     const timer = setTimeout(() => {
       try {
-        onPersist({ name, rooms, unitSystem, pipes, cables, schematic })
+        onPersist({ name, rooms, panels: panelPlan, unitSystem, pipes, cables, schematic })
         setSaveState('saved')
       } catch (err) {
         console.error(err)
@@ -483,12 +542,14 @@ export default function DesignerApp({
       }
     }, 500)
     return () => clearTimeout(timer)
-  }, [name, rooms, unitSystem, pipes, cables, schematic, onPersist])
+  }, [name, rooms, panelPlan, unitSystem, pipes, cables, schematic, onPersist])
 
   function deleteSelected() {
     const ids = selectedRef.current
     if (!ids.length) return
     const current = roomsRef.current
+    const prompt = removalPrompt(current, ids, t)
+    if (prompt && !window.confirm(prompt)) return
     const roomIds = new Set(current.map((room) => room.id))
     const pipeIds = new Set(pipesRef.current.map((pipe) => pipe.id))
     const cableIds = new Set(cablesRef.current.map((cable) => cable.id))
@@ -520,6 +581,22 @@ export default function DesignerApp({
     })
     setRooms(current.filter((item) => !drop.has(item.id)))
     setSelectedIds([])
+  }
+
+  function syncPanels(next) {
+    panelRef.current = next
+    setPanelPlan(next)
+    const synced = roomsFromPanels(next, roomsRef.current, drawTypeRef.current)
+    roomsRef.current = synced
+    setRooms(synced)
+  }
+
+  function onPanelSegment(a, b) {
+    syncPanels(commitPanel(panelRef.current, a, b, panelMmRef.current))
+  }
+
+  function onPanelEnd(id, end, point) {
+    syncPanels(setPanelEnd(panelRef.current, id, end, point))
   }
 
   function onCreateRect(x1, z1, x2, z2) {
@@ -606,7 +683,21 @@ export default function DesignerApp({
     const current = roomsRef.current
     const room = current.find((item) => item.id === roomId)
     if (!room) return
-    const eq = makeEquipment(placingId, room, x, z, current)
+    let placeX = x
+    let placeZ = z
+    const template = getTemplate(placingId)
+    if (template?.category === 'door') {
+      const hit = snapDoorToPanel(panelRef.current.walls, { x, z })
+      if (hit) {
+        placeX = hit.x
+        placeZ = hit.z
+      }
+    }
+    const eq = makeEquipment(placingId, room, placeX, placeZ, current)
+    if (eq.refused) {
+      setNotice(t(eq.refused === 'need-door' ? 'cold.needDoor' : 'cold.needEvap'))
+      return
+    }
     const warning = eq.warning
     delete eq.warning
     const candidate = { ...eq, x: room.x + eq.x, z: room.z + eq.z, w: eq.width, d: eq.depth, name: eq.name }
@@ -633,7 +724,7 @@ export default function DesignerApp({
       item.id === roomId ? { ...item, equipment: [...item.equipment, eq] } : item
     )))
     setSelectedIds([eq.id])
-    setNotice(warning || t('designer.placedIn', { name: eq.name, room: room.label }))
+    setNotice(warning ? t(warning) : t('designer.placedIn', { name: eq.name, room: room.label }))
     if (!stamp.shift && !repeatPlace) {
       setPlacingId(null)
       setTool('select')
@@ -1082,22 +1173,17 @@ export default function DesignerApp({
     onSelect: setSelectedIds,
     onPreview: setRooms,
     onGestureStart: pushUndo,
-    onGestureEnd: () => {
-      setRooms((current) => current.map((room) => ({
-        ...room,
-        equipment: (room.equipment || []).map((eq) => {
-          if (!isOutdoorCategory(eq.category)) return eq
-          const wx = room.x + eq.x
-          const wz = room.z + eq.z
-          if (!insideRefrigerated(current, wx, wz)) return eq
-          const snapped = snapOutdoorUnit(current, eq, wx, wz, { mount: eq.mount || 'wall' })
-          setNotice(snapped.warning || t('designer.movedOut'))
-          return { ...eq, x: snapped.x - room.x, z: snapped.z - room.z, rotation: snapped.rotation, mount: eq.mount || snapped.mount }
-        }),
-      })))
-    },
+    onGestureEnd: () => {},
     onCreateRect,
     onCreatePolygon,
+    walls: panelPlan.walls || [],
+    selectedWalls,
+    onPanelSegment,
+    onPanelEnd,
+    onSelectWall: (id, shift) => setSelectedWalls((current) => {
+      if (!shift) return [id]
+      return current.includes(id) ? current.filter((item) => item !== id) : [...current, id].slice(-2)
+    }),
     onCreateRoute,
     onPlace,
     onPreviewPipes: setPipes,
@@ -1170,6 +1256,7 @@ export default function DesignerApp({
     <div className="designer-app plan-app" data-testid="cold-workspace" data-project-type={projectType} style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
       {infoOpen && (
         <ProjectInfoDialog
+          scope="cold"
           projectType={projectType}
           onCancel={() => setInfoOpen(false)}
           onConfirm={(id) => { setInfoOpen(false); chooseProjectType(id) }}
@@ -1532,10 +1619,23 @@ export default function DesignerApp({
               {(tool === 'draw' || tool === 'polygon') && (
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 650 }}>
                   {t('designer.roomType')}
-                  <select data-testid="room-type" aria-label={t('designer.roomType')} value={drawType} onChange={(event) => setDrawType(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 4, height: 32, borderRadius: 6, border: '1px solid #d6d3d1' }}>
-                    {ROOM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+                  <DutyTypeSelect testId="room-type" ariaLabel={t('designer.roomType')} value={drawType} onChange={setDrawType} />
+                </label>
+              )}
+              {(tool === 'draw' || tool === 'polygon') && (
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginTop: 8 }}>
+                  {t('cold.panelThickness')}
+                  <select data-testid="panel-thickness" aria-label={t('cold.panelThickness')} value={panelMm} onChange={(event) => setPanelMm(Number(event.target.value))} style={{ display: 'block', width: '100%', marginTop: 4, height: 32, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                    {PANEL_MM.map((mm) => <option key={mm} value={mm}>{mm} mm</option>)}
                   </select>
                 </label>
+              )}
+              {tool === 'draw' && <div style={{ fontSize: 11, color: '#57534e', marginTop: 8, lineHeight: 1.4 }}>{t('cold.drawHint')}</div>}
+              {tool === 'select' && (panelPlan.walls || []).length > 1 && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button type="button" data-testid="panel-join" onClick={() => syncPanels(joinPanelCorner(panelRef.current, selectedWalls[0], selectedWalls[1]))} style={{ flex: 1, height: 30, borderRadius: 6, border: '1px solid #d6d3d1', background: '#fff', cursor: 'pointer' }}>{t('cold.join')}</button>
+                  <button type="button" data-testid="panel-extend" onClick={() => syncPanels(extendPanel(panelRef.current, selectedWalls[0]))} style={{ flex: 1, height: 30, borderRadius: 6, border: '1px solid #d6d3d1', background: '#fff', cursor: 'pointer' }}>{t('cold.extend')}</button>
+                </div>
               )}
               {(tool === 'pipe' || tool === 'cable') && (
                 <div data-testid="pipe-settings" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1564,6 +1664,15 @@ export default function DesignerApp({
               )}
             </div>
           )}
+          <UnitBoard
+            t={t}
+            rooms={rooms}
+            result={result}
+            diversity={schematic.diversity}
+            onDiversity={(diversity) => setSchematic((current) => ({ ...current, diversity }))}
+            onAssign={(roomId, unitId) => setRooms((current) => assignRooms(current, [roomId], unitId))}
+            onPick={(equipmentId, templateId) => setRooms((current) => applyUnitChoice(current, equipmentId, templateId))}
+          />
           {selectedIds.length > 1 && (
             <div style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
               <MultiProperties count={selectedIds.length}>
@@ -1734,13 +1843,20 @@ export default function DesignerApp({
             pushUndo()
             patchEquipment(menu.id, { doorFamily: family })
           }}
+          onDoorLeaf={() => {
+            const host = roomsRef.current.find((item) => (item.equipment || []).some((eq) => eq.id === menu.id))
+            const eq = host?.equipment?.find((item) => item.id === menu.id)
+            if (!eq) return
+            pushUndo()
+            patchEquipment(menu.id, { opensOut: !doorOpensOut(eq, host) })
+          }}
         />
       )}
     </div>
   )
 }
 
-function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily, onReroute, onHeight, onLock, onCad }) {
+function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily, onDoorLeaf, onReroute, onHeight, onLock, onCad }) {
   const { t } = useLocale()
   const host = rooms.find((room) => room.id === menu.id) || rooms.find((room) => (room.equipment || []).some((eq) => eq.id === menu.id))
   const eq = host?.equipment?.find((item) => item.id === menu.id) || null
@@ -1790,6 +1906,11 @@ function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAng
                   ))}
                 </select>
               </label>
+              <MenuBtn testid="ctx-door-leaf" onClick={() => onDoorLeaf?.()}>
+                {doorOpensOut(eq, host) ? t('cold.opensOut') : t('cold.opensIn')}
+                {' · '}
+                {t('ctx.leaf')}
+              </MenuBtn>
             </>
           )}
           {eq && eq.category !== 'door' && (

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocale } from '@/components/i18n/Locale'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
+import { chainCloses, panelCursor } from '@/lib/coldPanels'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
 import { pointInEquipment } from '@/lib/placement'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
@@ -11,7 +12,8 @@ import { highlightedPorts, pipeAppearance, snapPort } from '@/lib/pipeTopology'
 import { followEndpoint, moveSegmentPoints, moveVertexPoints, riseMetres, translatePoints } from '@/lib/routeEdit'
 import { designerHits, mergeIds, selectionBox } from '@/lib/cadEdit'
 import { calculateProject } from '@/lib/heatLoad'
-import { doorPlanFigures } from '@/lib/doors'
+import { doorOpensOut, doorPlanFigures } from '@/lib/doors'
+import { dragColdDevice, followHosts, isColdDevice, reseatWallDevices } from '@/lib/coldDevices'
 import {
   applyBox,
   applyOutline,
@@ -216,26 +218,103 @@ function edgeDimension(edge, points, scale, unitSystem) {
   )
 }
 
+function tagShift(eq, kind) {
+  const along = 0.1
+  const out = 0.16
+  const wall = eq.wall || 's'
+  if (kind === 'defrost') return { x: 0.1, y: -0.1, anchor: 'start' }
+  if (kind === 'controller' || eq.face === 'outer') {
+    if (wall === 'n') return { x: along, y: -out, anchor: 'start' }
+    if (wall === 'e') return { x: out, y: 0, anchor: 'start' }
+    if (wall === 'w') return { x: -out, y: 0, anchor: 'end' }
+    return { x: along, y: out, anchor: 'start' }
+  }
+  if (kind === 'door' || eq.face === 'frame') {
+    const side = eq.hostSide === -1 ? -1 : 1
+    if (wall === 'e' || wall === 'w') {
+      return { x: wall === 'e' ? out * 0.4 : -out * 0.4, y: side * along, anchor: wall === 'e' ? 'start' : 'end' }
+    }
+    return side < 0
+      ? { x: -along, y: wall === 'n' ? -out * 0.35 : out * 0.35, anchor: 'end' }
+      : { x: along, y: wall === 'n' ? -out * 0.35 : out * 0.35, anchor: 'start' }
+  }
+  if (wall === 'n') return { x: along, y: out, anchor: 'start' }
+  if (wall === 'e') return { x: -out, y: 0, anchor: 'end' }
+  if (wall === 'w') return { x: out, y: 0, anchor: 'start' }
+  return { x: along, y: -out, anchor: 'start' }
+}
+
+function ColdDeviceMark({ eq, scale }) {
+  const u = 0.05
+  const kind = eq.sensor === 'door'
+    ? 'door'
+    : eq.category === 'controller' || eq.sensor === 'controller'
+      ? 'controller'
+      : eq.sensor === 'defrost'
+        ? 'defrost'
+        : eq.sensor === 'room'
+          ? 'room'
+          : 'sensor'
+  const ink = kind === 'controller' ? '#0f766e' : kind === 'door' ? '#9a3412' : '#0369a1'
+  const shift = tagShift(eq, kind)
+  const font = 11 / Math.max(scale, 1)
+  const upright = -(eq.rotation || 0)
+  return (
+    <g data-testid={`cold-symbol-${kind}`}>
+      {kind !== 'defrost' && (
+        <g transform={`scale(${u})`} fill="#fff" stroke={ink} strokeWidth={0.32} strokeLinecap="round" strokeLinejoin="round">
+          {kind === 'door' && (
+            <>
+              <circle r={1.7} />
+              <line x1={0.2} y1={0.15} x2={1.55} y2={-1.5} />
+            </>
+          )}
+          {kind === 'controller' && (
+            <>
+              <rect x={-2.2} y={-1.55} width={4.4} height={3.1} rx={0.35} fill="#f0fdfa" />
+              <circle r={0.7} />
+            </>
+          )}
+          {kind === 'room' && (
+            <>
+              <circle r={1.55} />
+              <circle r={0.42} fill={ink} stroke="none" />
+            </>
+          )}
+          {kind === 'sensor' && <circle r={1.55} />}
+        </g>
+      )}
+      <g transform={`rotate(${upright})`}>
+        {kind === 'defrost' && (
+          <text textAnchor="middle" dominantBaseline="central" fontSize={2.2 * u} fontWeight={700} fill={ink} fontFamily="ui-sans-serif, system-ui, sans-serif">S</text>
+        )}
+        {eq.name && (
+          <text
+            x={shift.x}
+            y={shift.y}
+            textAnchor={shift.anchor}
+            dominantBaseline="middle"
+            fill={ink}
+            fontSize={font}
+            fontFamily="ui-sans-serif, system-ui, sans-serif"
+            stroke="#fff"
+            strokeWidth={3 / Math.max(scale, 1)}
+            paintOrder="stroke"
+          >
+            {eq.name}
+          </text>
+        )}
+      </g>
+    </g>
+  )
+}
+
 function EquipmentMark({ eq, scale }) {
   const w = eq.width
   const d = eq.depth
   const sw = 1 / Math.max(scale, 1)
-  if (eq.category === 'sensor') {
-    const letter = eq.sensor === 'door' ? 'O' : eq.sensor === 'defrost' ? 'S' : eq.sensor === 'evap' ? 'H' : 'T'
-    return (
-      <g>
-        <circle r={0.13} fill="#fff" stroke="#0369a1" strokeWidth={sw * 1.4} />
-        <text y={4 / scale} textAnchor="middle" fontSize={11 / scale} fill="#0369a1" fontFamily="ui-sans-serif, system-ui, sans-serif">{letter}</text>
-      </g>
-    )
-  }
-  if (eq.category === 'controller') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} rx={0.03} fill="#ccfbf1" stroke="#0f766e" strokeWidth={sw} />
-        <text y={4 / scale} textAnchor="middle" fontSize={12 / scale} fill="#0f766e" fontFamily="ui-sans-serif, system-ui, sans-serif">S</text>
-      </g>
-    )
+  if (eq.category === 'sensor' || eq.category === 'controller') {
+    return <ColdDeviceMark eq={eq} scale={scale} />
   }
   if (eq.category === 'column') {
     return <rect x={-w / 2} y={-d / 2} width={w} height={d} fill="#d6d3d1" stroke="#57534e" strokeWidth={sw * 1.4} />
@@ -321,7 +400,7 @@ function DoorGlyph({ room, eq, scale }) {
   const drawn = doorPlanFigures(room, eq)
   const px = (n) => n / scale
   return (
-    <g data-eq={eq.id} data-door-style={drawn.style}>
+    <g data-eq={eq.id} data-door-style={drawn.style} data-leaf={doorOpensOut(eq, room) ? 'out' : 'in'}>
       {drawn.figures.map((fig, index) => {
         if (fig.kind === 'rect') {
           return (
@@ -381,6 +460,11 @@ export default function PlanView({
   onCreateRect,
   onCreatePolygon,
   onCreateRoute,
+  onPanelSegment,
+  onPanelEnd,
+  onSelectWall,
+  walls = [],
+  selectedWalls = [],
   onPlace,
   onContextMenu,
   onPreviewPipes,
@@ -427,6 +511,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
+    onPanelSegment, onPanelEnd, onSelectWall, walls, selectedWalls,
     onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu, hand,
   }
 
@@ -568,7 +653,7 @@ export default function PlanView({
         typed.current.field = typed.current.field === 'w' ? 'd' : 'w'
         return
       }
-      if ((drawing || points.length) && /^[0-9.,]$/.test(event.key)) {
+      if ((drawing || points.length || propsRef.current.tool === 'draw') && /^[0-9.,@<]$/.test(event.key)) {
         event.preventDefault()
         event.stopPropagation()
         if (drawing) {
@@ -587,6 +672,23 @@ export default function PlanView({
         setDraft(null)
         propsRef.current.onCreateRect(g.x1, g.z1, g.x2, g.z2)
         typed.current = { field: 'w', w: '', d: '' }
+        return
+      }
+      if (event.key === 'Enter' && propsRef.current.tool === 'draw' && polyRef.current.length && polyTyped.current) {
+        event.preventDefault()
+        event.stopPropagation()
+        const last = polyRef.current[polyRef.current.length - 1]
+        const point = panelCursor({ x: last.x + 1, z: last.z }, last, propsRef.current.walls, viewRef.current.scale, polyTyped.current)
+        polyTyped.current = ''
+        if (point && chainCloses(polyRef.current, point)) {
+          propsRef.current.onPanelSegment?.(last, polyRef.current[0])
+          setPoly([])
+          return
+        }
+        if (point) {
+          propsRef.current.onPanelSegment?.(last, point)
+          setPoly([...polyRef.current, point])
+        }
         return
       }
       if (event.key === 'Enter' && points.length) {
@@ -641,16 +743,18 @@ export default function PlanView({
       const world = { x: (px - current.offsetX) / current.scale, z: (py - current.offsetY) / current.scale, px, py }
       const p = propsRef.current
       const g = gesture.current
-      if (polyRef.current.length && isRouteTool(p.tool)) {
+      if (polyRef.current.length && (isRouteTool(p.tool) || p.tool === 'draw')) {
         const last = polyRef.current[polyRef.current.length - 1]
-        let hover = snapWorld(world.x, world.z, {
-          origin: last,
-          scale: current.scale,
-          grid: p.snapOn ? p.gridSize : 0,
-          rooms: p.rooms,
-          flags: { ...p.snapFlags, ortho: true },
-        })
-        const typedLength = parseFloat(polyTyped.current.replace(',', '.'))
+        let hover = p.tool === 'draw'
+          ? { ...panelCursor(world, last, p.walls, current.scale, polyTyped.current), kind: 'endpoint' }
+          : snapWorld(world.x, world.z, {
+            origin: last,
+            scale: current.scale,
+            grid: p.snapOn ? p.gridSize : 0,
+            rooms: p.rooms,
+            flags: { ...p.snapFlags, ortho: true },
+          })
+        const typedLength = p.tool === 'draw' ? NaN : parseFloat(polyTyped.current.replace(',', '.'))
         if (Number.isFinite(typedLength) && typedLength >= 0.3) {
           const dx = hover.x - last.x
           const dz = hover.z - last.z
@@ -684,6 +788,12 @@ export default function PlanView({
       if (g.kind === 'marquee') {
         const mode = g.stretch || g.x1 > world.x ? 'crossing' : 'window'
         setDraft({ kind: 'marquee', x1: g.x1, z1: g.z1, x2: world.x, z2: world.z, mode })
+        return
+      }
+      if (g.kind === 'panel-end') {
+        const snappedEnd = panelCursor(world, null, p.walls, current.scale, '')
+        g.point = snappedEnd
+        setCursor({ ...world, x: snappedEnd.x, z: snappedEnd.z, kind: 'endpoint' })
         return
       }
       const snapped = snapWorld(world.x, world.z, {
@@ -764,7 +874,7 @@ export default function PlanView({
         const limited = clampResizeBox(room, g.orig, left, top, right, bottom)
         if (!limited) return
         p.onPreview(g.orig.map((item) => (
-          item.id === room.id ? applyBox(item, limited.left, limited.top, limited.right, limited.bottom) : item
+          item.id === room.id ? reseatWallDevices(applyBox(item, limited.left, limited.top, limited.right, limited.bottom)) : item
         )))
         return
       }
@@ -779,7 +889,7 @@ export default function PlanView({
         if (parent && !footprintInside(parent, proposed)) return
         const children = g.orig.filter((item) => item.parentId === room.id)
         if (children.some((child) => !footprintInside(proposed, child))) return
-        p.onPreview(g.orig.map((item) => (item.id === room.id ? proposed : item)))
+        p.onPreview(g.orig.map((item) => (item.id === room.id ? reseatWallDevices(proposed) : item)))
         return
       }
       if (g.kind === 'route') {
@@ -811,16 +921,17 @@ export default function PlanView({
         p.onPreviewCables?.(follow(g.cables))
         p.onPreview(g.orig.map((room) => {
           if (room.id !== g.roomId) return room
-          return {
-            ...room,
-            equipment: room.equipment.map((eq) => {
-              if (eq.id !== g.eqId) return eq
-              const localX = eq.x + dx
-              const localZ = eq.z + dz
-              if (eq.category === 'door') return { ...eq, ...snapDoorToWall(room, localX, localZ, eq.width) }
-              return { ...eq, x: localX, z: localZ }
-            }),
-          }
+          const equipment = room.equipment.map((eq) => {
+            if (eq.id !== g.eqId) return eq
+            const localX = eq.x + dx
+            const localZ = eq.z + dz
+            if (isColdDevice(eq)) {
+              return dragColdDevice(eq, room, room.x + localX, room.z + localZ, g.orig) || eq
+            }
+            if (eq.category === 'door') return { ...eq, ...snapDoorToWall(room, localX, localZ, eq.width) }
+            return { ...eq, x: localX, z: localZ }
+          })
+          return { ...room, equipment: followHosts(room, equipment, g.eqId) }
         }))
       }
     }
@@ -847,6 +958,10 @@ export default function PlanView({
                   : null
           if (hit) p.onContextMenu?.({ ...hit, x: event.clientX, y: event.clientY })
         }
+        return
+      }
+      if (g.kind === 'panel-end' && g.point) {
+        p.onPanelEnd?.(g.id, g.end, g.point)
         return
       }
       if (g.kind === 'draw') {
@@ -979,7 +1094,32 @@ export default function PlanView({
       setPoly([...polyRef.current, { x: point.x, z: point.z }])
       return
     }
-    if (!touchHand && (p.tool === 'draw' || p.tool === 'partition')) {
+    const panelEnd = event.target?.dataset?.panelEnd
+    const panelWall = event.target?.dataset?.panelWall
+    if (panelWall && !panelEnd && p.tool === 'select') {
+      p.onSelectWall?.(panelWall, event.shiftKey)
+      return
+    }
+    if (panelEnd && panelWall && p.tool === 'select') {
+      p.onSelectWall?.(panelWall, event.shiftKey)
+      gesture.current = { kind: 'panel-end', id: panelWall, end: panelEnd }
+      return
+    }
+    if (!touchHand && p.tool === 'draw') {
+      const origin = polyRef.current.length ? polyRef.current[polyRef.current.length - 1] : null
+      let point = panelCursor(world, origin, p.walls, view.scale, polyTyped.current)
+      polyTyped.current = ''
+      if (!point) return
+      if (origin && chainCloses(polyRef.current, point)) {
+        p.onPanelSegment?.(origin, polyRef.current[0])
+        setPoly([])
+        return
+      }
+      if (origin) p.onPanelSegment?.(origin, point)
+      setPoly([...polyRef.current, { x: point.x, z: point.z }])
+      return
+    }
+    if (!touchHand && p.tool === 'partition') {
       const point = snapWorld(world.x, world.z, {
         scale: view.scale,
         grid: p.snapOn ? p.gridSize : 0,
@@ -1273,9 +1413,11 @@ export default function PlanView({
       ? t('designer.cableHint')
       : tool === 'polygon'
         ? t('designer.polyHint')
-        : tool === 'draw' || tool === 'partition'
-          ? t('designer.dragHint')
-          : t('designer.selectHint')
+        : tool === 'draw'
+          ? t('cold.drawHint')
+          : tool === 'partition'
+            ? t('designer.dragHint')
+            : t('designer.selectHint')
 
   const rectDraft = draft?.kind === 'rect' ? draft : null
   const draftWidth = rectDraft ? Math.abs(rectDraft.x2 - rectDraft.x1) : 0
@@ -1321,6 +1463,33 @@ export default function PlanView({
               strokeWidth={(line.major ? 1.1 : 0.7) / view.scale}
             />
           ))}
+          {(walls || []).map((wall) => (
+            <g key={wall.id} data-testid={`panel-wall-${wall.id}`}>
+              <line
+                data-panel-wall={wall.id}
+                x1={wall.a.x}
+                y1={wall.a.z}
+                x2={wall.b.x}
+                y2={wall.b.z}
+                stroke={selectedWalls.includes(wall.id) ? '#0f766e' : '#44403c'}
+                strokeWidth={Math.max((wall.thickness || 0.1) * 0.35, 1.6 / view.scale)}
+              />
+              {['a', 'b'].map((end) => (
+                <circle
+                  key={end}
+                  data-panel-wall={wall.id}
+                  data-panel-end={end}
+                  data-testid={`panel-grip-${wall.id}-${end}`}
+                  cx={wall[end].x}
+                  cy={wall[end].z}
+                  r={5 / view.scale}
+                  fill="#fff"
+                  stroke="#0f766e"
+                  strokeWidth={1.4 / view.scale}
+                />
+              ))}
+            </g>
+          ))}
           {wallPanels.map((panel) => {
             const points = panelPolygon(panel)
             return (
@@ -1362,7 +1531,7 @@ export default function PlanView({
                   const ex = room.x + eq.x
                   const ez = room.z + eq.z
                   return (
-                    <g key={eq.id} data-eq={eq.id} data-cat={eq.category} data-style={eq.style || ''} transform={`translate(${ex} ${ez}) rotate(${eq.rotation || 0})`}>
+                    <g key={eq.id} data-eq={eq.id} data-cat={eq.category} data-style={eq.style || ''} data-sensor={eq.sensor || ''} data-face={eq.face || ''} data-host={eq.hostId || ''} transform={`translate(${ex} ${ez}) rotate(${eq.rotation || 0})`}>
                       {flashId === eq.id && <rect data-testid="place-flash" x={-eq.width / 2 - 0.06} y={-eq.depth / 2 - 0.06} width={eq.width + 0.12} height={eq.depth + 0.12} fill="none" stroke="#ea580c" strokeWidth={0.04} />}
                       <EquipmentMark eq={eq} scale={view.scale} />
                     </g>
@@ -1742,7 +1911,7 @@ export default function PlanView({
         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#44403c' }}>{t('north.label').toUpperCase()}</span>
       </div>
       {notice && (
-        <div style={{ position: 'absolute', left: 14, top: 44, maxWidth: 420, padding: '6px 10px', background: 'rgba(255,251,235,0.95)', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#78350f' }}>
+        <div data-testid="plan-notice" style={{ position: 'absolute', left: 14, top: 44, maxWidth: 460, padding: '6px 10px', background: 'rgba(255,251,235,0.95)', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#78350f' }}>
           {notice}
         </div>
       )}

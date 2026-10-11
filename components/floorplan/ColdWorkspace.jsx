@@ -32,6 +32,7 @@ export default function ColdWorkspace({ plan, onProjectType, onName, user = null
       initialPipes={saved?.pipes || []}
       initialCables={saved?.cables || []}
       initialSchematic={saved?.schematic || null}
+      initialPanels={saved?.panels || null}
       initialUnitSystem={saved?.unitSystem || (saved?.dimUnit === 'ft' ? 'IP' : 'SI')}
       projectType="kylmio"
       onProjectType={onProjectType}
@@ -43,6 +44,7 @@ export default function ColdWorkspace({ plan, onProjectType, onName, user = null
           cables: data.cables || [],
           unitSystem: data.unitSystem,
           schematic: data.schematic || null,
+          panels: data.panels || null,
           dimUnit: data.unitSystem === 'IP' ? 'ft' : 'm',
           lastSaved: new Date().toISOString(),
         }))
