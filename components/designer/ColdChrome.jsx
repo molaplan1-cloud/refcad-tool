@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { LanguageSwitch } from '@/components/i18n/Locale'
 import { CadToolbar, EditCommandItems } from '../floorplan/CadTools'
+import { FileMenuItems } from '../chrome/FileMenuItems'
 
 const COLD_TABS = ['structure', 'doors', 'cooling', 'pipes', 'electric', 'print']
 
@@ -146,8 +147,24 @@ export default function ColdChrome({
   onDxf,
   onJson,
   onImport,
+  onOpen,
   onProjectInfo,
   onProjectSettings,
+  onNew,
+  onSave,
+  onSaveAs,
+  recent = [],
+  onRecent,
+  onImportUnderlay,
+  onPrint,
+  onStraighten,
+  onSquare,
+  onExtend,
+  onJoin,
+  zoomPercent = 100,
+  onZoomIn,
+  onZoomOut,
+  onZoom100,
   settingsOpen,
   user,
   cad,
@@ -168,8 +185,8 @@ export default function ColdChrome({
   const drawButtons = (style) => (
     <>
       <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={style(selectOn)} onClick={() => { close(); onTool('select') }}>{t('tool.select')}</button>
-      <button type="button" data-testid="tool-draw" aria-pressed={tool === 'draw'} style={style(tool === 'draw')} onClick={() => { close(); onTool('draw') }}>{t('designer.room')}</button>
-      <button type="button" data-testid="tool-polygon" aria-pressed={tool === 'polygon'} style={style(tool === 'polygon')} onClick={() => { close(); onTool('polygon') }}>{t('tool.polygon')}</button>
+      <button type="button" data-testid="tool-draw" title={t('designer.roomTitle')} aria-pressed={tool === 'draw'} style={style(tool === 'draw')} onClick={() => { close(); onTool('draw') }}>{t('tool.rectangle')}</button>
+      <button type="button" data-testid="tool-polygon" aria-pressed={tool === 'polygon'} style={style(tool === 'polygon')} onClick={() => { close(); onTool('polygon') }}>{t('cold.wall')}</button>
       <button type="button" data-testid="tool-partition" aria-pressed={tool === 'partition'} style={style(tool === 'partition')} onClick={() => { close(); onTool('partition') }}>{t('tool.interior')}</button>
     </>
   )
@@ -206,6 +223,9 @@ export default function ColdChrome({
           <button type="button" data-testid="cleanup-duplicates" style={style(false)} onClick={() => { close(); onCleanup?.() }}>{t('edit.cleanup')}</button>
         </>
       )}
+      <button type="button" data-testid="zoom-out" title={t('snap.zoomOut')} style={style(false)} onClick={() => { close(); onZoomOut?.() }}>−</button>
+      <button type="button" data-testid="zoom-percent" style={style(false)} onClick={() => { close(); onZoom100?.() }}>{zoomPercent}%</button>
+      <button type="button" data-testid="zoom-in" title={t('snap.zoomIn')} style={style(false)} onClick={() => { close(); onZoomIn?.() }}>+</button>
       <button type="button" data-testid="zoom-fit" style={style(false)} onClick={() => { close(); onFit() }}>{t('snap.fit')}</button>
     </>
   )
@@ -222,20 +242,43 @@ export default function ColdChrome({
   const menus = (dock) => (
     <>
       <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen} dock={dock}>
-        <button type="button" data-testid="project-info" style={menuItem(false)} onClick={() => { close(); onProjectInfo?.() }}>{t('file.projectInfo')}</button>
-        <button type="button" data-testid="house-settings" style={menuItem(settingsOpen)} onClick={() => { close(); onProjectSettings?.() }}>{t('file.projectSettings')}</button>
-        <button type="button" data-testid="example-enquiry" style={menuItem(false)} onClick={() => { close(); onExample?.() }}>{t('designer.example')}</button>
-        <button type="button" data-testid="import-json" style={menuItem(false)} onClick={() => { close(); onImport?.() }}>{t('designer.import')}</button>
-        {user && (
-          <form action="/api/auth/logout" method="POST">
-            <button type="submit" style={menuItem(false)}>{t('designer.signOut')}</button>
-          </form>
-        )}
+        <FileMenuItems
+          t={t}
+          itemStyle={menuItem}
+          close={close}
+          onNew={onNew}
+          onOpen={onOpen}
+          onSave={onSave}
+          onSaveAs={onSaveAs}
+          recent={recent}
+          onRecent={onRecent}
+          onImportUnderlay={onImportUnderlay}
+          onExport={() => { onPdf?.(); onDxf?.() }}
+          onProjectInfo={onProjectInfo}
+          onProjectSettings={onProjectSettings}
+          settingsOpen={settingsOpen}
+          onPrint={onPrint}
+          extra={(
+            <>
+              <button type="button" data-testid="example-enquiry" style={menuItem(false)} onClick={() => { close(); onExample?.() }}>{t('designer.example')}</button>
+              <button type="button" data-testid="import-json" style={menuItem(false)} onClick={() => { close(); onImport?.() }}>{t('designer.import')}</button>
+              {user && (
+                <form action="/api/auth/logout" method="POST">
+                  <button type="submit" style={menuItem(false)}>{t('designer.signOut')}</button>
+                </form>
+              )}
+            </>
+          )}
+        />
       </Menu>
       <Menu id="edit" label={t('menu.edit')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="undo" style={menuItem(false)} onClick={() => { close(); onUndo?.() }}>{t('edit.undo')}</button>
         <button type="button" data-testid="redo" style={menuItem(false)} onClick={() => { close(); onRedo?.() }}>{t('edit.redo')}</button>
         <button type="button" data-testid="cleanup-menu" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>{t('edit.cleanup')}</button>
+        <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
+        <button type="button" data-testid="square-wall" style={menuItem(false)} onClick={() => { close(); onSquare?.() }}>{t('cad.square')}</button>
+        <button type="button" data-testid="menu-join-extend" style={menuItem(false)} onClick={() => { close(); onExtend?.() }}>{t('join.extend')}</button>
+        <button type="button" data-testid="menu-join-corner" style={menuItem(false)} onClick={() => { close(); onJoin?.() }}>{t('join.corner')}</button>
         <EditCommandItems
           scope="cold"
           itemStyle={menuItem}
@@ -253,20 +296,26 @@ export default function ColdChrome({
         <button type="button" data-testid="toggle-legend" style={menuItem(showLegend)} onClick={() => { close(); onLegend?.(!showLegend) }}>{t('display.legend')}</button>
         <button type="button" data-testid="full-canvas" style={menuItem(false)} onClick={() => { close(); onFull?.() }}>{t('panel.full')}</button>
         <button type="button" data-testid="toggle-edit-bar" aria-pressed={Boolean(editBar)} style={menuItem(Boolean(editBar))} onClick={() => { close(); onEditBar?.() }}>{t('view.editBar')}</button>
+        <button type="button" data-testid="menu-zoom-out" style={menuItem(false)} onClick={() => { close(); onZoomOut?.() }}>{t('snap.zoomOut')}</button>
+        <button type="button" data-testid="menu-zoom-in" style={menuItem(false)} onClick={() => { close(); onZoomIn?.() }}>{t('snap.zoomIn')}</button>
+        <button type="button" style={menuItem(false)} onClick={() => { close(); onZoom100?.() }}>{zoomPercent}%</button>
       </Menu>
       <Menu id="draw" label={t('menu.draw')} open={open} setOpen={setOpen} dock={dock}>
-        {tab === 'structure' && !dock ? <div style={{ fontSize: 12, color: '#78716c', padding: '4px 8px' }}>{t('menu.onRibbon')}</div> : drawButtons(menuItem)}
+        {drawButtons(menuItem)}
       </Menu>
       <Menu id="insert" label={t('menu.insert')} open={open} setOpen={setOpen} dock={dock}>
-        {COLD_TABS.filter((id) => id !== 'print').map((id) => (
-          <button key={id} type="button" style={menuItem(tab === id)} onClick={() => { close(); onTab(id) }}>{t(`cold.tab.${id}`)}</button>
+        <button type="button" style={menuItem(tool === 'draw')} onClick={() => { close(); onTab('structure'); onTool('draw') }}>{t('tool.rectangle')}</button>
+        <button type="button" style={menuItem(tool === 'polygon')} onClick={() => { close(); onTab('structure'); onTool('polygon') }}>{t('cold.wall')}</button>
+        <button type="button" style={menuItem(tool === 'partition')} onClick={() => { close(); onTab('structure'); onTool('partition') }}>{t('tool.interior')}</button>
+        {COLD_TABS.filter((id) => id !== 'print' && id !== 'structure').map((id) => (
+          <button key={id} type="button" data-testid={`insert-${id}`} style={menuItem(tab === id)} onClick={() => { close(); onTab(id) }}>{t(`cold.tab.${id}`)}</button>
         ))}
-        <div style={{ fontSize: 12, color: '#78716c', padding: '4px 8px' }}>{t('cold.inPanel')}</div>
       </Menu>
       <Menu id="print" label={t('menu.print')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="menu-export-pdf" style={menuItem(false)} onClick={() => { close(); onPdf?.() }}>{t('designer.pdf')}</button>
         <button type="button" data-testid="menu-export-dxf" style={menuItem(false)} onClick={() => { close(); onDxf?.() }}>{t('designer.dxf')}</button>
         <button type="button" data-testid="menu-export-json" style={menuItem(false)} onClick={() => { close(); onJson?.() }}>JSON</button>
+        <button type="button" data-testid="menu-print" style={menuItem(false)} onClick={() => { close(); onPrint?.() }}>{t('file.print')}</button>
       </Menu>
     </>
   )

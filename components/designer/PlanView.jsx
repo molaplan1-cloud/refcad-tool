@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocale } from '@/components/i18n/Locale'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
-import { chainCloses, panelCursor } from '@/lib/coldPanels'
+import { drawCursor, parseRectangleSize, rectangleCursor } from '@/lib/wallDraw'
+import { wallFigures } from '@/lib/wall-outline'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
 import { pointInEquipment } from '@/lib/placement'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
@@ -37,7 +38,6 @@ import {
   snapWorld,
   translateOutline,
 } from '@/lib/cadDraw'
-import { panelPolygon, sharedWallPanels } from '@/lib/sharedWalls'
 import { pinchScale } from '@/lib/zoom'
 import { touchAction } from '@/lib/touch'
 
@@ -138,7 +138,7 @@ function hitRoute(items, x, z, limit = 0.22) {
 }
 
 function isRouteTool(tool) {
-  return tool === 'polygon' || tool === 'pipe' || tool === 'cable'
+  return tool === 'pipe' || tool === 'cable'
 }
 
 function moveEdge(points, index, x, z) {
@@ -462,9 +462,15 @@ export default function PlanView({
   onCreateRoute,
   onPanelSegment,
   onPanelEnd,
+  onChainStep,
+  onCommitRectangle,
+  onUndo,
   onSelectWall,
   walls = [],
   selectedWalls = [],
+  zoomCommand = null,
+  onScale,
+  underlay = null,
   onPlace,
   onContextMenu,
   onPreviewPipes,
@@ -506,19 +512,46 @@ export default function PlanView({
   const typed = useRef({ field: 'w', w: '', d: '' })
   const polyTyped = useRef('')
   const polyRef = useRef([])
+  const chainRef = useRef(null)
+  const chainHist = useRef([])
   const propsRef = useRef({})
   polyRef.current = poly
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
-    onPanelSegment, onPanelEnd, onSelectWall, walls, selectedWalls,
+    onPanelSegment, onPanelEnd, onChainStep, onCommitRectangle, onUndo, onSelectWall, walls, selectedWalls, onScale,
     onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu, hand,
   }
 
   const setCamera = (next) => {
     viewRef.current = next
     setView(next)
+    propsRef.current.onScale?.(next.scale)
   }
+
+  useEffect(() => {
+    chainRef.current = null
+    chainHist.current = []
+    polyTyped.current = ''
+    setPoly([])
+    setDraft(null)
+  }, [tool])
+
+  useEffect(() => {
+    if (!zoomCommand) return
+    const host = hostRef.current
+    if (!host) return
+    const rect = host.getBoundingClientRect()
+    const current = viewRef.current
+    const cx = rect.width / 2
+    const cy = rect.height / 2
+    const worldX = (cx - current.offsetX) / current.scale
+    const worldZ = (cy - current.offsetY) / current.scale
+    const scale = zoomCommand.percent
+      ? Math.max(6, Math.min(220, 36 * (zoomCommand.percent / 100)))
+      : Math.max(6, Math.min(220, current.scale * (zoomCommand.factor || 1)))
+    setCamera({ scale, offsetX: cx - worldX * scale, offsetY: cy - worldZ * scale })
+  }, [zoomCommand])
 
   useEffect(() => {
     const host = hostRef.current
@@ -632,13 +665,93 @@ export default function PlanView({
       if (event.type !== 'keydown') return
       const drawing = gesture.current?.kind === 'draw'
       const points = polyRef.current
-      if (event.key === 'Escape' && (drawing || points.length)) {
+      const toolNow = propsRef.current.tool
+      const wallTool = toolNow === 'draw' || toolNow === 'polygon' || toolNow === 'partition'
+      const chainTool = toolNow === 'polygon' || toolNow === 'partition'
+      if (event.key === 'Escape' && (drawing || points.length || chainRef.current)) {
         gesture.current = null
         typed.current = { field: 'w', w: '', d: '' }
         polyTyped.current = ''
+        chainRef.current = null
+        chainHist.current = []
         setDraft(null)
         setPoly([])
         event.stopPropagation()
+        return
+      }
+      if (wallTool) {
+        const drawChar = event.key === ',' ? '.' : event.key
+        const isDrawChar = /^[0-9.]$/.test(drawChar) || event.key === '<' || event.key === '@' || event.key === 'x' || event.key === 'X' || event.key === '×' || event.key === '*'
+        if (event.key === 'Backspace') {
+          event.preventDefault()
+          event.stopPropagation()
+          if (polyTyped.current) {
+            polyTyped.current = polyTyped.current.slice(0, -1)
+            return
+          }
+          if (chainHist.current.length) {
+            const prev = chainHist.current.pop()
+            propsRef.current.onUndo?.()
+            chainRef.current = prev
+            setPoly(prev?.anchor ? [prev.anchor] : [])
+            setDraft(prev?.corner ? { kind: 'rect', x1: prev.corner.x, z1: prev.corner.z, x2: prev.corner.x, z2: prev.corner.z } : null)
+            return
+          }
+          chainRef.current = null
+          setPoly([])
+          setDraft(null)
+          return
+        }
+        if (!event.ctrlKey && !event.metaKey && !event.altKey && chainTool && event.key.toLowerCase() === 'c' && chainRef.current?.anchor) {
+          event.preventDefault()
+          event.stopPropagation()
+          const prev = chainRef.current
+          const result = propsRef.current.onChainStep?.(prev, prev.start, { close: true })
+          if (result?.committed) chainHist.current.push(prev)
+          chainRef.current = result?.chain || null
+          setPoly(result?.chain?.anchor ? [result.chain.anchor] : [])
+          return
+        }
+        if (!event.ctrlKey && !event.metaKey && !event.altKey && isDrawChar) {
+          event.preventDefault()
+          event.stopPropagation()
+          polyTyped.current = `${polyTyped.current}${event.key === '×' ? 'x' : drawChar}`.slice(0, 16)
+          return
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          event.stopPropagation()
+          if (toolNow === 'draw' && chainRef.current?.corner) {
+            const size = parseRectangleSize(polyTyped.current)
+            if (size) {
+              const corner = chainRef.current.corner
+              propsRef.current.onCommitRectangle?.(corner, { x: corner.x + size.width, z: corner.z + size.depth })
+              chainRef.current = null
+              polyTyped.current = ''
+              setDraft(null)
+            }
+            return
+          }
+          if (chainTool && chainRef.current?.anchor && polyTyped.current) {
+            const typedNow = polyTyped.current
+            const freeAngle = typedNow.includes('<')
+            const point = drawCursor(
+              { x: chainRef.current.anchor.x + 1, z: chainRef.current.anchor.z },
+              chainRef.current.anchor,
+              propsRef.current.walls,
+              viewRef.current.scale,
+              typedNow,
+              { extraPoints: chainRef.current.start ? [chainRef.current.start] : [] },
+            )
+            polyTyped.current = ''
+            const prev = chainRef.current
+            const result = propsRef.current.onChainStep?.(prev, point, { freeAngle })
+            if (result?.committed) chainHist.current.push(prev)
+            chainRef.current = result?.chain || null
+            setPoly(result?.chain?.anchor ? [result.chain.anchor] : [])
+          }
+          return
+        }
         return
       }
       if (event.key === 'Backspace' && points.length && !drawing) {
@@ -672,23 +785,6 @@ export default function PlanView({
         setDraft(null)
         propsRef.current.onCreateRect(g.x1, g.z1, g.x2, g.z2)
         typed.current = { field: 'w', w: '', d: '' }
-        return
-      }
-      if (event.key === 'Enter' && propsRef.current.tool === 'draw' && polyRef.current.length && polyTyped.current) {
-        event.preventDefault()
-        event.stopPropagation()
-        const last = polyRef.current[polyRef.current.length - 1]
-        const point = panelCursor({ x: last.x + 1, z: last.z }, last, propsRef.current.walls, viewRef.current.scale, polyTyped.current)
-        polyTyped.current = ''
-        if (point && chainCloses(polyRef.current, point)) {
-          propsRef.current.onPanelSegment?.(last, polyRef.current[0])
-          setPoly([])
-          return
-        }
-        if (point) {
-          propsRef.current.onPanelSegment?.(last, point)
-          setPoly([...polyRef.current, point])
-        }
         return
       }
       if (event.key === 'Enter' && points.length) {
@@ -743,18 +839,26 @@ export default function PlanView({
       const world = { x: (px - current.offsetX) / current.scale, z: (py - current.offsetY) / current.scale, px, py }
       const p = propsRef.current
       const g = gesture.current
-      if (polyRef.current.length && (isRouteTool(p.tool) || p.tool === 'draw')) {
+      if ((p.tool === 'polygon' || p.tool === 'partition') && chainRef.current?.anchor) {
+        const point = drawCursor(world, chainRef.current.anchor, p.walls, current.scale, polyTyped.current, {
+          extraPoints: chainRef.current.start ? [chainRef.current.start] : [],
+        })
+        setPoly([chainRef.current.anchor])
+        setPolyHover({ ...point, kind: 'endpoint' })
+      } else if (p.tool === 'draw' && chainRef.current?.corner) {
+        const point = rectangleCursor(world, chainRef.current.corner, p.walls, current.scale, polyTyped.current)
+        setDraft({ kind: 'rect', x1: chainRef.current.corner.x, z1: chainRef.current.corner.z, x2: point.x, z2: point.z })
+      }
+      if (polyRef.current.length && isRouteTool(p.tool)) {
         const last = polyRef.current[polyRef.current.length - 1]
-        let hover = p.tool === 'draw'
-          ? { ...panelCursor(world, last, p.walls, current.scale, polyTyped.current), kind: 'endpoint' }
-          : snapWorld(world.x, world.z, {
-            origin: last,
-            scale: current.scale,
-            grid: p.snapOn ? p.gridSize : 0,
-            rooms: p.rooms,
-            flags: { ...p.snapFlags, ortho: true },
-          })
-        const typedLength = p.tool === 'draw' ? NaN : parseFloat(polyTyped.current.replace(',', '.'))
+        let hover = snapWorld(world.x, world.z, {
+          origin: last,
+          scale: current.scale,
+          grid: p.snapOn ? p.gridSize : 0,
+          rooms: p.rooms,
+          flags: { ...p.snapFlags, ortho: true },
+        })
+        const typedLength = parseFloat(polyTyped.current.replace(',', '.'))
         if (Number.isFinite(typedLength) && typedLength >= 0.3) {
           const dx = hover.x - last.x
           const dz = hover.z - last.z
@@ -791,7 +895,7 @@ export default function PlanView({
         return
       }
       if (g.kind === 'panel-end') {
-        const snappedEnd = panelCursor(world, null, p.walls, current.scale, '')
+        const snappedEnd = drawCursor(world, null, p.walls, current.scale, '')
         g.point = snappedEnd
         setCursor({ ...world, x: snappedEnd.x, z: snappedEnd.z, kind: 'endpoint' })
         return
@@ -1105,30 +1209,33 @@ export default function PlanView({
       gesture.current = { kind: 'panel-end', id: panelWall, end: panelEnd }
       return
     }
-    if (!touchHand && p.tool === 'draw') {
-      const origin = polyRef.current.length ? polyRef.current[polyRef.current.length - 1] : null
-      let point = panelCursor(world, origin, p.walls, view.scale, polyTyped.current)
-      polyTyped.current = ''
-      if (!point) return
-      if (origin && chainCloses(polyRef.current, point)) {
-        p.onPanelSegment?.(origin, polyRef.current[0])
-        setPoly([])
+    if (!touchHand && (p.tool === 'draw' || p.tool === 'polygon' || p.tool === 'partition')) {
+      if (p.tool === 'draw') {
+        const corner = chainRef.current?.corner || null
+        const point = rectangleCursor(world, corner, p.walls, view.scale, polyTyped.current)
+        polyTyped.current = ''
+        if (!corner) {
+          chainRef.current = { corner: point }
+          setDraft({ kind: 'rect', x1: point.x, z1: point.z, x2: point.x, z2: point.z })
+          return
+        }
+        p.onCommitRectangle?.(corner, point)
+        chainRef.current = null
+        setDraft(null)
         return
       }
-      if (origin) p.onPanelSegment?.(origin, point)
-      setPoly([...polyRef.current, { x: point.x, z: point.z }])
-      return
-    }
-    if (!touchHand && p.tool === 'partition') {
-      const point = snapWorld(world.x, world.z, {
-        scale: view.scale,
-        grid: p.snapOn ? p.gridSize : 0,
-        rooms: p.rooms,
-        flags: { ...p.snapFlags, ortho: false },
+      const typedNow = polyTyped.current
+      const origin = chainRef.current?.anchor || null
+      const point = drawCursor(world, origin, p.walls, view.scale, typedNow, {
+        extraPoints: chainRef.current?.start ? [chainRef.current.start] : [],
       })
-      typed.current = { field: 'w', w: '', d: '' }
-      gesture.current = { kind: 'draw', x1: point.x, z1: point.z, x2: point.x, z2: point.z }
-      setDraft({ kind: 'rect', x1: point.x, z1: point.z, x2: point.x, z2: point.z })
+      polyTyped.current = ''
+      const prev = chainRef.current
+      const result = p.onChainStep?.(prev, point, { freeAngle: typedNow.includes('<') })
+      if (result?.committed) chainHist.current.push(prev)
+      chainRef.current = result?.chain || null
+      setPoly(result?.chain?.anchor ? [result.chain.anchor] : [])
+      setPolyHover(null)
       return
     }
     if (!touchHand && p.placing) {
@@ -1310,7 +1417,7 @@ export default function PlanView({
     }
     const p = propsRef.current
     const drawing = Boolean(p.placing || (p.tool && p.tool !== 'select'))
-    const dragDraw = p.tool === 'draw' || p.tool === 'partition'
+    const dragDraw = p.tool === 'draw' || p.tool === 'partition' || p.tool === 'polygon'
     const arm = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, long: false, drawing, timer: 0 }
     armRef.current = arm
     if (drawing && !p.hand) {
@@ -1404,20 +1511,33 @@ export default function PlanView({
     }
   }
   const bar = scaleBarMetres(view.scale)
-  const wallPanels = useMemo(() => sharedWallPanels(rooms), [rooms])
+  const wallFaces = useMemo(
+    () => wallFigures(walls || [], [], (wall) => wall.thickness || 0.1),
+    [walls],
+  )
   const selected = new Set(selectedIds)
-  const drawing = tool === 'draw' || tool === 'partition' || isRouteTool(tool)
+  const drawing = tool === 'draw' || tool === 'polygon' || tool === 'partition' || isRouteTool(tool)
   const hint = tool === 'pipe'
     ? t('designer.pipeHint')
     : tool === 'cable'
       ? t('designer.cableHint')
-      : tool === 'polygon'
-        ? t('designer.polyHint')
+      : tool === 'polygon' || tool === 'partition'
+        ? t('cold.chainHint')
         : tool === 'draw'
           ? t('cold.drawHint')
-          : tool === 'partition'
-            ? t('designer.dragHint')
-            : t('designer.selectHint')
+          : t('designer.selectHint')
+  const grips = []
+  const gripSeen = new Set()
+  ;(walls || []).forEach((wall) => {
+    ;['a', 'b'].forEach((end) => {
+      const point = wall[end]
+      if (!point) return
+      const key = `${Number(point.x).toFixed(3)}:${Number(point.z).toFixed(3)}`
+      if (gripSeen.has(key)) return
+      gripSeen.add(key)
+      grips.push({ key, id: wall.id, end, x: point.x, z: point.z })
+    })
+  })
 
   const rectDraft = draft?.kind === 'rect' ? draft : null
   const draftWidth = rectDraft ? Math.abs(rectDraft.x2 - rectDraft.x1) : 0
@@ -1463,49 +1583,65 @@ export default function PlanView({
               strokeWidth={(line.major ? 1.1 : 0.7) / view.scale}
             />
           ))}
-          {(walls || []).map((wall) => (
-            <g key={wall.id} data-testid={`panel-wall-${wall.id}`}>
-              <line
-                data-panel-wall={wall.id}
-                x1={wall.a.x}
-                y1={wall.a.z}
-                x2={wall.b.x}
-                y2={wall.b.z}
-                stroke={selectedWalls.includes(wall.id) ? '#0f766e' : '#44403c'}
-                strokeWidth={Math.max((wall.thickness || 0.1) * 0.35, 1.6 / view.scale)}
-              />
-              {['a', 'b'].map((end) => (
-                <circle
-                  key={end}
-                  data-panel-wall={wall.id}
-                  data-panel-end={end}
-                  data-testid={`panel-grip-${wall.id}-${end}`}
-                  cx={wall[end].x}
-                  cy={wall[end].z}
-                  r={5 / view.scale}
-                  fill="#fff"
-                  stroke="#0f766e"
-                  strokeWidth={1.4 / view.scale}
-                />
-              ))}
-            </g>
+          {underlay?.image && (
+            <image
+              data-testid="underlay-image"
+              href={underlay.image}
+              x={(underlay.x || 0) - (underlay.widthM || 1) / 2}
+              y={(underlay.z || 0) - (underlay.heightM || 1) / 2}
+              width={underlay.widthM || 1}
+              height={underlay.heightM || 1}
+              opacity={underlay.opacity ?? 0.45}
+              style={{ pointerEvents: 'none' }}
+            />
+          )}
+          {wallFaces.quads.map((item, index) => (
+            <polygon
+              key={`face-${item.wallId}-${index}`}
+              data-testid="wall-quad"
+              data-wall={item.wallId}
+              points={item.quad.map((point) => `${point.x},${point.z}`).join(' ')}
+              fill={item.exterior ? 'url(#panel-hatch)' : '#e7e5e4'}
+              stroke={selectedWalls.includes(item.wallId) ? '#0f766e' : '#1c1917'}
+              strokeWidth={(selectedWalls.includes(item.wallId) ? 1.6 : 1.05) / view.scale}
+              strokeLinejoin="miter"
+              style={{ pointerEvents: 'none' }}
+            />
           ))}
-          {wallPanels.map((panel) => {
-            const points = panelPolygon(panel)
-            return (
-              <polygon
-                key={panel.id}
-                points={points.map((point) => `${point.x},${point.z}`).join(' ')}
-                fill={panel.shared ? '#e7e5e4' : 'url(#panel-hatch)'}
-                stroke="#44403c"
-                strokeWidth={0.7 / view.scale}
-                style={{ pointerEvents: 'none' }}
-              />
-            )
-          })}
+          {(walls || []).map((wall) => (
+            <line
+              key={`hit-${wall.id}`}
+              data-testid={`panel-wall-${wall.id}`}
+              data-panel-wall={wall.id}
+              data-ax={wall.a.x}
+              data-az={wall.a.z}
+              data-bx={wall.b.x}
+              data-bz={wall.b.z}
+              x1={wall.a.x}
+              y1={wall.a.z}
+              x2={wall.b.x}
+              y2={wall.b.z}
+              stroke="transparent"
+              strokeWidth={Math.max(wall.thickness || 0.1, 10 / view.scale)}
+            />
+          ))}
+          {grips.map((grip) => (
+            <circle
+              key={grip.key}
+              data-panel-wall={grip.id}
+              data-panel-end={grip.end}
+              data-testid={`panel-grip-${grip.id}-${grip.end}`}
+              cx={grip.x}
+              cy={grip.z}
+              r={5 / view.scale}
+              fill="#fff"
+              stroke="#0f766e"
+              strokeWidth={1.4 / view.scale}
+            />
+          ))}
           {rooms.filter((room) => !room.hidden).map((room) => {
             const outer = outlineOf(room)
-            const inner = insetOrthogonal(outer, room.wallThickness) || outer
+            const inner = room.panelKey ? outer : (insetOrthogonal(outer, room.wallThickness) || outer)
             const active = selected.has(room.id)
             const hot = hoverId === room.id
             const dims = metricsOf(room)
@@ -1521,8 +1657,8 @@ export default function PlanView({
                   d={pathOf(room.type === 'yard' ? outer : inner)}
                   fill={room.type === 'yard' ? '#d9e7c4' : isRefrigerated(room.type) ? (room.color || '#3b82f6') : '#f5f5f4'}
                   fillOpacity={room.type === 'yard' ? 0.85 : isRefrigerated(room.type) ? (active || hot ? 0.22 : 0.14) : 1}
-                  stroke={active ? TEAL : 'none'}
-                  strokeWidth={(active ? 1.6 : 0) / view.scale}
+                  stroke="none"
+                  strokeWidth={0}
                 />
                 {(room.equipment || []).filter((eq) => !eq.hidden).map((eq) => {
                   if (eq.category === 'door') {

@@ -14,12 +14,15 @@ import { TEMPLATES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/c
 import { PANEL_MM, commitPanel, emptyPanelPlan, extendPanel, joinPanelCorner, roomsFromPanels, setPanelEnd, snapDoorToPanel } from '@/lib/coldPanels'
 import { applyUnitChoice, assignRooms, groupUnits } from '@/lib/coldUnits'
 import { formatDeviceLink, isColdDevice, removalPrompt } from '@/lib/coldDevices'
-import { ProjectInfoDialog, ProjectSettingsDialog } from '@/components/floorplan/ProjectDialogs'
+import { LibraryDialog, ProjectInfoDialog, ProjectSettingsDialog } from '@/components/floorplan/ProjectDialogs'
 import ColdChrome from './ColdChrome'
 import { stampDemoWatermark } from '@/lib/watermark'
 import { applyProjectType } from '@/lib/projectMode'
 import { CURRENT_KEY } from '@/lib/projects'
-import { emptyPlan } from '@/lib/floorplan'
+import { emptyPlan, squareWalls, straightenWalls } from '@/lib/floorplan'
+import { closeWallChain, commitRectangle, stepWallChain } from '@/lib/wallDraw'
+import { placeUnderlay } from '@/lib/underlay'
+import { readUnderlayFile, renderPdfPage } from '@/lib/underlayFile'
 import {
   buildEnquiryExample,
   createRoom,
@@ -265,6 +268,12 @@ export default function DesignerApp({
   const [panelPlan, setPanelPlan] = useState(() => initialPanels?.walls ? { ...emptyPanelPlan(), ...initialPanels } : emptyPanelPlan())
   const [panelMm, setPanelMm] = useState(initialPanels?.panelMm || 100)
   const [selectedWalls, setSelectedWalls] = useState([])
+  const [coldLibrary, setColdLibrary] = useState([])
+  const [projectId, setProjectId] = useState('')
+  const [underlay, setUnderlay] = useState(null)
+  const [zoomPercent, setZoomPercent] = useState(100)
+  const [zoomCommand, setZoomCommand] = useState(null)
+  const underlayFileRef = useRef(null)
   const [pipes, setPipes] = useState(initialPipes || [])
   const [cables, setCables] = useState(initialCables || [])
   const [schematic, setSchematic] = useState(() => ({
@@ -318,6 +327,7 @@ export default function DesignerApp({
   const [saveState, setSaveState] = useState('saved')
   const [coldTab, setColdTab] = useState('structure')
   const [infoOpen, setInfoOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [roomsOpen, setRoomsOpen] = useState(true)
   const [templatesOpen, setTemplatesOpen] = useState(true)
@@ -366,12 +376,17 @@ export default function DesignerApp({
     rooms: structuredClone(roomsRef.current),
     pipes: structuredClone(pipesRef.current),
     cables: structuredClone(cablesRef.current),
+    panels: structuredClone(panelRef.current),
   }), [])
 
   const restore = useCallback((shot) => {
     setRooms(shot.rooms)
     setPipes(shot.pipes || [])
     setCables(shot.cables || [])
+    if (shot.panels) {
+      panelRef.current = shot.panels
+      setPanelPlan(shot.panels)
+    }
   }, [])
 
   const pushUndo = useCallback(() => {
@@ -596,7 +611,40 @@ export default function DesignerApp({
   }
 
   function onPanelEnd(id, end, point) {
+    pushUndo()
     syncPanels(setPanelEnd(panelRef.current, id, end, point))
+  }
+
+  function panelDrawOptions(extra = {}) {
+    return {
+      kind: 'panel',
+      panel: true,
+      thickness: (Number(panelMmRef.current) || 100) / 1000,
+      ...extra,
+    }
+  }
+
+  function onChainStep(chain, point, options = {}) {
+    const before = panelRef.current
+    const drawOptions = panelDrawOptions({ freeAngle: Boolean(options.freeAngle) })
+    const step = options.close
+      ? closeWallChain(before, chain, drawOptions)
+      : stepWallChain(before, chain, point, drawOptions)
+    if (step.plan !== before) {
+      pushUndo()
+      syncPanels({ ...step.plan, panelMm: panelMmRef.current, projectType: 'kylmio', buildingType: 'kylmio' })
+    }
+    return { chain: step.chain, committed: Boolean(step.committed || step.closed) }
+  }
+
+  function onCommitRectangle(corner, opposite) {
+    const next = commitRectangle(panelRef.current, corner, opposite, panelDrawOptions())
+    if (next === panelRef.current) {
+      setNotice(t('designer.minRoom'))
+      return
+    }
+    pushUndo()
+    syncPanels({ ...next, panelMm: panelMmRef.current, projectType: 'kylmio', buildingType: 'kylmio' })
   }
 
   function onCreateRect(x1, z1, x2, z2) {
@@ -1027,7 +1075,7 @@ export default function DesignerApp({
   }
 
   function exportJson() {
-    const blob = new Blob([JSON.stringify({ projectName: name, rooms, unitSystem, pipes, cables, schematic }, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify({ projectName: name, rooms, panels: panelRef.current, unitSystem, pipes, cables, schematic }, null, 2)], { type: 'application/json' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
     link.download = `${(name || 'refcad').replace(/\s+/g, '_')}.json`
@@ -1051,6 +1099,10 @@ export default function DesignerApp({
         setCables(Array.isArray(data.cables) ? data.cables : [])
         if (data.schematic && typeof data.schematic === 'object') setSchematic((current) => ({ ...current, ...data.schematic }))
         if (data.unitSystem === 'IP' || data.unitSystem === 'SI') setUnitSystem(data.unitSystem)
+        if (data.panels?.walls) {
+          panelRef.current = data.panels
+          setPanelPlan(data.panels)
+        }
         setNotice(t('designer.imported'))
       } catch {
         setNotice(t('designer.badFile'))
@@ -1159,6 +1211,111 @@ export default function DesignerApp({
     setCad(null)
   }
 
+  const libraryBoot = useRef(true)
+  useEffect(() => {
+    try {
+      const raw = JSON.parse(window.localStorage.getItem('refcad-cold-library-v1') || '[]')
+      if (Array.isArray(raw)) setColdLibrary(raw)
+    } catch { /* keep the empty list */ }
+  }, [])
+  useEffect(() => {
+    if (libraryBoot.current) {
+      libraryBoot.current = false
+      return
+    }
+    window.localStorage.setItem('refcad-cold-library-v1', JSON.stringify(coldLibrary))
+  }, [coldLibrary])
+
+  function storedDesign(id, designName = nameRef.current) {
+    return {
+      id,
+      name: designName || t('file.untitled'),
+      updatedAt: new Date().toISOString(),
+      rooms: roomsRef.current,
+      panels: panelRef.current,
+      pipes: pipesRef.current,
+      cables: cablesRef.current,
+      unitSystem: unitRef.current,
+      schematic: schematicRef.current,
+    }
+  }
+
+  function rememberDesign(entry) {
+    setColdLibrary((current) => [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, 12))
+  }
+
+  function onSaveDesign() {
+    const id = projectId || `cold-${Date.now().toString(36)}`
+    setProjectId(id)
+    rememberDesign(storedDesign(id))
+    showToast(t('file.saved'))
+  }
+
+  function onSaveDesignAs() {
+    const nextName = window.prompt(t('file.saveAs'), nameRef.current || '')
+    if (!nextName) return
+    const id = `cold-${Date.now().toString(36)}`
+    setName(nextName)
+    setProjectId(id)
+    rememberDesign(storedDesign(id, nextName))
+    showToast(t('file.saved'))
+  }
+
+  function onRenameDesign(id, nextName) {
+    const trimmed = String(nextName || '').trim()
+    if (!trimmed) return
+    setColdLibrary((current) => current.map((item) => (item.id === id ? { ...item, name: trimmed } : item)))
+    if (projectId === id) setName(trimmed)
+  }
+
+  function onDeleteDesign(id) {
+    setColdLibrary((current) => current.filter((item) => item.id !== id))
+  }
+
+  function onOpenRecent(id) {
+    const entry = coldLibrary.find((item) => item.id === id)
+    if (!entry) return
+    pushUndo()
+    setProjectId(entry.id)
+    setName(entry.name || t('file.untitled'))
+    const panels = entry.panels?.walls ? entry.panels : emptyPanelPlan()
+    panelRef.current = panels
+    setPanelPlan(panels)
+    setRooms(entry.rooms || [])
+    roomsRef.current = entry.rooms || []
+    setPipes(entry.pipes || [])
+    setCables(entry.cables || [])
+    if (entry.unitSystem) setUnitSystem(entry.unitSystem)
+    if (entry.schematic) setSchematic(entry.schematic)
+  }
+
+  function onNewDesign() {
+    if ((roomsRef.current.length || panelRef.current.walls?.length) && !window.confirm(t('file.newConfirm'))) return
+    pushUndo()
+    const empty = emptyPanelPlan()
+    panelRef.current = empty
+    setPanelPlan(empty)
+    setRooms([])
+    roomsRef.current = []
+    setPipes([])
+    setCables([])
+    setName(t('file.untitled'))
+    setProjectId(`cold-${Date.now().toString(36)}`)
+  }
+
+  async function onUnderlayFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    try {
+      const read = await readUnderlayFile(file)
+      const spec = read.kind === 'pdf' ? { ...(await renderPdfPage(read.bytes, 1)), name: read.name } : read
+      setUnderlay(placeUnderlay(emptyPanelPlan(), spec).underlay)
+    } catch {
+      showToast(t('designer.import'))
+    }
+  }
+
   const saveText = saveState === 'saving' ? t('designer.savingNow') : saveState === 'error' ? t('designer.saveFailed') : t('designer.savedAs', { where: persistLabel })
   const planProps = {
     rooms,
@@ -1180,6 +1337,12 @@ export default function DesignerApp({
     selectedWalls,
     onPanelSegment,
     onPanelEnd,
+    onChainStep,
+    onCommitRectangle,
+    onUndo: undo,
+    zoomCommand,
+    onScale: (scale) => setZoomPercent(Math.round((scale / 36) * 100)),
+    underlay,
     onSelectWall: (id, shift) => setSelectedWalls((current) => {
       if (!shift) return [id]
       return current.includes(id) ? current.filter((item) => item !== id) : [...current, id].slice(-2)
@@ -1254,6 +1417,18 @@ export default function DesignerApp({
 
   return (
     <div className="designer-app plan-app" data-testid="cold-workspace" data-project-type={projectType} style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e7e5e4', color: '#1c1917' }}>
+      {libraryOpen && (
+        <LibraryDialog
+          library={{ projects: coldLibrary.map((item) => ({ id: item.id, name: item.name })) }}
+          onClose={() => setLibraryOpen(false)}
+          onSave={onSaveDesign}
+          onOpen={(id) => { onOpenRecent(id); setLibraryOpen(false) }}
+          onRename={onRenameDesign}
+          onDelete={onDeleteDesign}
+          onExport={exportJson}
+          onImport={(file) => importJson({ target: { files: [file], value: '' } })}
+        />
+      )}
       {infoOpen && (
         <ProjectInfoDialog
           scope="cold"
@@ -1324,6 +1499,39 @@ export default function DesignerApp({
           writePanels(user?.id, next)
           return next
         })}
+        onNew={onNewDesign}
+        onSave={onSaveDesign}
+        onSaveAs={onSaveDesignAs}
+        recent={coldLibrary.map((item) => ({ id: item.id, name: item.name }))}
+        onRecent={onOpenRecent}
+        onOpen={() => setLibraryOpen(true)}
+        onImportUnderlay={() => underlayFileRef.current?.click()}
+        onPrint={() => window.print()}
+        onStraighten={() => {
+          const next = straightenWalls(panelRef.current, 2)
+          if (next === panelRef.current) return
+          pushUndo()
+          syncPanels(next)
+        }}
+        onSquare={() => {
+          if (!selectedWalls.length) return
+          pushUndo()
+          syncPanels(squareWalls(panelRef.current, selectedWalls))
+        }}
+        onExtend={() => {
+          if (!selectedWalls[0]) return
+          pushUndo()
+          syncPanels(extendPanel(panelRef.current, selectedWalls[0]))
+        }}
+        onJoin={() => {
+          if (selectedWalls.length < 2) return
+          pushUndo()
+          syncPanels(joinPanelCorner(panelRef.current, selectedWalls[0], selectedWalls[1]))
+        }}
+        zoomPercent={zoomPercent}
+        onZoomIn={() => setZoomCommand({ factor: 2, n: Date.now() })}
+        onZoomOut={() => setZoomCommand({ factor: 0.5, n: Date.now() })}
+        onZoom100={() => setZoomCommand({ percent: 100, n: Date.now() })}
         onExample={loadExample}
         onPdf={exportPdf}
         onDxf={exportDxf}
@@ -1354,6 +1562,7 @@ export default function DesignerApp({
         onToggleTools={() => setToolsOpen((open) => !open)}
       />
       <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={importJson} />
+      <input ref={underlayFileRef} data-testid="underlay-file" type="file" accept="application/pdf,.pdf,image/png,image/jpeg,.jpg,.jpeg,.heic,.heif" hidden onChange={onUnderlayFile} />
       {cad && (
         <div style={{ padding: '4px 10px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
           <CadPrompt
@@ -1613,16 +1822,16 @@ export default function DesignerApp({
               />
             </div>
           )}
-          {(tool === 'draw' || tool === 'polygon' || tool === 'pipe' || tool === 'cable') && (
+          {(tool === 'draw' || tool === 'polygon' || tool === 'partition' || tool === 'pipe' || tool === 'cable') && (
             <div data-testid="tool-properties" style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
               <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 8 }}>{t('panel.tool')}</div>
-              {(tool === 'draw' || tool === 'polygon') && (
+              {(tool === 'draw' || tool === 'polygon' || tool === 'partition') && (
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 650 }}>
                   {t('designer.roomType')}
                   <DutyTypeSelect testId="room-type" ariaLabel={t('designer.roomType')} value={drawType} onChange={setDrawType} />
                 </label>
               )}
-              {(tool === 'draw' || tool === 'polygon') && (
+              {(tool === 'draw' || tool === 'polygon' || tool === 'partition') && (
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginTop: 8 }}>
                   {t('cold.panelThickness')}
                   <select data-testid="panel-thickness" aria-label={t('cold.panelThickness')} value={panelMm} onChange={(event) => setPanelMm(Number(event.target.value))} style={{ display: 'block', width: '100%', marginTop: 4, height: 32, borderRadius: 6, border: '1px solid #d6d3d1' }}>
@@ -1631,12 +1840,7 @@ export default function DesignerApp({
                 </label>
               )}
               {tool === 'draw' && <div style={{ fontSize: 11, color: '#57534e', marginTop: 8, lineHeight: 1.4 }}>{t('cold.drawHint')}</div>}
-              {tool === 'select' && (panelPlan.walls || []).length > 1 && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                  <button type="button" data-testid="panel-join" onClick={() => syncPanels(joinPanelCorner(panelRef.current, selectedWalls[0], selectedWalls[1]))} style={{ flex: 1, height: 30, borderRadius: 6, border: '1px solid #d6d3d1', background: '#fff', cursor: 'pointer' }}>{t('cold.join')}</button>
-                  <button type="button" data-testid="panel-extend" onClick={() => syncPanels(extendPanel(panelRef.current, selectedWalls[0]))} style={{ flex: 1, height: 30, borderRadius: 6, border: '1px solid #d6d3d1', background: '#fff', cursor: 'pointer' }}>{t('cold.extend')}</button>
-                </div>
-              )}
+              {(tool === 'polygon' || tool === 'partition') && <div style={{ fontSize: 11, color: '#57534e', marginTop: 8, lineHeight: 1.4 }}>{t('cold.chainHint')}</div>}
               {(tool === 'pipe' || tool === 'cable') && (
                 <div data-testid="pipe-settings" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {tool === 'pipe' && (
