@@ -1930,7 +1930,7 @@ export default function DesignerApp({
             <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '1fr 1fr', gridTemplateRows: compact ? '1fr 1fr' : undefined, height: '100%' }}>
               <PlanView {...planProps} />
               <div style={{ borderLeft: '1px solid #d6d3d1' }}>
-                <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} placeMode={Boolean(placing)} onPlace={(spot) => {
+                <Scene3D locale={locale} rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} placeMode={Boolean(placing)} onPlace={(spot) => {
                   const host = (rooms || []).find((room) => pointInOutline(spot.x, spot.z, outlinePoints(room))) || [...rooms].sort((a, b) => Math.hypot(a.x - spot.x, a.z - spot.z) - Math.hypot(b.x - spot.x, b.z - spot.z))[0]
                   if (host) onPlace(host.id, spot.x, spot.z, spot.gesture)
                 }} onExitPlace={() => { setPlacingId(null); setTool('select') }} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => {
@@ -1943,7 +1943,7 @@ export default function DesignerApp({
               </div>
             </div>
           ) : view === '3d' ? (
-            <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} placeMode={Boolean(placing)} onPlace={(spot) => {
+            <Scene3D locale={locale} rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} placeMode={Boolean(placing)} onPlace={(spot) => {
               const host = (rooms || []).find((room) => pointInOutline(spot.x, spot.z, outlinePoints(room))) || [...rooms].sort((a, b) => Math.hypot(a.x - spot.x, a.z - spot.z) - Math.hypot(b.x - spot.x, b.z - spot.z))[0]
               if (host) onPlace(host.id, spot.x, spot.z, spot.gesture)
             }} onExitPlace={() => { setPlacingId(null); setTool('select') }} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => {

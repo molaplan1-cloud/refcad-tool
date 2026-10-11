@@ -11,7 +11,8 @@ import { pipeSupports } from '@/lib/pipeTopology'
 import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
 import { sharedWallPanels } from '@/lib/sharedWalls'
 import { buildingDimensionSpec, dimensionStyle, layoutRoomTags } from '@/lib/sceneDims'
-import { doorOpensOut, resolveDoor } from '@/lib/doors'
+import { doorScenePose } from '@/lib/doors'
+import { translate } from '@/lib/i18n'
 
 const DOOR_PART = {
   frame: '#3a3f46',
@@ -72,27 +73,22 @@ function footprintGeometry(points, height) {
 }
 
 function doorBasis(room, eq) {
-  const spec = resolveDoor(eq)
-  const wall = eq.wall || 's'
-  const low = spec.style === 'leveler'
-  const w = Math.max(low ? 0.8 : 0.55, eq.width || 0.9)
-  const h = Math.max(low ? 0.08 : 1.5, eq.height || 2.1)
-  const cx = room.x + (eq.x || 0)
-  const cz = room.z + (eq.z || 0)
-  const alongX = wall === 'n' || wall === 's'
-  const flip = eq.hinge === 'right' || eq.swing === -1
-  const hinge = alongX
-    ? { x: cx + (flip ? w / 2 : -w / 2), z: cz }
-    : { x: cx, z: cz + (flip ? w / 2 : -w / 2) }
-  const tangent = alongX ? { x: flip ? -1 : 1, z: 0 } : { x: 0, z: flip ? -1 : 1 }
-  const inward = wall === 's' ? { x: 0, z: -1 } : wall === 'n' ? { x: 0, z: 1 } : wall === 'e' ? { x: -1, z: 0 } : { x: 1, z: 0 }
+  const pose = doorScenePose(room, eq)
   const basis = new THREE.Matrix4().makeBasis(
-    new THREE.Vector3(tangent.x, 0, tangent.z),
+    new THREE.Vector3(pose.tangent.x, 0, pose.tangent.z),
     new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(-inward.x, 0, -inward.z),
+    new THREE.Vector3(pose.outward.x, 0, pose.outward.z),
   )
   const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
-  return { w, h, hinge, quaternion, spec }
+  return {
+    w: pose.width,
+    h: pose.height,
+    hinge: pose.origin,
+    quaternion,
+    spec: pose.spec,
+    thick: pose.thick,
+    slide: pose.slide,
+  }
 }
 
 function DoorPart({ part, args, position, rotation, children }) {
@@ -123,17 +119,18 @@ function DoorLeaf({ w, h, glass = false }) {
       </group>
     )
   }
-  return <DoorPart part="leaf" args={[w - 0.04, h - 0.08, 0.04]} position={[w / 2, h / 2, 0.02]} />
+  return <DoorPart part="leaf" args={[w - 0.04, h - 0.08, 0.045]} position={[w / 2, h / 2, 0]} />
 }
 
 function DoorMesh({ room, eq, onSelect, onContext }) {
-  const { w, h, hinge, quaternion, spec } = useMemo(() => doorBasis(room, eq), [room, eq])
+  const { w, h, hinge, quaternion, spec, thick, slide } = useMemo(() => doorBasis(room, eq), [room, eq])
+  const leafDepth = Math.max(0.04, Math.min(0.06, (thick || 0.1) * 0.45))
   const doors = (room.equipment || []).filter((item) => item.category === 'door')
   const number = Math.max(1, doors.findIndex((item) => item.id === eq.id) + 1)
   const style = spec.style
-  const yaw = doorOpensOut(eq, room) ? -1 : 1
-  const pair = style === 'impact' ? 0.16 : 0.36
+  const pair = 0
   const jamb = 0.05
+  const frameDepth = thick || 0.1
   const strips = Math.max(6, Math.round(w / 0.12))
   const swing = style === 'hinged' || style === 'freezer' || style === 'fire' || style === 'glass'
   return (
@@ -155,11 +152,13 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
         </>
       ) : (
         <>
-          <DoorPart part="frame" args={[jamb, h + 0.06, 0.1]} position={[-jamb / 2, h / 2, 0]} />
-          <DoorPart part="frame" args={[jamb, h + 0.06, 0.1]} position={[w + jamb / 2, h / 2, 0]} />
-          <DoorPart part="frame" args={[w + jamb * 2, 0.06, 0.1]} position={[w / 2, h + 0.02, 0]} />
+          <DoorPart part="frame" args={[jamb, h + 0.06, frameDepth]} position={[-jamb / 2, h / 2, 0]} />
+          <DoorPart part="frame" args={[jamb, h + 0.06, frameDepth]} position={[w + jamb / 2, h / 2, 0]} />
+          <DoorPart part="frame" args={[w + jamb * 2, 0.06, frameDepth]} position={[w / 2, h + 0.02, 0]} />
           {style === 'freezer' && <DoorPart part="heat" args={[0.02, h, 0.02]} position={[0.05, h / 2, 0.07]} />}
-          {style === 'sliding' && <DoorPart part="track" args={[w * 1.7, 0.04, 0.06]} position={[w * 0.72, h + 0.08, 0]} />}
+          {style === 'sliding' && slide && (
+            <DoorPart part="track" args={[slide.rail.w, 0.04, slide.rail.d]} position={[slide.rail.x, slide.rail.y, slide.rail.z]} />
+          )}
           {(style === 'roll' || style === 'speed-roll') && (
             <DoorPart part="hood" args={[w + 0.28, style === 'speed-roll' ? 0.16 : 0.32, style === 'speed-roll' ? 0.16 : 0.28]} position={[w / 2, h + (style === 'speed-roll' ? 0.12 : 0.18), 0.08]} />
           )}
@@ -178,26 +177,26 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
                   <meshStandardMaterial color="#1c1917" metalness={0.6} roughness={0.3} />
                 </mesh>
               ))}
-              <group rotation={[0, yaw * 0.16, 0]}>
+              <group>
                 <DoorLeaf w={w} h={h} glass={style === 'glass'} />
                 <DoorPart part="handle" args={[0.025, 0.22, 0.035]} position={[w * 0.78, h * 0.48, 0.055]} />
                 <DoorPart part="handle" args={[0.1, 0.022, 0.03]} position={[w * 0.78, h * 0.58, 0.05]} />
               </group>
             </>
           )}
-          {style === 'sliding' && (
-            <group position={[w * 0.14, 0, 0.02]}>
-              <DoorPart part="leaf" args={[w - 0.08, h - 0.1, 0.04]} position={[w / 2, h / 2, 0]} />
-              <DoorPart part="handle" args={[0.1, 0.22, 0.03]} position={[w * 0.22, h * 0.48, 0.04]} />
+          {style === 'sliding' && slide && (
+            <group>
+              <DoorPart part="leaf" args={[slide.leaf.w, h - 0.08, slide.leaf.d]} position={[slide.leaf.x, slide.leaf.y, slide.leaf.z]} />
+              <DoorPart part="handle" args={[0.08, 0.22, 0.03]} position={[slide.leaf.x, h * 0.48, slide.leaf.z + slide.leaf.d / 2 + 0.02]} />
             </group>
           )}
           {(style === 'double' || style === 'impact') && (
             <>
-              <group rotation={[0, yaw * pair, 0]}>
-                <DoorPart part="leaf" args={[w / 2 - 0.03, h - 0.08, 0.04]} position={[w / 4, h / 2, 0.02]} />
+              <group rotation={[0, pair, 0]}>
+                <DoorPart part="leaf" args={[w / 2 - 0.03, h - 0.08, leafDepth]} position={[w / 4, h / 2, 0]} />
               </group>
-              <group position={[w, 0, 0]} rotation={[0, -yaw * pair, 0]}>
-                <DoorPart part="leaf" args={[w / 2 - 0.03, h - 0.08, 0.04]} position={[-w / 4, h / 2, 0.02]} />
+              <group position={[w, 0, 0]} rotation={[0, -pair, 0]}>
+                <DoorPart part="leaf" args={[w / 2 - 0.03, h - 0.08, leafDepth]} position={[-w / 4, h / 2, 0]} />
               </group>
             </>
           )}
@@ -1698,7 +1697,7 @@ function StylePass() {
 
 function RoomDimensions({ rooms, theme }) {
   const ink = dimensionStyle(theme)
-  const spec = useMemo(() => buildingDimensionSpec(rooms), [rooms])
+  const spec = useMemo(() => buildingDimensionSpec(rooms, { floor: true }), [rooms])
   const geom = useMemo(() => {
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(spec.segments, 3))
@@ -1889,9 +1888,9 @@ function PlaceBridge({ active, onPlace, onExit, onPreview }) {
   return null
 }
 
-export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, onSelect, onContext, onRouteDrag, unitSystem, placeMode = false, onPlace, onExitPlace, print = false, onCapture }) {
+export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, onSelect, onContext, onRouteDrag, unitSystem, placeMode = false, onPlace, onExitPlace, locale = 'fi', print = false, onCapture }) {
   const [theme, setTheme] = useState('technical')
-  const [dims, setDims] = useState(true)
+  const [dims, setDims] = useState(false)
   const [heading, setHeading] = useState(0)
   const [ghost, setGhost] = useState(null)
   const rigRef = useRef(null)
@@ -2012,7 +2011,7 @@ export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, on
             onClick={() => setDims((current) => !current)}
             style={{ ...roundBtn, width: 'auto', padding: '0 10px', borderRadius: 8, fontWeight: dims ? 700 : 500 }}
           >
-            Mitat
+            {dims ? translate(locale, 'scene.hideDims') : translate(locale, 'scene.showDims')}
           </button>
           {THEME_ORDER.map(([id, label]) => (
             <button
