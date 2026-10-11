@@ -20,7 +20,7 @@ import {
   rerouteRun,
   rerouteSystem,
   runColor,
-  serviceLegend,
+  serviceLegendRows,
   serviceObjectTitle,
   rotateServiceNode,
   snapDeviceToWall,
@@ -44,6 +44,7 @@ import {
   symbolSizeMm,
 } from '@/lib/electricSymbols'
 import { HEIGHT_PRESETS, heightMetres, insulationOptions, materialOptions, routeLength } from '@/lib/routeEdit'
+import { insulationMessageKey, routeExempt, segmentStyle, segmentZone, zoneAllowed, zoneLabelKey, zonesFor } from '@/lib/ivZone'
 import { houseBox } from '@/lib/yard'
 import { CAD_COMMANDS } from '@/lib/cadEdit'
 import { paperFont, placeFlowLabel, placeLineLabels, routeStrokeBoxes } from '@/lib/annotations'
@@ -175,19 +176,34 @@ const RUN_SHIFT = { drain: -0.22, water: -0.08, electric: 0.08, iv: 0.22 }
 function shiftPoints(points, system, multi, kind) {
   const base = points || []
   const kindShift = system === 'water' && kind === 'hot' ? 0.16 : system === 'water' && kind === 'circ' ? 0.32 : 0
-  const shifted = kindShift ? base.map((point) => ({ ...point, x: point.x + kindShift, z: point.z + kindShift })) : base
+  const shifted = kindShift ? base.map((point) => ({ ...point, x: point.x + kindShift, z: point.z + kindShift })) : base.map((point) => ({ ...point }))
   if (!multi || shifted.length < 2) return shifted
   const dist = RUN_SHIFT[system] || 0
   if (!dist) return shifted
+  const segDir = []
+  for (let i = 1; i < shifted.length; i += 1) {
+    const dx = shifted[i].x - shifted[i - 1].x
+    const dz = shifted[i].z - shifted[i - 1].z
+    const len = Math.hypot(dx, dz)
+    segDir.push(len > 0.05 ? { x: dx / len, z: dz / len } : null)
+  }
+  const offset = new Array(shifted.length).fill(null)
+  segDir.forEach((dir, index) => {
+    if (!dir) return
+    if (!offset[index]) offset[index] = dir
+    if (!offset[index + 1]) offset[index + 1] = dir
+  })
+  segDir.forEach((dir, index) => {
+    if (dir) return
+    const shared = offset[index] || offset[index + 1]
+    if (!shared) return
+    offset[index] = shared
+    offset[index + 1] = shared
+  })
   return shifted.map((point, index) => {
-    const prev = shifted[Math.max(0, index - 1)]
-    const next = shifted[Math.min(shifted.length - 1, index + 1)]
-    let dx = next.x - prev.x
-    let dz = next.z - prev.z
-    const len = Math.hypot(dx, dz) || 1
-    dx /= len
-    dz /= len
-    return { x: point.x - dz * dist, z: point.z + dx * dist }
+    const dir = offset[index]
+    if (!dir) return point
+    return { ...point, x: point.x - dir.z * dist, z: point.z + dir.x * dist }
   })
 }
 
@@ -337,7 +353,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     (!Array.isArray(legendSystems) || legendSystems.includes(item.id))
     && (layerVisible(plan, item.id) || (Array.isArray(revealSystems) && revealSystems.includes(item.id)))
     && (services.runs.some((run) => run.system === item.id) || services.nodes.some((node) => node.system === item.id))
-  )).flatMap((item) => serviceLegend(item.id).map((row) => ({ ...row, system: item.id })))
+  )).flatMap((item) => serviceLegendRows(plan, item.id).map((row) => ({ ...row, system: item.id })))
   const live = (system) => !Array.isArray(activeSystems) || activeSystems.includes(system)
   const open = (event, hit) => {
     event.preventDefault()
@@ -349,6 +365,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const cableFont = CABLE_LABEL_MM * unit
   const deviceTagFont = DEVICE_TAG_MM * unit
   const flowFont = deviceTagFont
+  const ivFont = paperFont(sheet?.k || 1, zoom, 2.2)
   const nameFont = paperFont(sheet?.k || 1, zoom, 3.5)
   const areaFont = paperFont(sheet?.k || 1, zoom, 2.5)
   const view = viewport && camera ? {
@@ -410,7 +427,16 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
     const tall = paper.h * unit
     obstacles.push({ x: cx - wide / 2, y: cy - tall / 2, w: wide, h: tall, kind: 'symbol' })
     if (!node.flow || quietLabels) return
-    const place = placeFlowLabel(cx, cy, `${node.flow} l/s`, flowFont, Math.max(wide, tall) / 2 + 3, obstacles)
+    const ivFlow = node.system === 'iv'
+    const place = placeFlowLabel(
+      cx,
+      cy,
+      `${node.flow} l/s`,
+      ivFlow ? ivFont : flowFont,
+      ivFlow ? 12 : Math.max(wide, tall) / 2 + 3,
+      ivFlow ? obstacles.filter((block) => block.kind !== 'route') : obstacles,
+      ivFlow ? { tight: true } : undefined,
+    )
     flowAnchor.set(node.id, place)
     obstacles.push({ ...place.box, kind: 'label' })
   })
@@ -487,23 +513,52 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
         const showText = !quietLabels || runSelected
         return (
           <g key={run.id} opacity={live(run.system) ? 1 : 0.22} style={{ pointerEvents: live(run.system) ? 'auto' : 'none' }}>
-            <polyline
-              points={pointsOf(points, X, Y)}
-              fill="none"
-              stroke={color}
-              strokeWidth={width}
-              strokeDasharray={dashed
-                ? (run.role === 'switch-drop' || run.role === 'traveler'
-                  ? `${0.9 * unit} ${0.7 * unit}`
-                  : (run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? `${1.6 * unit} ${1.1 * unit}` : `${2.2 * unit} ${1.4 * unit}`))
-                : undefined}
-              data-wire-role={run.role || ''}
-              data-heat-kind={run.system === 'heat' ? run.kind : undefined}
-              data-testid={run.kind === 'collector' ? 'collector-pipe' : (String(run.linkedFrom || '').includes(':sewer') ? 'sewer-line' : (run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined))}
-              strokeLinejoin="round"
-              strokeLinecap={run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? 'butt' : 'round'}
-              style={{ pointerEvents: 'none' }}
-            />
+            {zonesFor(run.system).length && !routeExempt(run) ? points.slice(1).map((point, index) => {
+              const prev = points[index]
+              const zone = segmentZone(run, index, plan)
+              const style = segmentStyle(zone, prev, point, plan)
+              if (Math.hypot(point.x - prev.x, point.z - prev.z) < 0.02 && Math.abs((point.y || 0) - (prev.y || 0)) < 0.02) return null
+              const roleDash = run.role === 'switch-drop' || run.role === 'traveler'
+              const dash = roleDash
+                ? `${0.9 * unit} ${0.7 * unit}`
+                : (style.dash || undefined)
+              return (
+                <line
+                  key={`route-seg-${run.id}-${index}`}
+                  data-testid={run.system === 'iv' ? 'duct-segment' : 'route-segment'}
+                  data-zone={zone}
+                  data-above={style.above ? '1' : '0'}
+                  data-system={run.system}
+                  x1={X(prev.x)}
+                  y1={Y(prev.z)}
+                  x2={X(point.x)}
+                  y2={Y(point.z)}
+                  stroke={color}
+                  strokeWidth={width * (style.weight || 1)}
+                  strokeDasharray={dash}
+                  strokeLinecap="round"
+                  style={{ pointerEvents: 'none' }}
+                />
+              )
+            }) : (
+              <polyline
+                points={pointsOf(points, X, Y)}
+                fill="none"
+                stroke={color}
+                strokeWidth={width}
+                strokeDasharray={dashed
+                  ? (run.role === 'switch-drop' || run.role === 'traveler'
+                    ? `${0.9 * unit} ${0.7 * unit}`
+                    : (run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? `${1.6 * unit} ${1.1 * unit}` : `${2.2 * unit} ${1.4 * unit}`))
+                  : undefined}
+                data-wire-role={run.role || ''}
+                data-heat-kind={run.system === 'heat' ? run.kind : undefined}
+                data-testid={run.kind === 'collector' ? 'collector-pipe' : (String(run.linkedFrom || '').includes(':sewer') ? 'sewer-line' : (run.system === 'heat' && (run.kind === 'floorheat' || run.kind === 'efloor') ? 'heat-loop' : undefined))}
+                strokeLinejoin="round"
+                strokeLinecap={run.kind === 'floorheat' || run.role === 'loop' || run.kind === 'efloor' ? 'butt' : 'round'}
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
             <polyline
               points={pointsOf(points, X, Y)}
               fill="none"
@@ -515,9 +570,11 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
             {points.map((point, index) => {
               if (!index) return null
               const prev = points[index - 1]
-              const vertical = Math.hypot(point.x - prev.x, point.z - prev.z) < 0.05 && Math.abs((point.y || 0) - (prev.y || 0)) > 0.08
+              const src = (run.points || [])[index] || point
+              const srcPrev = (run.points || [])[index - 1] || prev
+              const vertical = Math.hypot(src.x - srcPrev.x, src.z - srcPrev.z) < 0.05 && Math.abs((src.y || 0) - (srcPrev.y || 0)) > 0.08
               if (!vertical) return null
-              const up = (point.y || 0) > (prev.y || 0)
+              const up = (src.y || 0) > (srcPrev.y || 0)
               return (
                 <g key={`riser-${run.id}-${index}`} data-testid="route-riser" style={{ pointerEvents: 'none' }}>
                   <circle cx={X(point.x)} cy={Y(point.z)} r={1.6 * unit} fill="#fff" stroke={color} strokeWidth={0.2 * unit} />
@@ -611,7 +668,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           {item.leader && (
             <line x1={item.anchorX} y1={item.anchorY} x2={item.x} y2={item.y} stroke={item.color || '#57534e'} strokeWidth={0.15 * unit} />
           )}
-          <text data-testid={item.system === 'iv' ? 'duct-label' : 'cable-mark'} x={item.x} y={item.y} textAnchor="middle" dominantBaseline="central" fontSize={cableFont} fontWeight="650" fill={item.color || '#1c1917'} stroke="#fbfaf7" strokeWidth={0.45 * unit} paintOrder="stroke">{item.text}</text>
+          <text data-testid={item.system === 'iv' ? 'duct-label' : 'cable-mark'} x={item.x} y={item.y} textAnchor="middle" dominantBaseline="central" fontSize={item.system === 'iv' ? ivFont : cableFont} fontWeight="650" fill={item.color || '#1c1917'} stroke="#fbfaf7" strokeWidth={0.45 * unit} paintOrder="stroke">{item.text}</text>
         </g>
       ))}
       {fittings.bends.map((point, index) => (
@@ -641,7 +698,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
             <NodeSymbol node={node} unit={unit} />
           </g>
           {node.flow && (!quietLabels || (selected?.service?.target === 'node' && selected?.service?.id === node.id)) ? (
-            <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 0} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={0.4 * unit} paintOrder="stroke">{node.flow} l/s</text>
+            <text data-testid="valve-flow" x={flowAnchor.get(node.id)?.x ?? 12} y={flowAnchor.get(node.id)?.y ?? 0} textAnchor={flowAnchor.get(node.id)?.anchor || 'start'} dominantBaseline="middle" fontSize={node.system === 'iv' ? ivFont : flowFont} fontWeight="650" fill={nodeColor(node)} stroke="#fbfaf7" strokeWidth={0.4 * unit} paintOrder="stroke">{node.flow} l/s</text>
           ) : null}
           {tag ? (
             <g style={{ pointerEvents: 'none' }}>
@@ -679,8 +736,12 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
             const y = legendTitle + legendStep * (index + 1)
             const label = item.key && t(item.key) !== item.key ? t(item.key) : item.name
             return (
-              <g key={`${item.system}-${item.key || item.name}`}>
-                <rect x={8} y={y - legendFont * 0.72} width="12" height={legendFont * 0.7} fill={item.color} stroke="#44403c" strokeWidth="0.5" />
+              <g key={`${item.system}-${item.zoneId || item.key || item.name}`} data-testid={item.zone ? 'legend-zone' : undefined} data-zone={item.zoneId || undefined}>
+                {item.zone ? (
+                  <line x1={8} y1={y - legendFont * 0.28} x2={22} y2={y - legendFont * 0.28} stroke={item.color} strokeWidth={1.6} strokeDasharray={item.dash || undefined} />
+                ) : (
+                  <rect x={8} y={y - legendFont * 0.72} width="12" height={legendFont * 0.7} fill={item.color} stroke="#44403c" strokeWidth="0.5" />
+                )}
                 <text x={26} y={y} fontSize={legendFont} fill="#1c1917">{label}</text>
               </g>
             )
@@ -834,6 +895,7 @@ function MenuBtn({ children, onClick, testid }) {
 }
 
 function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
+  const { t } = usePlanLocale(plan)
   const metres = routeLength(run.points)
   const materials = materialOptions(run.system)
   const insulations = insulationOptions(run.system)
@@ -844,12 +906,47 @@ function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
   const a = run.points?.[segment]
   const b = run.points?.[segment + 1]
   const segmentMetres = a && b ? Math.hypot(b.x - a.x, b.z - a.z) : metres
+  const zones = zonesFor(run.system)
+  const branchZone = zoneAllowed(run.zone, run.system) ? run.zone : ''
+  const segmentPicked = segmentZone(run, segment, plan)
+  const segmentOwn = zoneAllowed(run.segmentZone?.[segment], run.system) || zoneAllowed(a?.zone, run.system) || zoneAllowed(b?.zone, run.system)
+    ? (zoneAllowed(a?.zone, run.system) && a.zone === b?.zone ? a.zone : (zoneAllowed(run.segmentZone?.[segment], run.system) ? run.segmentZone[segment] : (zoneAllowed(a?.zone, run.system) ? a.zone : (zoneAllowed(b?.zone, run.system) ? b.zone : ''))))
+    : ''
   return (
     <div data-testid="route-fields">
       <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>
         {`Pituus ${metres.toFixed(1).replace('.', ',')} m`}
         {run.locked ? ' · manuaalinen' : ''}
       </div>
+      {zones.length > 0 && (
+        <>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+            {t('iv.zone.branch')}
+            <select
+              data-testid={run.system === 'iv' ? 'iv-zone-run' : 'route-zone'}
+              style={fieldStyle}
+              value={branchZone}
+              onChange={(event) => onCommit(updateServiceRun(plan, run.id, { zone: event.target.value }))}
+            >
+              <option value="">{t('iv.zone.inherit')}</option>
+              {zones.map((id) => <option key={id} value={id}>{t(zoneLabelKey(run.system, id))}</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+            {t('iv.zone.segment')}
+            <select
+              data-testid={run.system === 'iv' ? 'iv-zone-segment' : 'route-zone-segment'}
+              style={fieldStyle}
+              value={segmentOwn || ''}
+              onChange={(event) => onCommit(updateServiceRun(plan, run.id, { segmentZone: { index: segment, zone: event.target.value } }))}
+            >
+              <option value="">{t('iv.zone.inherit')}</option>
+              {zones.map((id) => <option key={id} value={id}>{t(zoneLabelKey(run.system, id))}</option>)}
+            </select>
+          </label>
+          <div data-testid={run.system === 'iv' ? 'iv-zone-effective' : 'route-zone-effective'} style={{ fontSize: 11, color: '#78716c', marginBottom: 8 }}>{segmentPicked ? t(zoneLabelKey(run.system, segmentPicked)) : ''}</div>
+        </>
+      )}
       <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
         Nimi
         <input data-testid="route-label" style={fieldStyle} defaultValue={run.label || ''} onBlur={(event) => onPatch({ label: event.target.value })} />
@@ -912,6 +1009,9 @@ function RouteFields({ plan, run, segmentIndex = 0, onPatch, onCommit }) {
         Eristys
         <select data-testid="route-insulation" style={fieldStyle} value={run.insulation || ''} onChange={(event) => onCommit(updateServiceRun(plan, run.id, { insulation: event.target.value }))}>
           <option value="">—</option>
+          {run.system === 'iv' && ['wool-100', 'condensate'].map((id) => (
+            <option key={id} value={id}>{t(insulationMessageKey(id))}</option>
+          ))}
           {insulations.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
       </label>

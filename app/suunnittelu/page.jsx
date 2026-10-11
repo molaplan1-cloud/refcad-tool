@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import DesignerApp from '@/components/designer/DesignerApp'
 import { ShellLanguage, useLocale } from '@/components/i18n/Locale'
-import { accessFor } from '@/lib/access'
+import { coldRoomEntry } from '@/lib/access'
 
 const STORAGE_KEY = 'refcad-design-v1'
 
@@ -12,17 +12,23 @@ export default function Page() {
   const { t } = useLocale()
   const [ready, setReady] = useState(false)
   const [saved, setSaved] = useState(null)
-  const [access, setAccess] = useState(null)
+  const [user, setUser] = useState(null)
+  const [entry, setEntry] = useState(null)
 
   useEffect(() => {
     let cancel = false
-    fetch('/api/auth/session')
+    fetch('/api/auth/session', { cache: 'no-store', credentials: 'same-origin' })
       .then((res) => res.json())
       .then((data) => {
-        if (!cancel) setAccess(accessFor(data.user, 'kylmio'))
+        if (cancel) return
+        const next = data.user || null
+        setUser(next)
+        setEntry(coldRoomEntry(next))
       })
       .catch(() => {
-        if (!cancel) setAccess(accessFor(null, 'kylmio'))
+        if (cancel) return
+        setUser(null)
+        setEntry(coldRoomEntry(null))
       })
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY)
@@ -47,27 +53,40 @@ export default function Page() {
     }))
   }, [])
 
-  if (!ready || !access) {
+  if (!ready || !entry) {
     return <div style={{ height: '100vh', background: '#0a0f1e' }} />
   }
 
-  if (!access.workspaces.includes('kylma')) {
-    const message = access.admin
+  if (!entry.allowed) {
+    const message = entry.access.admin
       ? t('gate.admin')
-      : access.pending
+      : entry.access.pending
         ? t('price.thanks')
         : t('gate.cold')
     return (
-      <div data-testid="cold-room-gate" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', color: '#0f172a', padding: 24 }}>
-        <div style={{ maxWidth: 460, textAlign: 'center' }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+      <div data-testid="cold-room-gate" style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a' }}>
+        <header className="picker-header safe-page" data-testid="cold-gate-header" style={{ paddingTop: 'calc(18px + env(safe-area-inset-top))' }}>
+          <Link href="/" style={{ fontWeight: 800, color: '#0f172a', textDecoration: 'none' }}>RefCAD</Link>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+            {user ? (
+              <>
+                <span data-testid="session-user" style={{ fontWeight: 700 }}>{user.username || user.email}</span>
+                <span data-testid="session-plan" style={{ color: '#0369a1', fontWeight: 700 }}>{t(`plan.${entry.planId}.name`)}</span>
+              </>
+            ) : (
+              <Link href="/login" style={{ color: '#0369a1', textDecoration: 'none' }}>{t('shell.login')}</Link>
+            )}
             <ShellLanguage tone="light" />
-          </div>
-          <h1 data-testid={access.pending ? 'order-thanks' : undefined} style={{ fontSize: 28, marginBottom: 12 }}>{message}</h1>
-          <p style={{ color: '#475569', lineHeight: 1.5 }}>{t('price.cold')}</p>
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 20 }}>
-            <Link href="/#pricing" style={{ color: '#0369a1' }}>{t('shell.pricing')}</Link>
-            <Link href={access.admin ? '/admin' : '/uusi'} style={{ color: '#0369a1' }}>{access.admin ? t('shell.admin') : t('designer.floorplan')}</Link>
+          </span>
+        </header>
+        <div style={{ display: 'grid', placeItems: 'center', padding: 24 }}>
+          <div style={{ maxWidth: 460, textAlign: 'center' }}>
+            <h1 data-testid={entry.access.pending ? 'order-thanks' : 'cold-gate-title'} style={{ fontSize: 28, marginBottom: 12 }}>{message}</h1>
+            <p style={{ color: '#475569', lineHeight: 1.5 }}>{t('price.cold')}</p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 20 }}>
+              <Link href="/#pricing" style={{ color: '#0369a1' }}>{t('shell.pricing')}</Link>
+              <Link href={entry.access.admin ? '/admin' : '/uusi'} style={{ color: '#0369a1' }}>{entry.access.admin ? t('shell.admin') : t('designer.floorplan')}</Link>
+            </div>
           </div>
         </div>
       </div>
@@ -84,6 +103,8 @@ export default function Page() {
       initialUnitSystem={saved?.unitSystem || (saved?.dimUnit === 'ft' ? 'IP' : 'SI')}
       onPersist={onPersist}
       persistLabel={t('designer.browser')}
+      user={user}
+      watermark={entry.access.watermark}
     />
   )
 }

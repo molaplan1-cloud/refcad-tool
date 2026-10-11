@@ -94,6 +94,19 @@ img, svg, video { max-width: 100%; }
   padding-right: max(8px, env(safe-area-inset-right));
 }
 .workspace-scroll > * { scroll-snap-align: start; flex-shrink: 0; }
+.workspace-tabs > button,
+.workspace-tabs > a,
+.workspace-scroll > button,
+.workspace-scroll > a.workspace-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  font-family: inherit;
+  line-height: 1;
+  text-decoration: none;
+  flex-shrink: 0;
+}
 .view-tabs { border-bottom: 1px solid #292524; }
 .plan-chrome { display: flex; flex-direction: column; min-height: 0; }
 .plan-chrome.tools-open { max-height: 60dvh; overflow: hidden; }

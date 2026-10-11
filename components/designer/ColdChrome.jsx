@@ -278,6 +278,7 @@ export default function ColdChrome({
           <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14, flexShrink: 0 }}>RefCAD</Link>
           <input aria-label={t('designer.projectName')} value={name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 16, flex: 1, minWidth: 0, width: 0 }} />
           <span data-testid="project-type" style={{ fontSize: 12, fontWeight: 650, color: '#d6d3d1', whiteSpace: 'nowrap' }}>{t(`type.${projectType || 'kylmio'}.name`)}</span>
+          {user && <span data-testid="session-user" style={{ fontSize: 12, fontWeight: 650, color: '#d6d3d1', whiteSpace: 'nowrap' }}>{user.username || user.email}</span>}
           <GearButton compact label={t('file.projectSettings')} onClick={() => onProjectSettings?.()} />
           <LanguageSwitch className="compact-only" value={locale} onChange={setLocale} />
           <button type="button" data-testid="chrome-menu" aria-expanded={open === 'root'} onClick={() => setOpen(open === 'root' ? null : 'root')} style={{ ...modeTab(open === 'root'), minHeight: 44, minWidth: 44, padding: '0 12px' }}>{t('chrome.menu')}</button>
@@ -310,6 +311,7 @@ export default function ColdChrome({
         <Link href="/" style={{ color: '#99f6e4', fontWeight: 800, textDecoration: 'none', fontSize: 14 }}>RefCAD</Link>
         <input aria-label={t('designer.projectName')} value={name} onChange={(event) => onName(event.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 650, fontSize: 13, width: 160 }} />
         <span data-testid="project-type" style={{ fontSize: 12, fontWeight: 650, color: '#d6d3d1', whiteSpace: 'nowrap' }}>{t(`type.${projectType || 'kylmio'}.name`)}</span>
+        {user && <span data-testid="session-user" style={{ fontSize: 12, fontWeight: 650, color: '#d6d3d1', whiteSpace: 'nowrap' }}>{user.username || user.email}</span>}
         <span style={{ flex: 1 }} />
         <GearButton label={t('file.projectSettings')} onClick={() => onProjectSettings?.()} />
         <div data-testid="view-tabs" style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 8, background: '#1c212b' }}>

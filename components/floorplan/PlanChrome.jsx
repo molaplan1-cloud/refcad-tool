@@ -310,6 +310,7 @@ export function PlanChrome({
           <button type="button" data-testid="view-site" disabled={access && !access.workspaces.includes('piha')} style={{ ...modeTab(mode === 'site'), minHeight: 44 }} onClick={() => { if (!access || access.workspaces.includes('piha')) onMode('site') }}>{t('view.site')}</button>
           <button type="button" data-testid="view-floor-3d" style={{ ...modeTab(mode === '3d'), minHeight: 44 }} onClick={() => onMode('3d')}>3D</button>
           <button type="button" data-testid="view-facade" style={{ ...modeTab(mode === 'facade'), minHeight: 44 }} onClick={() => onMode('facade')}>{t('view.facade')}</button>
+          <button type="button" data-testid="view-section" style={{ ...modeTab(mode === 'section'), minHeight: 44 }} onClick={() => onMode('section')}>{t('view.section')}</button>
         </div>
         <div className="workspace-scroll" data-testid="workspace-tabs" style={{ background: '#1c212b' }}>
           {WORKSPACES.map((item) => {
@@ -320,9 +321,7 @@ export function PlanChrome({
               </button>
             )
           })}
-          {access?.workspaces.includes('kylma') && (
-            <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), minHeight: 44, display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}>{t('workspace.cold')}</a>
-          )}
+          {access?.workspaces.includes('kylma') && <ColdTab t={t} compact />}
         </div>
         {open === 'root' && (
           <div className="compact-menu" data-testid="chrome-menu-panel" style={{ background: '#fff', color: '#1c1917', maxHeight: '46vh', overflow: 'auto', padding: 8 }}>
@@ -330,7 +329,7 @@ export function PlanChrome({
             <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
           </div>
         )}
-        {toolsOpen && mode !== 'facade' && (
+        {toolsOpen && mode !== 'facade' && mode !== 'section' && (
           <div className="tool-sheet" data-testid="tool-sheet">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
               {workspace === 'rakenne' && (onPlan || mode === '3d') && drawTools(hit)}
@@ -377,10 +376,11 @@ export function PlanChrome({
           <button type="button" data-testid="view-site" disabled={access && !access.workspaces.includes('piha')} style={modeTab(mode === 'site')} onClick={() => { if (!access || access.workspaces.includes('piha')) onMode('site') }}>{t('view.site')}</button>
           <button type="button" data-testid="view-floor-3d" style={modeTab(mode === '3d')} onClick={() => onMode('3d')}>3D</button>
           <button type="button" data-testid="view-facade" style={modeTab(mode === 'facade')} onClick={() => onMode('facade')}>{t('view.facade')}</button>
+          <button type="button" data-testid="view-section" style={modeTab(mode === 'section')} onClick={() => onMode('section')}>{t('view.section')}</button>
         </div>
         <LanguageSwitch value={plan.locale || locale} onChange={setLocale} />
       </header>
-      <div data-testid="workspace-tabs" style={{ display: 'flex', alignItems: 'center', gap: 4, height: 36, padding: '0 8px', background: '#14181f' }}>
+      <div className="workspace-tabs" data-testid="workspace-tabs" style={{ display: 'flex', alignItems: 'center', gap: 4, height: 36, padding: '0 8px', background: '#14181f' }}>
         {WORKSPACES.map((item) => {
           const allowed = !access || access.workspaces.includes(item.id)
           return (
@@ -389,9 +389,7 @@ export function PlanChrome({
             </button>
           )
         })}
-        {access?.workspaces.includes('kylma') && (
-          <a data-testid="workspace-kylma" href="/suunnittelu" style={{ ...workspaceTab(false), textDecoration: 'none' }}>{t('workspace.cold')}</a>
-        )}
+        {access?.workspaces.includes('kylma') && <ColdTab t={t} />}
       </div>
       <div data-testid="menu-bar" style={{ display: 'flex', alignItems: 'center', gap: 2, height: 32, padding: '0 6px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
         <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen}>
@@ -473,7 +471,7 @@ export function PlanChrome({
         <button type="button" title={t('edit.undo')} onClick={onUndo} style={rib(false)}>↶</button>
         <button type="button" title={t('edit.redo')} onClick={onRedo} style={rib(false)}>↷</button>
       </div>
-      {mode !== 'facade' && (
+      {mode !== 'facade' && mode !== 'section' && (
         <div data-testid="tool-ribbon" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '4px 8px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto' }}>
             {workspace === 'rakenne' && (onPlan || mode === '3d') && (
@@ -527,6 +525,30 @@ export function PlanChrome({
       )}
       <CadToolbar active={command?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onCadLayer} />
     </div>
+  )
+}
+
+function ColdTab({ t, compact = false }) {
+  return (
+    <a
+      data-testid="workspace-kylma"
+      href="/suunnittelu"
+      className="workspace-tab"
+      style={{
+        ...workspaceTab(false),
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box',
+        fontFamily: 'inherit',
+        lineHeight: 1,
+        textDecoration: 'none',
+        flexShrink: 0,
+        minHeight: compact ? 44 : undefined,
+      }}
+    >
+      {t('workspace.cold')}
+    </a>
   )
 }
 
