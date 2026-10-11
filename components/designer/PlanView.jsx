@@ -5,6 +5,8 @@ import { useLocale } from '@/components/i18n/Locale'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
 import { drawCursor, parseRectangleSize, rectangleCursor } from '@/lib/wallDraw'
+import { coldDimensionFigures } from '@/lib/coldDimensions'
+import { wallForDimension } from '@/lib/floorplan'
 import { wallFigures } from '@/lib/wall-outline'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
 import { pointInEquipment } from '@/lib/placement'
@@ -22,7 +24,6 @@ import {
   clampGroupTranslation,
   clampResizeBox,
   cleanOrthogonal,
-  edgesOf,
   fitView,
   footprintInside,
   gridSpec,
@@ -173,6 +174,50 @@ function moveVertex(points, index, x, z) {
   return cleanOrthogonal(out)
 }
 
+function ChainDim({ dim, witnesses = [], scale, onEdit }) {
+  const off = Number.isFinite(dim.offset) ? dim.offset : 0
+  const x1 = dim.x1 + (dim.nx || 0) * off
+  const z1 = dim.z1 + (dim.nz || 0) * off
+  const x2 = dim.x2 + (dim.nx || 0) * off
+  const z2 = dim.z2 + (dim.nz || 0) * off
+  const len = Math.hypot(x2 - x1, z2 - z1) || 1
+  const ux = (x2 - x1) / len
+  const uz = (z2 - z1) / len
+  const label = String(dim.label ?? '')
+  const font = 12 / scale
+  const textW = Math.max(font * 2.2, label.length * font * 0.62)
+  const gap = textW < len * 0.8 ? textW + font * 0.45 : 0
+  const mx = (x1 + x2) / 2
+  const mz = (z1 + z2) / 2
+  const tick = 4.5 / scale
+  const px = -uz * tick
+  const pz = ux * tick
+  const vertical = Math.abs(x2 - x1) < Math.abs(z2 - z1)
+  const edit = (event) => {
+    event.stopPropagation()
+    event.preventDefault()
+    onEdit?.(dim, event)
+  }
+  return (
+    <g data-testid={`dim-${dim.kind || 'dim'}`} data-label={label} style={{ pointerEvents: 'none' }}>
+      {witnesses.map((line, index) => (
+        <line key={index} data-testid="dim-extension" x1={line.x1} y1={line.z1} x2={line.x2} y2={line.z2} stroke="#a8a29e" strokeWidth={0.8 / scale} />
+      ))}
+      <line x1={x1} y1={z1} x2={mx - ux * gap / 2} y2={mz - uz * gap / 2} stroke="#44403c" strokeWidth={1 / scale} />
+      <line x1={mx + ux * gap / 2} y1={mz + uz * gap / 2} x2={x2} y2={z2} stroke="#44403c" strokeWidth={1 / scale} />
+      <line x1={x1 - px} y1={z1 - pz} x2={x1 + px} y2={z1 + pz} stroke="#44403c" strokeWidth={1 / scale} />
+      <line x1={x2 - px} y1={z2 - pz} x2={x2 + px} y2={z2 + pz} stroke="#44403c" strokeWidth={1 / scale} />
+      <g transform={vertical ? `rotate(90 ${mx} ${mz})` : undefined}>
+        <rect x={mx - textW / 2} y={mz - font * 0.72} width={textW} height={font * 1.44} fill="#fbfaf7" />
+        <text data-testid="dim-text" x={mx} y={mz} textAnchor="middle" dominantBaseline="middle" fontSize={font} fontWeight={600} fill="#292524" fontFamily="ui-sans-serif, system-ui, sans-serif">{label}</text>
+        {onEdit && (
+          <rect data-testid="dim-hit" x={mx - textW / 2} y={mz - font * 0.72} width={textW} height={font * 1.44} fill="transparent" style={{ cursor: 'text', pointerEvents: 'all' }} onMouseDown={edit} />
+        )}
+      </g>
+    </g>
+  )
+}
+
 function DimLine({ x1, z1, x2, z2, scale, text }) {
   const dx = x2 - x1
   const dz = z2 - z1
@@ -192,29 +237,6 @@ function DimLine({ x1, z1, x2, z2, scale, text }) {
         </text>
       </g>
     </g>
-  )
-}
-
-function edgeDimension(edge, points, scale, unitSystem) {
-  const len = edge.len || 1
-  let nx = -(edge.z2 - edge.z1) / len
-  let nz = (edge.x2 - edge.x1) / len
-  const mx = (edge.x1 + edge.x2) / 2
-  const mz = (edge.z1 + edge.z2) / 2
-  if (pointInPolygon(mx + nx * 0.05, mz + nz * 0.05, points)) {
-    nx = -nx
-    nz = -nz
-  }
-  const off = 0.42
-  return (
-    <DimLine
-      x1={edge.x1 + nx * off}
-      z1={edge.z1 + nz * off}
-      x2={edge.x2 + nx * off}
-      z2={edge.z2 + nz * off}
-      scale={scale}
-      text={formatLength(len, unitSystem)}
-    />
   )
 }
 
@@ -464,6 +486,7 @@ export default function PlanView({
   onPanelEnd,
   onChainStep,
   onCommitRectangle,
+  onEditDimension,
   onUndo,
   onSelectWall,
   walls = [],
@@ -498,6 +521,7 @@ export default function PlanView({
   const [cursor, setCursor] = useState(null)
   const [hoverId, setHoverId] = useState(null)
   const [draft, setDraft] = useState(null)
+  const [dimEdit, setDimEdit] = useState(null)
   const [poly, setPoly] = useState([])
   const [polyHover, setPolyHover] = useState(null)
   const [spaceDown, setSpaceDown] = useState(false)
@@ -519,7 +543,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
-    onPanelSegment, onPanelEnd, onChainStep, onCommitRectangle, onUndo, onSelectWall, walls, selectedWalls, onScale,
+    onPanelSegment, onPanelEnd, onChainStep, onCommitRectangle, onEditDimension, onUndo, onSelectWall, walls, selectedWalls, onScale,
     onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu, hand,
   }
 
@@ -1515,6 +1539,11 @@ export default function PlanView({
     () => wallFigures(walls || [], [], (wall) => wall.thickness || 0.1),
     [walls],
   )
+  const dimFigures = useMemo(
+    () => coldDimensionFigures({ walls: walls || [] }, rooms, 22 / Math.max(view.scale, 6)),
+    [walls, rooms, view.scale],
+  )
+  const dimPlan = useMemo(() => ({ walls: walls || [] }), [walls])
   const selected = new Set(selectedIds)
   const drawing = tool === 'draw' || tool === 'polygon' || tool === 'partition' || isRouteTool(tool)
   const hint = tool === 'pipe'
@@ -1706,28 +1735,6 @@ export default function PlanView({
                     {line2}
                   </text>
                 </g>
-                {active && (rectLike ? (
-                  <>
-                    <DimLine
-                      x1={bboxOf(outer).left}
-                      z1={bboxOf(outer).top - 0.45}
-                      x2={bboxOf(outer).right}
-                      z2={bboxOf(outer).top - 0.45}
-                      scale={view.scale}
-                      text={formatLength(room.width, unitSystem)}
-                    />
-                    <DimLine
-                      x1={bboxOf(outer).left - 0.45}
-                      z1={bboxOf(outer).top}
-                      x2={bboxOf(outer).left - 0.45}
-                      z2={bboxOf(outer).bottom}
-                      scale={view.scale}
-                      text={formatLength(room.depth, unitSystem)}
-                    />
-                  </>
-                ) : edgesOf(outer).map((edge) => (
-                  <g key={edge.index}>{edgeDimension(edge, outer, view.scale, unitSystem)}</g>
-                )))}
                 {showHandles && (rectLike ? ['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'] : []).map((corner) => {
                   const box = bboxOf(outer)
                   const x = corner.includes('w') ? box.left : corner.includes('e') ? box.right : box.x
@@ -1943,6 +1950,29 @@ export default function PlanView({
               </g>
             )
           })}
+          {dimFigures.map((item, index) => (
+            <ChainDim
+              key={`dim-${item.dim.kind}-${index}-${item.dim.label}`}
+              dim={item.dim}
+              witnesses={item.witnesses}
+              scale={view.scale}
+              onEdit={tool === 'select' && wallForDimension(dimPlan, item.dim) ? (dim, event) => {
+                const host = hostRef.current
+                const frame = host?.getBoundingClientRect()
+                const width = 96
+                const height = 32
+                let x = event.clientX
+                let y = event.clientY
+                if (frame) {
+                  x = event.clientX - frame.left - width / 2
+                  y = event.clientY - frame.top - height / 2
+                  x = Math.min(Math.max(8, x), Math.max(8, frame.width - width - 8))
+                  y = Math.min(Math.max(8, y), Math.max(8, frame.height - height - 8))
+                }
+                setDimEdit({ dim, value: String(dim.label || ''), x, y })
+              } : null}
+            />
+          ))}
           {rectDraft && (
             <g>
               <rect
@@ -1955,6 +1985,12 @@ export default function PlanView({
                 strokeWidth={1.4 / view.scale}
                 strokeDasharray={`${6 / view.scale} ${4 / view.scale}`}
               />
+              {draftWidth >= 0.05 && draftDepth >= 0.05 && (
+                <g data-testid="rect-size" data-label={`${Math.round(draftWidth * 1000)} × ${Math.round(draftDepth * 1000)}`} transform={`translate(${rectDraft.x2} ${rectDraft.z2}) scale(${1 / view.scale})`} style={{ pointerEvents: 'none' }}>
+                  <rect x={14} y={-30} width={Math.max(86, `${Math.round(draftWidth * 1000)} × ${Math.round(draftDepth * 1000)}`.length * 7.4)} height={22} rx={4} fill="#fff" stroke="#0f766e" />
+                  <text x={20} y={-15} fontSize={12} fontWeight={700} fill="#0f766e" fontFamily="ui-sans-serif, system-ui, sans-serif">{Math.round(draftWidth * 1000)} × {Math.round(draftDepth * 1000)}</text>
+                </g>
+              )}
               <DimLine
                 x1={Math.min(rectDraft.x1, rectDraft.x2)}
                 z1={Math.min(rectDraft.z1, rectDraft.z2) - 0.35}
@@ -2040,6 +2076,29 @@ export default function PlanView({
           </>
         )}
       </svg>
+      {dimEdit && (
+        <input
+          data-testid="wall-length-edit"
+          autoFocus
+          inputMode="decimal"
+          value={dimEdit.value}
+          onFocus={(event) => event.target.select()}
+          onChange={(event) => setDimEdit((current) => (current ? { ...current, value: event.target.value } : current))}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              const mm = Number(String(dimEdit.value).replace(',', '.'))
+              if (Number.isFinite(mm) && mm >= 50) propsRef.current.onEditDimension?.(dimEdit.dim, mm)
+              setDimEdit(null)
+            } else if (event.key === 'Escape') {
+              event.preventDefault()
+              setDimEdit(null)
+            }
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{ position: 'absolute', left: dimEdit.x, top: dimEdit.y, zIndex: 30, width: 96, height: 32, padding: '2px 8px', fontSize: 16, fontWeight: 700, color: '#134e4a', background: '#fff', border: '2px solid #0f766e', borderRadius: 6, boxShadow: '0 8px 18px rgba(28,25,23,0.18)' }}
+        />
+      )}
       <div style={{ position: 'absolute', left: 14, top: 12, display: 'flex', gap: 8, alignItems: 'center', pointerEvents: 'none' }}>
         <div style={{ width: 22, height: 22, border: '1.5px solid #44403c', borderRadius: 11, position: 'relative' }}>
           <div style={{ position: 'absolute', left: 10, top: 2, width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: '7px solid #0f766e' }} />

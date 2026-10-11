@@ -19,7 +19,7 @@ import ColdChrome from './ColdChrome'
 import { stampDemoWatermark } from '@/lib/watermark'
 import { applyProjectType } from '@/lib/projectMode'
 import { CURRENT_KEY } from '@/lib/projects'
-import { emptyPlan, squareWalls, straightenWalls } from '@/lib/floorplan'
+import { emptyPlan, resizeDimension, squareWalls, straightenWalls } from '@/lib/floorplan'
 import { closeWallChain, commitRectangle, stepWallChain } from '@/lib/wallDraw'
 import { placeUnderlay } from '@/lib/underlay'
 import { readUnderlayFile, renderPdfPage } from '@/lib/underlayFile'
@@ -330,6 +330,7 @@ export default function DesignerApp({
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [roomsOpen, setRoomsOpen] = useState(true)
+  const [panelListOpen, setPanelListOpen] = useState(false)
   const [templatesOpen, setTemplatesOpen] = useState(true)
   const roomsRef = useRef(rooms)
   const panelRef = useRef(panelPlan)
@@ -622,6 +623,13 @@ export default function DesignerApp({
       thickness: (Number(panelMmRef.current) || 100) / 1000,
       ...extra,
     }
+  }
+
+  function onEditDimension(dim, mm) {
+    const next = resizeDimension(panelRef.current, dim, mm / 1000)
+    if (!next || next === panelRef.current) return
+    pushUndo()
+    syncPanels(next)
   }
 
   function onChainStep(chain, point, options = {}) {
@@ -1339,6 +1347,7 @@ export default function DesignerApp({
     onPanelEnd,
     onChainStep,
     onCommitRectangle,
+    onEditDimension,
     onUndo: undo,
     zoomCommand,
     onScale: (scale) => setZoomPercent(Math.round((scale / 36) * 100)),
@@ -1411,7 +1420,7 @@ export default function DesignerApp({
     router.push('/pohjakuva')
   }
 
-  const designName = placing?.name || (tool === 'draw' ? t('designer.room') : tool === 'polygon' ? t('designer.polygon') : tool === 'partition' ? t('designer.partition') : tool === 'pipe' ? t('designer.pipe') : tool === 'cable' ? t('designer.cable') : null)
+  const designName = placing?.name || (tool === 'draw' ? t('tool.rectangle') : tool === 'polygon' ? t('cold.wall') : tool === 'partition' ? t('tool.interior') : tool === 'pipe' ? t('designer.pipe') : tool === 'cable' ? t('designer.cable') : null)
   const designDrawing = Boolean(designName && !placing)
   const designLabel = modeChipText({ name: designName, repeat: repeatPlace && Boolean(placing), drawing: designDrawing })
 
@@ -1614,11 +1623,36 @@ export default function DesignerApp({
             <div style={{ padding: '4px 8px 8px' }}>
               {rooms.length === 0 && <div style={{ fontSize: 12, color: '#78716c', margin: '4px 4px 8px', lineHeight: 1.4 }}>{t('designer.emptyLibrary')}</div>}
               {panels.count > 0 && (
-                <div data-testid="panel-schedule" style={{ fontSize: 11, color: '#44403c', margin: '4px 4px 8px', lineHeight: 1.45 }}>
-                  <strong>{t('cold.panels')}</strong>
-                  <div>{t('cold.panelLine', { count: panels.count, net: panels.net.toFixed(1) })}</div>
-                  <div>{t('cold.sharedLine', { count: panels.shared })}</div>
-                </div>
+              <div data-testid="panel-library" style={{ margin: '4px 4px 8px' }}>
+                    <button type="button" data-testid="panel-summary" aria-expanded={panelListOpen} onClick={() => setPanelListOpen((open) => !open)} style={{ display: 'flex', width: '100%', alignItems: 'baseline', gap: 8, padding: '4px 2px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#1c1917', textAlign: 'left' }}>
+                      <strong style={{ fontSize: 12 }}>{t('cold.panels')}</strong>
+                      <span style={{ fontSize: 11, color: '#44403c' }}>{t('cold.panelLine', { count: panels.count, net: panels.net.toFixed(1) })}</span>
+                      <span style={{ marginLeft: 'auto', color: '#78716c' }}>{panelListOpen ? '−' : '+'}</span>
+                    </button>
+                    {panelListOpen && (
+                      <>
+                        <div style={{ fontSize: 11, color: '#44403c', margin: '2px 2px 6px' }}>{t('cold.sharedLine', { count: panels.shared })}</div>
+                        <table data-testid="panel-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, color: '#44403c' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: 'left', fontWeight: 650, padding: '2px 4px' }}>{t('cold.col.length')}</th>
+                              <th style={{ textAlign: 'left', fontWeight: 650, padding: '2px 4px' }}>{t('cold.col.height')}</th>
+                              <th style={{ textAlign: 'left', fontWeight: 650, padding: '2px 4px' }}>{t('cold.col.thick')}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {panels.panels.map((panel) => (
+                              <tr key={panel.id} data-testid="panel-library-row">
+                                <td style={{ padding: '2px 4px' }}>{Math.round((panel.b - panel.a) * 1000)}</td>
+                                <td style={{ padding: '2px 4px' }}>{Math.round((panel.y1 - panel.y0) * 1000)}</td>
+                                <td style={{ padding: '2px 4px' }}>{Math.round((panel.thickness || 0) * 1000)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
+                    )}
+              </div>
               )}
               {doors.length > 0 && (
                 <div data-testid="door-schedule" style={{ fontSize: 11, color: '#44403c', margin: '4px 4px 8px', lineHeight: 1.45 }}>
@@ -1665,25 +1699,6 @@ export default function DesignerApp({
                   <button type="button" data-testid="show-all-sizes" onClick={() => setShowAllSizes((value) => !value)} style={{ marginTop: 6, border: 'none', background: 'transparent', color: '#0f766e', fontWeight: 700, cursor: 'pointer', padding: 0, transform: 'none' }}>
                     {showAllSizes ? t('cold.showFit') : t('cold.showAll')}
                   </button>
-                </div>
-              )}
-              {coldTab === 'structure' && (
-                <div data-testid="panel-library" style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 10, color: '#a8a29e', margin: '2px 4px 4px', fontWeight: 700, letterSpacing: 0.4 }}>{t('cold.panels')}</div>
-                  <div style={{ fontSize: 11, color: '#44403c', margin: '0 4px', lineHeight: 1.45 }}>
-                    <div>{t('cold.panelLine', { count: panels.count, net: panels.net.toFixed(1) })}</div>
-                    <div>{t('cold.sharedLine', { count: panels.shared })}</div>
-                  </div>
-                  {panels.count === 0 && <div data-testid="panel-library-empty" style={{ fontSize: 11, color: '#78716c', margin: '4px', lineHeight: 1.4 }}>{t('cold.panelsEmpty')}</div>}
-                  {panels.panels.map((panel) => (
-                    <div key={panel.id} data-testid="panel-library-row" style={{ fontSize: 11, color: '#44403c', margin: '2px 4px' }}>
-                      {t('cold.panelItem', {
-                        length: Math.round((panel.b - panel.a) * 1000),
-                        height: Math.round((panel.y1 - panel.y0) * 1000),
-                        thick: Math.round((panel.thickness || 0) * 1000),
-                      })}
-                    </div>
-                  ))}
                 </div>
               )}
               {TEMPLATE_GROUPS.filter((group) => ({ structure: ['column', 'rack'], doors: ['door'], cooling: ['evaporator', 'condenser', 'combo', 'compressor'], electric: ['sensor'] }[coldTab] || []).includes(group.id)).map((group) => {
