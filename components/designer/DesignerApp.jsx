@@ -5,6 +5,8 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LanguageSwitch, useLocale } from '@/components/i18n/Locale'
+import { SideRail } from '@/components/floorplan/SideRail'
+import { applyPanelCommand, panelCommand, readPanels, writePanels } from '@/lib/panels'
 import PlanView from './PlanView'
 import HeatLoadPanel from './HeatLoadPanel'
 import { ROOM_TYPES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
@@ -241,6 +243,14 @@ export default function DesignerApp({
   const [selectedIds, setSelectedIds] = useState([])
   const [cad, setCad] = useState(null)
   const [placingId, setPlacingId] = useState(null)
+  const [rails, setRails] = useState(() => readPanels(null))
+  const railsOwner = useRef('local')
+  useEffect(() => {
+    const id = user?.id || 'local'
+    if (railsOwner.current === id && user) return
+    railsOwner.current = id
+    setRails(readPanels(user?.id))
+  }, [user])
   useEffect(() => {
     if ((tool && tool !== 'select') || placingId) setHand(false)
   }, [tool, placingId])
@@ -329,6 +339,16 @@ export default function DesignerApp({
     const onKey = (e) => {
       const tag = e.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      const panelsKey = panelCommand(e)
+      if (panelsKey) {
+        e.preventDefault()
+        setRails((current) => {
+          const next = applyPanelCommand(current, panelsKey)
+          writePanels(user?.id, next)
+          return next
+        })
+        return
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault()
         undo()
@@ -400,7 +420,7 @@ export default function DesignerApp({
       else if (e.key.toLowerCase() === 'r') setTool('draw')
       else if (e.key.toLowerCase() === 'p') setTool('polygon')
       else if (e.key.toLowerCase() === 'w') setTool('partition')
-      else if (e.key.toLowerCase() === 'f') setFitToken((token) => token + 1)
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'f') setFitToken((token) => token + 1)
       else if (e.key.toLowerCase() === 'g') setSnapOn((value) => !value)
       else if (e.key.toLowerCase() === 'l') setTool('pipe')
       else if (e.key.toLowerCase() === 'k') setTool('cable')
@@ -1199,6 +1219,17 @@ export default function DesignerApp({
         onUndo={undo}
         onRedo={redo}
         onFit={() => setFitToken((token) => token + 1)}
+        showLegend={rails.legend}
+        onLegend={(legend) => setRails((current) => {
+          const next = { ...current, legend }
+          writePanels(user?.id, next)
+          return next
+        })}
+        onFull={() => setRails((current) => {
+          const next = applyPanelCommand(current, 'full')
+          writePanels(user?.id, next)
+          return next
+        })}
         onExample={loadExample}
         onPdf={exportPdf}
         onDxf={exportDxf}
@@ -1255,11 +1286,22 @@ export default function DesignerApp({
         {compact && drawer && (
           <button type="button" className="drawer-backdrop" data-testid="drawer-backdrop" aria-label={t('panel.closeInfo')} onClick={() => setDrawer(null)} />
         )}
-        <aside
-          data-testid="template-library"
+        <SideRail
+          side="left"
+          testId="template-library"
           className="designer-library"
-          data-open={compact && drawer === 'rooms' ? 'true' : 'false'}
-          style={compact ? undefined : { width: 248, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #e7e5e4' }}
+          compact={compact}
+          open={drawer === 'rooms'}
+          collapsed={rails.left}
+          onToggle={() => setRails((current) => {
+            const next = { ...current, left: !current.left }
+            writePanels(user?.id, next)
+            return next
+          })}
+          width={276}
+          pad="0"
+          collapseLabel={t('panel.collapse')}
+          expandLabel={t('panel.expand')}
         >
           {compact && <button type="button" data-testid="close-rooms" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
           <button type="button" onClick={() => setRoomsOpen((open) => !open)} style={sectionHead}>
@@ -1376,7 +1418,7 @@ export default function DesignerApp({
               )})}
             </div>
           )}
-        </aside>
+        </SideRail>
 
         <div className="plan-stage" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
         <div className="plan-status" style={{ minHeight: 28, display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4' }}>
@@ -1419,7 +1461,7 @@ export default function DesignerApp({
           ) : (
             <PlanView {...planProps} />
           )}
-          {pipes.length > 0 && view !== '3d' && view !== 'schematic' && (
+          {pipes.length > 0 && rails.legend && view !== '3d' && view !== 'schematic' && (
             <div className="pipe-legend" data-testid="pipe-legend" style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 4, background: 'rgba(255,255,255,0.94)', border: '1px solid #e7e5e4', borderRadius: 10, padding: '8px 10px', maxWidth: 320 }}>
               {['suction', 'liquid', 'liquidReturn', 'hotgas', 'drain', 'drainHeat'].map((key) => (
                 <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#44403c', marginBottom: 3 }}>
@@ -1449,11 +1491,22 @@ export default function DesignerApp({
         )}
         </div>
 
-        {view !== 'schematic' && <aside
-          data-testid="designer-props"
+        {view !== 'schematic' && <SideRail
+          side="right"
+          testId="designer-props"
           className="designer-props"
-          data-open={compact && drawer === 'info' ? 'true' : 'false'}
-          style={compact ? undefined : { width: 340, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #e7e5e4' }}
+          compact={compact}
+          open={drawer === 'info'}
+          collapsed={rails.right}
+          onToggle={() => setRails((current) => {
+            const next = { ...current, right: !current.right }
+            writePanels(user?.id, next)
+            return next
+          })}
+          width={368}
+          pad="0"
+          collapseLabel={t('panel.collapse')}
+          expandLabel={t('panel.expand')}
         >
           {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
           {(tool === 'draw' || tool === 'polygon' || tool === 'pipe' || tool === 'cable') && (
@@ -1588,7 +1641,7 @@ export default function DesignerApp({
             }}
             onDeleteEquipment={deleteSelected}
           />
-        </aside>}
+        </SideRail>}
       </div>
       {toolMenu && (
         <div data-testid="tool-menu" style={{ position: 'fixed', left: toolMenu.x, top: toolMenu.y, zIndex: 80, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 10, padding: 6, boxShadow: '0 12px 28px rgba(28,25,23,0.16)' }} onMouseDown={(event) => event.stopPropagation()}>

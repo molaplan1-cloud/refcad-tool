@@ -136,6 +136,9 @@ export default function ColdChrome({
   onUndo,
   onRedo,
   onFit,
+  showLegend = false,
+  onLegend,
+  onFull,
   onExample,
   onPdf,
   onDxf,
@@ -238,6 +241,8 @@ export default function ColdChrome({
         <button type="button" style={menuItem(view === 'split')} onClick={() => { close(); onView('split') }}>{t('designer.split')}</button>
         <button type="button" style={menuItem(view === 'schematic')} onClick={() => { close(); onView('schematic') }}>{t('designer.schematic')}</button>
         <button type="button" style={menuItem(false)} onClick={() => { close(); onFit?.() }}>{t('snap.fit')}</button>
+        <button type="button" data-testid="toggle-legend" style={menuItem(showLegend)} onClick={() => { close(); onLegend?.(!showLegend) }}>{t('display.legend')}</button>
+        <button type="button" data-testid="full-canvas" style={menuItem(false)} onClick={() => { close(); onFull?.() }}>{t('panel.full')}</button>
       </Menu>
       <Menu id="draw" label={t('menu.draw')} open={open} setOpen={setOpen} dock={dock}>
         {tab === 'structure' && !dock ? <div style={{ fontSize: 12, color: '#78716c', padding: '4px 8px' }}>{t('menu.onRibbon')}</div> : drawButtons(menuItem)}

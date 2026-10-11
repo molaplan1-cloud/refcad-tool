@@ -1099,7 +1099,7 @@ function boundsOf(rooms) {
 
 function Frame({ rooms }) {
   const { camera, controls, size } = useThree()
-  const signature = `${rooms.map((room) => room.id).join('|')}|${Math.round(size.width)}x${Math.round(size.height)}`
+  const signature = rooms.map((room) => room.id).join('|')
   const primed = useRef('')
   useEffect(() => {
     if (!rooms.length || !controls || size.width < 40 || size.height < 40) return undefined

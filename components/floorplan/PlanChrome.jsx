@@ -168,7 +168,7 @@ export function PlanChrome({
   onCloseRoom, onYardTool, onGrid, onAngle, onZoomOut, onZoomIn, onZoomFit,
   onClearances, onWallMode, onRoofMode, onSceneStyle, onSystem, onKind, onSvcTool,
   onFinish, onRoute, onRewire, onSchedule, onDiagram, onRewireWater, onRewireHeat, onHeatTable,
-  onHeatSchematic, onPdf, onServicePdf, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup, onRemoveAuto, onStraighten,
+  onHeatSchematic, onPdf, onServicePdf, onMaterials, onFull, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup, onRemoveAuto, onStraighten, onSquare,
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
   access = null,
   onProjectInfo,
@@ -276,12 +276,15 @@ export function PlanChrome({
         <button type="button" data-testid="cleanup-duplicates" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>{t('edit.cleanup')}</button>
         <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>{t('edit.removeAuto')}</button>
         <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
+        <button type="button" data-testid="square-wall" style={menuItem(false)} onClick={() => { close(); onSquare?.() }}>{t('cad.square')}</button>
       </Menu>
       <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="open-display" style={menuItem(display.preset !== 'custom')} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
+        <button type="button" data-testid="full-canvas" style={menuItem(false)} onClick={() => { close(); onFull?.() }}>{t('panel.full')}</button>
       </Menu>
       <Menu id="print" label={t('menu.print')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="export-floor-pdf" style={menuItem(false)} onClick={() => { close(); onPdf() }}>PDF</button>
+        <button type="button" data-testid="open-materials" style={menuItem(false)} onClick={() => { close(); onMaterials?.() }}>{t('bom.title')}</button>
         <button type="button" data-testid="export-site-pdf" style={menuItem(false)} onClick={() => { close(); onServicePdf('site') }}>{t('file.sitePdf')}</button>
         <button type="button" data-testid="export-floor-png" style={menuItem(false)} onClick={() => { close(); onServicePdf('png') }}>PNG</button>
         {SERVICE_SYSTEMS.map((item) => (
@@ -404,9 +407,11 @@ export function PlanChrome({
           <button type="button" data-testid="cleanup-duplicates" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>{t('edit.cleanup')}</button>
           <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>{t('edit.removeAuto')}</button>
           <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
+          <button type="button" data-testid="square-wall" style={menuItem(false)} onClick={() => { close(); onSquare?.() }}>{t('cad.square')}</button>
         </Menu>
         <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="open-display" style={menuItem(false)} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
+          <button type="button" data-testid="full-canvas" style={menuItem(false)} onClick={() => { close(); onFull?.() }}>{t('panel.full')}</button>
           {!onSheet && snapTools}
           {!onSheet && zoomTools}
         </Menu>
@@ -455,6 +460,7 @@ export function PlanChrome({
         </Menu>
         <Menu id="print" label={t('menu.print')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="export-floor-pdf" style={menuItem(false)} onClick={() => { close(); onPdf() }}>PDF</button>
+          <button type="button" data-testid="open-materials" style={menuItem(false)} onClick={() => { close(); onMaterials?.() }}>{t('bom.title')}</button>
           <button type="button" data-testid="export-site-pdf" style={menuItem(false)} onClick={() => { close(); onServicePdf('site') }}>{t('file.sitePdf')}</button>
           <button type="button" data-testid="export-floor-png" style={menuItem(false)} onClick={() => { close(); onServicePdf('png') }}>PNG</button>
           {SERVICE_SYSTEMS.map((item) => (
