@@ -164,6 +164,9 @@ export default function ColdChrome({
   onExtend,
   onJoin,
   zoomPercent = 100,
+  snapOn = true,
+  gridSize = 0.1,
+  onCycleGrid,
   onZoomIn,
   onZoomOut,
   onZoom100,
@@ -229,6 +232,7 @@ export default function ColdChrome({
       <button type="button" data-testid="zoom-percent" style={style(false)} onClick={() => { close(); onZoom100?.() }}>{zoomPercent}%</button>
       <button type="button" data-testid="zoom-in" title={t('snap.zoomIn')} style={style(false)} onClick={() => { close(); onZoomIn?.() }}>+</button>
       <button type="button" data-testid="zoom-fit" style={style(false)} onClick={() => { close(); onFit() }}>{t('snap.fit')}</button>
+      <button type="button" data-testid="snap-step" style={style(snapOn)} onClick={() => { close(); onCycleGrid?.() }}>{t('snap.snap')} {snapOn ? `${Math.round(gridSize * 1000)} mm` : t('designer.gridOff')}</button>
     </>
   )
 

@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocale } from '@/components/i18n/Locale'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
+import { dimensionMoveChoice, doorPlacement, evaporatorPlacement } from '@/lib/coldEdit'
 import { drawCursor, parseRectangleSize, rectangleCursor } from '@/lib/wallDraw'
 import { coldDimensionFigures, innerDimHitsLabel, layoutColdInnerDims } from '@/lib/coldDimensions'
-import { wallForDimension } from '@/lib/floorplan'
+import { nearestWall, wallForDimension } from '@/lib/floorplan'
 import { wallFigures } from '@/lib/wall-outline'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
 import { pointInEquipment } from '@/lib/placement'
@@ -515,8 +516,12 @@ export default function PlanView({
   onEditDimension,
   innerDims = true,
   roomShape = 'rect',
+  sizeBasis = 'inner',
+  editEpoch = '',
   onUndo,
   onSelectWall,
+  onSlideWall,
+  onDrawActive,
   walls = [],
   selectedWalls = [],
   zoomCommand = null,
@@ -550,6 +555,9 @@ export default function PlanView({
   const [hoverId, setHoverId] = useState(null)
   const [draft, setDraft] = useState(null)
   const [dimEdit, setDimEdit] = useState(null)
+  const [liveTyped, setLiveTyped] = useState('')
+  const [endpointDrag, setEndpointDrag] = useState(null)
+  const [placeGhost, setPlaceGhost] = useState(null)
   const [poly, setPoly] = useState([])
   const [polyHover, setPolyHover] = useState(null)
   const [spaceDown, setSpaceDown] = useState(false)
@@ -571,7 +579,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
-    onPanelSegment, onPanelEnd, onChainStep, onCommitRectangle, onEditDimension, onUndo, onSelectWall, walls, selectedWalls, onScale, roomShape,
+    onPanelSegment, onPanelEnd, onChainStep, onCommitRectangle, onEditDimension, onUndo, onSelectWall, onSlideWall, onDrawActive, walls, selectedWalls, onScale, roomShape, sizeBasis, gridSize, snapOn,
     onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu, hand,
   }
 
@@ -585,8 +593,11 @@ export default function PlanView({
     chainRef.current = null
     chainHist.current = []
     polyTyped.current = ''
+    setLiveTyped('')
     setPoly([])
     setDraft(null)
+    setDimEdit(null)
+    onDrawActive?.(false)
   }, [tool, roomShape])
 
   useEffect(() => {
@@ -645,21 +656,13 @@ export default function PlanView({
     return () => cancelAnimationFrame(frame)
   }, [fitToken])
 
-  const roomCount = rooms.length
-  const seenRooms = useRef(0)
   useEffect(() => {
-    if (seenRooms.current === 0 && roomCount > 0) {
-      autoFit.current = true
-      const frame = requestAnimationFrame(() => {
-        const host = hostRef.current
-        if (host) setCamera(fitView(propsRef.current.rooms, host.clientWidth, host.clientHeight))
-      })
-      seenRooms.current = roomCount
-      return () => cancelAnimationFrame(frame)
-    }
-    seenRooms.current = roomCount
-    return undefined
-  }, [roomCount])
+    setDimEdit(null)
+  }, [editEpoch])
+
+  useEffect(() => {
+    if (!placing) setPlaceGhost(null)
+  }, [placing])
 
   useEffect(() => {
     if (tool !== 'polygon') {
@@ -715,6 +718,7 @@ export default function PlanView({
         return
       }
       if (event.type !== 'keydown') return
+      if (event.key === 'Escape') setDimEdit(null)
       const drawing = gesture.current?.kind === 'draw'
       const points = polyRef.current
       const toolNow = propsRef.current.tool
@@ -724,10 +728,12 @@ export default function PlanView({
         gesture.current = null
         typed.current = { field: 'w', w: '', d: '' }
         polyTyped.current = ''
+        setLiveTyped('')
         chainRef.current = null
         chainHist.current = []
         setDraft(null)
         setPoly([])
+        propsRef.current.onDrawActive?.(false)
         event.stopPropagation()
         return
       }
@@ -739,6 +745,7 @@ export default function PlanView({
           event.stopPropagation()
           if (polyTyped.current) {
             polyTyped.current = polyTyped.current.slice(0, -1)
+            setLiveTyped(polyTyped.current)
             return
           }
           if (chainHist.current.length) {
@@ -768,6 +775,7 @@ export default function PlanView({
           event.preventDefault()
           event.stopPropagation()
           polyTyped.current = `${polyTyped.current}${event.key === '×' ? 'x' : drawChar}`.slice(0, 16)
+          setLiveTyped(polyTyped.current)
           return
         }
         if (event.key === 'Enter') {
@@ -780,7 +788,9 @@ export default function PlanView({
               propsRef.current.onCommitRectangle?.(corner, { x: corner.x + size.width, z: corner.z + size.depth })
               chainRef.current = null
               polyTyped.current = ''
+              setLiveTyped('')
               setDraft(null)
+              propsRef.current.onDrawActive?.(false)
             }
             return
           }
@@ -796,6 +806,7 @@ export default function PlanView({
               { extraPoints: chainRef.current.start ? [chainRef.current.start] : [] },
             )
             polyTyped.current = ''
+            setLiveTyped('')
             const prev = chainRef.current
             const result = propsRef.current.onChainStep?.(prev, point, { freeAngle })
             if (result?.committed) chainHist.current.push(prev)
@@ -899,7 +910,9 @@ export default function PlanView({
         setPoly([chainRef.current.anchor])
         setPolyHover({ ...point, kind: 'endpoint' })
       } else if (p.tool === 'draw' && p.roomShape !== 'free' && chainRef.current?.corner) {
-        const point = rectangleCursor(world, chainRef.current.corner, p.walls, current.scale, polyTyped.current)
+        const point = rectangleCursor(world, chainRef.current.corner, p.walls, current.scale, polyTyped.current, {
+          grid: p.snapOn ? p.gridSize : 0,
+        })
         setDraft({ kind: 'rect', x1: chainRef.current.corner.x, z1: chainRef.current.corner.z, x2: point.x, z2: point.z })
       }
       if (polyRef.current.length && isRouteTool(p.tool)) {
@@ -925,6 +938,9 @@ export default function PlanView({
         if (p.cad?.step === 'to') p.onCadMove?.(world)
         const eq = hitEquipment(p.rooms, world.x, world.z)
         setHoverId(eq?.room?.id || hitRoom(p.rooms, world.x, world.z)?.id || null)
+        if (p.placing?.category === 'door') setPlaceGhost(doorPlacement(p.rooms, p.walls, world, p.placing.width))
+        else if (p.placing?.category === 'evaporator') setPlaceGhost(evaporatorPlacement(p.rooms, p.walls, world, p.placing))
+        else setPlaceGhost(null)
         return
       }
       if (g.kind === 'right') {
@@ -948,9 +964,26 @@ export default function PlanView({
         return
       }
       if (g.kind === 'panel-end') {
-        const snappedEnd = drawCursor(world, null, p.walls, current.scale, '')
+        const snappedEnd = drawCursor(world, null, p.walls, current.scale, '', {
+          grid: p.snapOn ? p.gridSize : 0,
+        })
         g.point = snappedEnd
+        setEndpointDrag({ from: g.from, to: snappedEnd })
         setCursor({ ...world, x: snappedEnd.x, z: snappedEnd.z, kind: 'endpoint' })
+        return
+      }
+      if (g.kind === 'wall-slide') {
+        const dx = world.x - g.startX
+        const dz = world.z - g.startZ
+        const step = p.snapOn ? p.gridSize : 0
+        const snap = (value) => (step > 0 ? Math.round(value / step) * step : value)
+        g.dx = snap(dx)
+        g.dz = snap(dz)
+        if (!g.started && Math.hypot(g.dx, g.dz) >= (step > 0 ? step * 0.5 : 0.02)) {
+          g.started = true
+          p.onSlideWall?.(g.id, 0, 0, 'start')
+        }
+        if (g.started) p.onSlideWall?.(g.id, g.dx, g.dz, 'move')
         return
       }
       const snapped = snapWorld(world.x, world.z, {
@@ -1096,8 +1129,35 @@ export default function PlanView({
       if (touching.current && event.pointerType !== 'touch') return
       const g = gesture.current
       gesture.current = null
-      if (!g) return
       const p = propsRef.current
+      const chain = chainRef.current
+      if (!g && chain?.corner && chain.sx != null && p.tool === 'draw' && p.roomShape !== 'free') {
+        const moved = Math.hypot(event.clientX - chain.sx, event.clientY - chain.sy)
+        if (moved > 6) {
+          const host = hostRef.current
+          const frame = host?.getBoundingClientRect()
+          const current = viewRef.current
+          if (frame) {
+            const world = {
+              x: (event.clientX - frame.left - current.offsetX) / current.scale,
+              z: (event.clientY - frame.top - current.offsetY) / current.scale,
+            }
+            const point = rectangleCursor(world, chain.corner, p.walls, current.scale, polyTyped.current, {
+              grid: p.snapOn ? p.gridSize : 0,
+            })
+            if (Math.abs(point.x - chain.corner.x) >= 0.3 && Math.abs(point.z - chain.corner.z) >= 0.3) {
+              p.onCommitRectangle?.(chain.corner, point)
+              chainRef.current = null
+              polyTyped.current = ''
+              setLiveTyped('')
+              setDraft(null)
+              p.onDrawActive?.(false)
+            }
+          }
+        }
+        return
+      }
+      if (!g) return
       if (g.kind === 'right') {
         if (!g.moved) {
           const eqHit = hitEquipment(p.rooms, g.world.x, g.world.z)
@@ -1118,7 +1178,12 @@ export default function PlanView({
         return
       }
       if (g.kind === 'panel-end' && g.point) {
+        setEndpointDrag(null)
         p.onPanelEnd?.(g.id, g.end, g.point)
+        return
+      }
+      if (g.kind === 'wall-slide') {
+        p.onSlideWall?.(g.id, g.dx || 0, g.dz || 0, 'end')
         return
       }
       if (g.kind === 'draw') {
@@ -1253,28 +1318,43 @@ export default function PlanView({
     }
     const panelEnd = event.target?.dataset?.panelEnd
     const panelWall = event.target?.dataset?.panelWall
-    if (panelWall && !panelEnd && p.tool === 'select') {
+    if (panelWall && !panelEnd && p.tool === 'select' && !p.placing) {
       p.onSelectWall?.(panelWall, event.shiftKey)
+      gesture.current = { kind: 'wall-slide', id: panelWall, startX: world.x, startZ: world.z, dx: 0, dz: 0, started: false }
       return
     }
-    if (panelEnd && panelWall && p.tool === 'select') {
+    if (panelEnd && panelWall && p.tool === 'select' && !p.placing) {
+      const wall = (p.walls || []).find((item) => item.id === panelWall)
       p.onSelectWall?.(panelWall, event.shiftKey)
-      gesture.current = { kind: 'panel-end', id: panelWall, end: panelEnd }
+      gesture.current = { kind: 'panel-end', id: panelWall, end: panelEnd, from: wall?.[panelEnd] || null }
       return
+    }
+    if (!panelWall && !panelEnd && p.tool === 'select' && !p.placing && !handle && !hitEquipment(p.rooms, world.x, world.z)) {
+      const near = nearestWall(p.walls, world, Math.max(0.16, 14 / view.scale))
+      if (near) {
+        p.onSelectWall?.(near.wall.id, event.shiftKey)
+        gesture.current = { kind: 'wall-slide', id: near.wall.id, startX: world.x, startZ: world.z, dx: 0, dz: 0, started: false }
+        return
+      }
     }
     if (!touchHand && (p.tool === 'draw' || p.tool === 'polygon' || p.tool === 'partition')) {
       if (p.tool === 'draw' && p.roomShape !== 'free') {
         const corner = chainRef.current?.corner || null
-        const point = rectangleCursor(world, corner, p.walls, view.scale, polyTyped.current)
-        polyTyped.current = ''
+        const point = rectangleCursor(world, corner, p.walls, view.scale, polyTyped.current, {
+          grid: p.snapOn ? p.gridSize : 0,
+        })
         if (!corner) {
-          chainRef.current = { corner: point }
+          chainRef.current = { corner: point, sx: event.clientX, sy: event.clientY }
           setDraft({ kind: 'rect', x1: point.x, z1: point.z, x2: point.x, z2: point.z })
+          p.onDrawActive?.(true)
           return
         }
         p.onCommitRectangle?.(corner, point)
         chainRef.current = null
+        polyTyped.current = ''
+        setLiveTyped('')
         setDraft(null)
+        p.onDrawActive?.(false)
         return
       }
       const typedNow = polyTyped.current
@@ -1292,13 +1372,19 @@ export default function PlanView({
       return
     }
     if (!touchHand && p.placing) {
-      let room = hitRoom(p.rooms, world.x, world.z)
+      const ghost = p.placing.category === 'door'
+        ? doorPlacement(p.rooms, p.walls, world, p.placing.width)
+        : p.placing.category === 'evaporator'
+          ? evaporatorPlacement(p.rooms, p.walls, world, p.placing)
+          : null
+      const at = ghost ? { x: ghost.worldX, z: ghost.worldZ } : world
+      let room = ghost?.roomId ? p.rooms.find((item) => item.id === ghost.roomId) : hitRoom(p.rooms, at.x, at.z)
       const outdoor = ['condenser', 'unit', 'combo', 'compressor'].includes(p.placing.category)
       if (!room && outdoor) {
-        room = [...p.rooms].sort((a, b) => Math.hypot(a.x - world.x, a.z - world.z) - Math.hypot(b.x - world.x, b.z - world.z))[0]
+        room = [...p.rooms].sort((a, b) => Math.hypot(a.x - at.x, a.z - at.z) - Math.hypot(b.x - at.x, b.z - at.z))[0]
       }
       if (room) {
-        p.onPlace(room.id, world.x, world.z, { at: Date.now(), px: event.clientX, py: event.clientY, shift: event.shiftKey })
+        p.onPlace(room.id, at.x, at.z, { at: Date.now(), px: event.clientX, py: event.clientY, shift: event.shiftKey, placement: ghost })
       }
       return
     }
@@ -1564,10 +1650,17 @@ export default function PlanView({
     }
   }
   const bar = scaleBarMetres(view.scale)
-  const wallFaces = useMemo(
-    () => wallFigures(walls || [], [], (wall) => wall.thickness || 0.1),
-    [walls],
-  )
+  const displayWalls = (walls || []).map((wall) => {
+    if (!endpointDrag?.from || !endpointDrag.to) return wall
+    const near = (point) => Math.hypot((point?.x || 0) - endpointDrag.from.x, (point?.z || 0) - endpointDrag.from.z) <= 0.03
+    if (!near(wall.a) && !near(wall.b)) return wall
+    return {
+      ...wall,
+      a: near(wall.a) ? endpointDrag.to : wall.a,
+      b: near(wall.b) ? endpointDrag.to : wall.b,
+    }
+  })
+  const wallFaces = wallFigures(displayWalls, [], (wall) => wall.thickness || 0.1)
   const dimLayout = useMemo(
     () => layoutColdInnerDims(
       coldDimensionFigures({ walls: walls || [] }, rooms, 22 / Math.max(view.scale, 6)),
@@ -1580,18 +1673,24 @@ export default function PlanView({
   const dimPlan = useMemo(() => ({ walls: walls || [] }), [walls])
   const selected = new Set(selectedIds)
   const drawing = tool === 'draw' || tool === 'polygon' || tool === 'partition' || isRouteTool(tool)
-  const hint = tool === 'pipe'
-    ? t('designer.pipeHint')
-    : tool === 'cable'
-      ? t('designer.cableHint')
-      : tool === 'polygon' || tool === 'partition'
-        ? t('cold.chainHint')
-        : tool === 'draw'
-          ? (roomShape === 'free' ? t('cold.freeHint') : t('cold.drawHint'))
-          : t('designer.selectHint')
+  const hint = placing?.category === 'door'
+    ? t('cold.doorHint')
+    : placing?.category === 'evaporator'
+      ? t('cold.evapHint')
+      : placing
+        ? t('cold.placeHint')
+        : tool === 'pipe'
+          ? t('designer.pipeHint')
+          : tool === 'cable'
+            ? t('designer.cableHint')
+            : tool === 'polygon' || tool === 'partition'
+              ? t('cold.chainHint')
+              : tool === 'draw'
+                ? (roomShape === 'free' ? t('cold.freeHint') : t('cold.drawHint'))
+                : t('cold.selectHint')
   const grips = []
   const gripSeen = new Set()
-  ;(walls || []).forEach((wall) => {
+  displayWalls.forEach((wall) => {
     ;['a', 'b'].forEach((end) => {
       const point = wall[end]
       if (!point) return
@@ -1672,7 +1771,7 @@ export default function PlanView({
               style={{ pointerEvents: 'none' }}
             />
           ))}
-          {(walls || []).map((wall) => (
+          {displayWalls.map((wall) => (
             <line
               key={`hit-${wall.id}`}
               data-testid={`panel-wall-${wall.id}`}
@@ -2003,7 +2102,7 @@ export default function PlanView({
               dim={item.dim}
               witnesses={item.witnesses}
               scale={view.scale}
-              onEdit={tool === 'select' && wallForDimension(dimPlan, item.dim) ? (dim, event) => {
+              onEdit={tool === 'select' && !placing && wallForDimension(dimPlan, item.dim) ? (dim, event) => {
                 const host = hostRef.current
                 const frame = host?.getBoundingClientRect()
                 const width = 96
@@ -2016,7 +2115,8 @@ export default function PlanView({
                   x = Math.min(Math.max(8, x), Math.max(8, frame.width - width - 8))
                   y = Math.min(Math.max(8, y), Math.max(8, frame.height - height - 8))
                 }
-                setDimEdit({ dim, value: String(dim.label || ''), x, y })
+                const choice = dimensionMoveChoice(dimPlan, dim)
+                setDimEdit({ dim, value: String(dim.label || ''), x, y, side: 'outer', shared: choice.shared })
               } : null}
             />
           ))}
@@ -2032,28 +2132,32 @@ export default function PlanView({
                 strokeWidth={1.4 / view.scale}
                 strokeDasharray={`${6 / view.scale} ${4 / view.scale}`}
               />
-              {draftWidth >= 0.05 && draftDepth >= 0.05 && (
-                <g data-testid="rect-size" data-label={`${Math.round(draftWidth * 1000)} × ${Math.round(draftDepth * 1000)}`} transform={`translate(${rectDraft.x2} ${rectDraft.z2}) scale(${1 / view.scale})`} style={{ pointerEvents: 'none' }}>
-                  <rect x={14} y={-30} width={Math.max(86, `${Math.round(draftWidth * 1000)} × ${Math.round(draftDepth * 1000)}`.length * 7.4)} height={22} rx={4} fill="#fff" stroke="#0f766e" />
-                  <text x={20} y={-15} fontSize={12} fontWeight={700} fill="#0f766e" fontFamily="ui-sans-serif, system-ui, sans-serif">{Math.round(draftWidth * 1000)} × {Math.round(draftDepth * 1000)}</text>
+              {(liveTyped || (draftWidth >= 0.05 && draftDepth >= 0.05)) && (
+                <g data-testid="rect-size" data-label={liveTyped ? `${liveTyped}_` : `${Math.round(draftWidth * 1000)} × ${Math.round(draftDepth * 1000)}`} transform={`translate(${rectDraft.x2} ${rectDraft.z2}) scale(${1 / view.scale})`} style={{ pointerEvents: 'none' }}>
+                  <rect x={14} y={-30} width={Math.max(118, `${liveTyped || `${Math.round(draftWidth * 1000)} × ${Math.round(draftDepth * 1000)}`}`.length * 7.6)} height={22} rx={4} fill="#fff" stroke="#0f766e" />
+                  <text x={20} y={-15} fontSize={12} fontWeight={700} fill="#0f766e" fontFamily="ui-sans-serif, system-ui, sans-serif">{liveTyped ? `${liveTyped}_` : `${Math.round(draftWidth * 1000)} × ${Math.round(draftDepth * 1000)} ${sizeBasis === 'outer' ? t('cold.measure.outer') : t('cold.measure.inner')}`}</text>
                 </g>
               )}
-              <DimLine
-                x1={Math.min(rectDraft.x1, rectDraft.x2)}
-                z1={Math.min(rectDraft.z1, rectDraft.z2) - 0.35}
-                x2={Math.max(rectDraft.x1, rectDraft.x2)}
-                z2={Math.min(rectDraft.z1, rectDraft.z2) - 0.35}
-                scale={view.scale}
-                text={formatLength(draftWidth, unitSystem)}
-              />
-              <DimLine
-                x1={Math.min(rectDraft.x1, rectDraft.x2) - 0.35}
-                z1={Math.min(rectDraft.z1, rectDraft.z2)}
-                x2={Math.min(rectDraft.x1, rectDraft.x2) - 0.35}
-                z2={Math.max(rectDraft.z1, rectDraft.z2)}
-                scale={view.scale}
-                text={formatLength(draftDepth, unitSystem)}
-              />
+              {draftWidth >= 0.05 && draftDepth >= 0.05 && !liveTyped && (
+                <DimLine
+                  x1={Math.min(rectDraft.x1, rectDraft.x2)}
+                  z1={Math.min(rectDraft.z1, rectDraft.z2) - 0.35}
+                  x2={Math.max(rectDraft.x1, rectDraft.x2)}
+                  z2={Math.min(rectDraft.z1, rectDraft.z2) - 0.35}
+                  scale={view.scale}
+                  text={formatLength(draftWidth, unitSystem)}
+                />
+              )}
+              {draftWidth >= 0.05 && draftDepth >= 0.05 && !liveTyped && (
+                <DimLine
+                  x1={Math.min(rectDraft.x1, rectDraft.x2) - 0.35}
+                  z1={Math.min(rectDraft.z1, rectDraft.z2)}
+                  x2={Math.min(rectDraft.x1, rectDraft.x2) - 0.35}
+                  z2={Math.max(rectDraft.z1, rectDraft.z2)}
+                  scale={view.scale}
+                  text={formatLength(draftDepth, unitSystem)}
+                />
+              )}
             </g>
           )}
           {poly.length > 0 && (
@@ -2093,7 +2197,7 @@ export default function PlanView({
               strokeDasharray={draft.mode === 'crossing' ? `${7 / view.scale} ${4 / view.scale}` : undefined}
             />
           )}
-          {placing && cursor && (
+          {placing && cursor && !placeGhost && (
             <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${cursor.x} ${cursor.z})`}>
               <rect
                 x={-(placing.width || 0.6) / 2}
@@ -2107,12 +2211,19 @@ export default function PlanView({
               />
             </g>
           )}
+          {placeGhost && placing?.category === 'door' && (
+            <g data-testid="place-ghost" data-wall={placeGhost.wall} style={{ pointerEvents: 'none' }}>
+              <DoorGlyph room={{ x: 0, z: 0 }} eq={{ ...placing, ...placeGhost, x: placeGhost.worldX, z: placeGhost.worldZ, opensOut: true }} scale={view.scale} />
+            </g>
+          )}
+          {placeGhost && placing?.category === 'evaporator' && (
+            <g data-testid="place-ghost" style={{ pointerEvents: 'none' }} transform={`translate(${placeGhost.worldX} ${placeGhost.worldZ}) rotate(${placeGhost.rotation || 0})`}>
+              <EquipmentMark eq={{ ...placing, category: 'evaporator' }} scale={view.scale} />
+            </g>
+          )}
           {cursor?.kind && (
             <g>
               <circle cx={cursor.x} cy={cursor.z} r={6 / view.scale} fill="none" stroke={TEAL} strokeWidth={1.5 / view.scale} />
-              <text x={cursor.x + 10 / view.scale} y={cursor.z - 8 / view.scale} fill={TEAL} fontSize={11 / view.scale} fontWeight="700">
-                {snapLabel(cursor.kind)}
-              </text>
             </g>
           )}
         </g>
@@ -2124,27 +2235,57 @@ export default function PlanView({
         )}
       </svg>
       {dimEdit && (
-        <input
-          data-testid="wall-length-edit"
-          autoFocus
-          inputMode="decimal"
-          value={dimEdit.value}
-          onFocus={(event) => event.target.select()}
-          onChange={(event) => setDimEdit((current) => (current ? { ...current, value: event.target.value } : current))}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              const mm = Number(String(dimEdit.value).replace(',', '.'))
-              if (Number.isFinite(mm) && mm >= 50) propsRef.current.onEditDimension?.(dimEdit.dim, mm)
-              setDimEdit(null)
-            } else if (event.key === 'Escape') {
-              event.preventDefault()
-              setDimEdit(null)
-            }
-          }}
+        <div
+          data-testid="dim-editor"
           onPointerDown={(event) => event.stopPropagation()}
-          style={{ position: 'absolute', left: dimEdit.x, top: dimEdit.y, zIndex: 30, width: 96, height: 32, padding: '2px 8px', fontSize: 16, fontWeight: 700, color: '#134e4a', background: '#fff', border: '2px solid #0f766e', borderRadius: 6, boxShadow: '0 8px 18px rgba(28,25,23,0.18)' }}
-        />
+          onMouseDown={(event) => event.stopPropagation()}
+          style={{ position: 'absolute', left: dimEdit.x, top: dimEdit.y, zIndex: 30, width: dimEdit.shared ? 210 : 112, padding: 8, background: '#fff', border: '2px solid #0f766e', borderRadius: 8, boxShadow: '0 8px 18px rgba(28,25,23,0.18)' }}
+        >
+          <input
+            data-testid="wall-length-edit"
+            autoFocus
+            inputMode="decimal"
+            value={dimEdit.value}
+            onFocus={(event) => event.target.select()}
+            onChange={(event) => setDimEdit((current) => (current ? { ...current, value: event.target.value } : current))}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                const mm = Number(String(dimEdit.value).replace(',', '.'))
+                if (Number.isFinite(mm) && mm >= 50) propsRef.current.onEditDimension?.(dimEdit.dim, mm, dimEdit.side || 'outer')
+                setDimEdit(null)
+              } else if (event.key === 'Escape') {
+                event.preventDefault()
+                event.stopPropagation()
+                setDimEdit(null)
+              }
+            }}
+            style={{ width: '100%', height: 32, padding: '2px 8px', fontSize: 16, fontWeight: 700, color: '#134e4a', background: '#fff', border: '1px solid #99f6e4', borderRadius: 6 }}
+          />
+          {dimEdit.shared && (
+            <div data-testid="dim-side" style={{ marginTop: 6, fontSize: 12, color: '#134e4a' }}>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>{t('cold.dimSide')}</div>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="radio" name="dim-side" checked={dimEdit.side !== 'shared'} onChange={() => setDimEdit((current) => (current ? { ...current, side: 'outer' } : current))} />
+                {t('cold.dimOuter')}
+              </label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="radio" name="dim-side" checked={dimEdit.side === 'shared'} onChange={() => setDimEdit((current) => (current ? { ...current, side: 'shared' } : current))} />
+                {t('cold.dimShared')}
+              </label>
+            </div>
+          )}
+        </div>
+      )}
+      {liveTyped && cursor && !rectDraft && (
+        <div data-testid="rect-size" data-label={`${liveTyped}_`} style={{ position: 'absolute', left: Math.min(cursor.px + 14, Math.max(8, size.w - 140)), top: Math.max(8, cursor.py - 28), zIndex: 5, padding: '2px 8px', background: '#fff', border: '1px solid #0f766e', borderRadius: 6, color: '#0f766e', fontSize: 12, fontWeight: 700, pointerEvents: 'none' }}>
+          {liveTyped}_
+        </div>
+      )}
+      {cursor?.kind && (
+        <div data-testid="snap-label" style={{ position: 'absolute', left: Math.min(Math.max(8, cursor.px + 12), Math.max(8, size.w - 110)), top: cursor.py < 28 ? cursor.py + 12 : cursor.py - 22, zIndex: 5, color: '#0f766e', fontSize: 12, fontWeight: 700, pointerEvents: 'none', background: 'rgba(255,255,255,0.92)', padding: '0 4px', borderRadius: 4 }}>
+          {snapLabel(cursor.kind)}
+        </div>
       )}
       <div style={{ position: 'absolute', left: 14, top: 12, display: 'flex', gap: 8, alignItems: 'center', pointerEvents: 'none' }}>
         <div style={{ width: 22, height: 22, border: '1.5px solid #44403c', borderRadius: 11, position: 'relative' }}>

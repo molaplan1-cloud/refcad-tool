@@ -261,10 +261,10 @@ export default function HeatLoadPanel({
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
           <div style={{ fontSize: 10, letterSpacing: 0.8, color: '#78716c', fontWeight: 700 }}>{t('designer.whole')}</div>
-          <div style={{ fontSize: 11, color: '#0f766e' }}>{result.suggestedEvap.count} × {result.suggestedEvap.template.name}</div>
+          <div data-testid="site-suggest" style={{ fontSize: 11, color: '#0f766e', textAlign: 'right' }}>{t('cold.suggest')}: {result.rooms.map((item) => `${item.label} ${item.suggestedEvap.count} × ${item.suggestedEvap.template.name}`).join(' · ') || '—'}</div>
         </div>
-        <div style={{ fontSize: 26, fontWeight: 750, color: '#1c1917', lineHeight: 1.05, letterSpacing: -0.4, marginTop: 2 }}>
-          {formatKw(result.total)}
+        <div data-testid="site-placed" style={{ fontSize: 26, fontWeight: 750, color: '#1c1917', lineHeight: 1.05, letterSpacing: -0.4, marginTop: 2 }}>
+          {placedEvaporators(rooms).length ? formatKw(placedEvaporators(rooms).reduce((sum, eq) => sum + (eq.capacityKw || 0), 0) * 1000) : t('cold.noEvap')}
         </div>
         <div style={{ fontSize: 11, color: '#78716c', marginTop: 2 }}>
           {Math.round(result.total).toLocaleString('fi-FI')} W · {formatPower(result.total, 'IP')}
@@ -285,7 +285,7 @@ export default function HeatLoadPanel({
           }}>
             <div>
               <div style={{ fontSize: 11, color: '#115e59', fontWeight: 700 }}>{room.label} yhteensä</div>
-              <div style={{ fontSize: 10, color: '#0f766e' }}>× {roomResult.safetyFactor.toFixed(2)} · {roomResult.suggestedEvap.count} × {roomResult.suggestedEvap.template.name}</div>
+              <div data-testid="room-suggest" style={{ fontSize: 10, color: '#0f766e' }}>{t('cold.suggest')}: {roomResult.suggestedEvap.count} × {roomResult.suggestedEvap.template.name}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 16, fontWeight: 750, color: '#134e4a' }}>{formatKw(roomResult.total)}</div>
@@ -513,7 +513,12 @@ export default function HeatLoadPanel({
   )
 }
 
+function placedEvaporators(rooms) {
+  return (rooms || []).flatMap((room) => (room.equipment || []).filter((eq) => eq.category === 'evaporator'))
+}
+
 function CapacityBlock({ room, roomResult }) {
+  const { t } = useLocale()
   const selectedKw = (room.equipment || [])
     .filter((eq) => eq.category === 'evaporator')
     .reduce((sum, eq) => sum + (eq.capacityKw || 0), 0)
@@ -537,9 +542,7 @@ function CapacityBlock({ room, roomResult }) {
     <div data-testid="capacity-check" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: '#fff', border: '1px solid #e7e5e4' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: tone, lineHeight: 1.4 }}>{text}</div>
       <div style={{ fontSize: 10, color: '#57534e', marginTop: 4, lineHeight: 1.45 }}>
-        Ehdotus: {pack.evap?.name || '—'}
-        {pack.slant ? `, viisto ${pack.slant.name}` : ''}
-        {pack.combo ? `, ${pack.combo.name}` : ''}
+        {t('cold.suggest')}: {roomResult.suggestedEvap.count} × {roomResult.suggestedEvap.template.name}
         {`. ${pack.suction.label}. ${pack.liquid.label}.`}
       </div>
     </div>

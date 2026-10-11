@@ -12,6 +12,7 @@ import PlanView from './PlanView'
 import HeatLoadPanel, { DutyTypeSelect } from './HeatLoadPanel'
 import { TEMPLATES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
 import { PANEL_MM, commitPanel, emptyPanelPlan, extendPanel, joinPanelCorner, roomsFromPanels, setPanelEnd, snapDoorToPanel } from '@/lib/coldPanels'
+import { fitAgainstRooms, resizeRoomSpan, slideWallBy } from '@/lib/coldEdit'
 import { applyUnitChoice, assignRooms, groupUnits } from '@/lib/coldUnits'
 import { formatDeviceLink, isColdDevice, removalPrompt } from '@/lib/coldDevices'
 import { LibraryDialog, ProjectInfoDialog, ProjectSettingsDialog } from '@/components/floorplan/ProjectDialogs'
@@ -19,8 +20,8 @@ import ColdChrome from './ColdChrome'
 import { stampDemoWatermark } from '@/lib/watermark'
 import { applyProjectType } from '@/lib/projectMode'
 import { CURRENT_KEY } from '@/lib/projects'
-import { emptyPlan, resizeDimension, squareWalls, straightenWalls } from '@/lib/floorplan'
-import { closeWallChain, commitRectangle, stepWallChain } from '@/lib/wallDraw'
+import { deleteWall, emptyPlan, squareWalls, straightenWalls } from '@/lib/floorplan'
+import { centerlineFromMeasure, closeWallChain, commitRectangle, stepWallChain } from '@/lib/wallDraw'
 import { placeUnderlay } from '@/lib/underlay'
 import { readUnderlayFile, renderPdfPage } from '@/lib/underlayFile'
 import {
@@ -194,6 +195,20 @@ function TemplateThumb({ item }) {
   )
 }
 
+function roomMeasure(room) {
+  const points = room?.outline || []
+  if (points.length >= 3) {
+    const box = points.reduce((acc, point) => ({
+      minX: Math.min(acc.minX, point.x),
+      maxX: Math.max(acc.maxX, point.x),
+      minZ: Math.min(acc.minZ, point.z),
+      maxZ: Math.max(acc.maxZ, point.z),
+    }), { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity })
+    return `${Math.round((box.maxX - box.minX) * 1000)}×${Math.round((box.maxZ - box.minZ) * 1000)}`
+  }
+  return `${Math.round((room?.width || 0) * 1000)}×${Math.round((room?.depth || 0) * 1000)}`
+}
+
 function UnitBoard({ t, rooms, result, diversity, onDiversity, onAssign, onPick }) {
   const board = groupUnits(rooms, result, { diversity })
   const machines = board.groups.filter((group) => group.machine)
@@ -225,10 +240,13 @@ function UnitBoard({ t, rooms, result, diversity, onDiversity, onAssign, onPick 
             <div key={room.id} data-testid={`unit-room-${room.id}`} style={{ marginTop: 4 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <span>{room.label} {room.name} · {room.kw.toFixed(2)} kW · {t('cold.evap')} {room.evapKw.toFixed(2)} kW</span>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#57534e' }}>
+                  {t('cold.assign')}:
                 <select data-testid={`unit-assign-${room.id}`} aria-label={t('cold.assign')} value={full?.unitId || ''} onChange={(event) => onAssign(room.id, event.target.value || null)} style={{ maxWidth: 140, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }}>
                   <option value="">{t('cold.unassigned')}</option>
                   {machines.map((item) => <option key={item.id} value={item.id}>{item.machine.name}</option>)}
                 </select>
+                </label>
               </div>
               {linked.map((eq) => (
                 <div key={eq.id} data-testid={`device-link-${eq.id}`} style={{ fontSize: 11, color: '#44403c', marginTop: 2 }}>{formatDeviceLink(t, full, eq, rooms)}</div>
@@ -308,6 +326,10 @@ export default function DesignerApp({
   const [rails, setRails] = useState(() => ({ ...readPanels(null), editBar: false }))
   const [innerDims, setInnerDims] = useState(true)
   const [roomShape, setRoomShape] = useState('rect')
+  const [sizeBasis, setSizeBasis] = useState('inner')
+  const [drawActive, setDrawActive] = useState(false)
+  const sizeBasisRef = useRef('inner')
+  sizeBasisRef.current = sizeBasis
   const railsOwner = useRef('local')
   useEffect(() => {
     const id = user?.id || 'local'
@@ -337,6 +359,7 @@ export default function DesignerApp({
   const roomsRef = useRef(rooms)
   const panelRef = useRef(panelPlan)
   const panelMmRef = useRef(panelMm)
+  const slideBase = useRef(null)
   const drawTypeRef = useRef('chilled')
   const pipesRef = useRef(pipes)
   const cablesRef = useRef(cables)
@@ -562,9 +585,31 @@ export default function DesignerApp({
     return () => clearTimeout(timer)
   }, [name, rooms, panelPlan, unitSystem, pipes, cables, schematic, onPersist])
 
+  function deleteSelectedWalls() {
+    const ids = selectedWalls
+    if (!ids.length) return
+    let next = panelRef.current
+    let removed = false
+    ids.forEach((id) => {
+      if (!(next.walls || []).some((wall) => wall.id === id)) return
+      next = deleteWall(next, id)
+      removed = true
+    })
+    if (!removed) {
+      setNotice(t('cold.wallMissing'))
+      return
+    }
+    pushUndo()
+    syncPanels(next)
+    setSelectedWalls([])
+  }
+
   function deleteSelected() {
     const ids = selectedRef.current
-    if (!ids.length) return
+    if (!ids.length) {
+      deleteSelectedWalls()
+      return
+    }
     const current = roomsRef.current
     const prompt = removalPrompt(current, ids, t)
     if (prompt && !window.confirm(prompt)) return
@@ -627,11 +672,27 @@ export default function DesignerApp({
     }
   }
 
-  function onEditDimension(dim, mm) {
-    const next = resizeDimension(panelRef.current, dim, mm / 1000)
+  function onEditDimension(dim, mm, side = 'outer') {
+    const next = resizeRoomSpan(panelRef.current, dim, mm / 1000, side === 'shared' ? 'shared' : 'outer')
     if (!next || next === panelRef.current) return
     pushUndo()
     syncPanels(next)
+  }
+
+  function onSlideWall(id, dx, dz, phase) {
+    if (phase === 'start') {
+      pushUndo()
+      slideBase.current = panelRef.current
+      return
+    }
+    if (phase === 'end') {
+      slideBase.current = null
+      return
+    }
+    const base = slideBase.current || panelRef.current
+    const moved = slideWallBy(base, id, dx, dz)
+    if (!moved || moved === base) return
+    syncPanels({ ...moved, panelMm: panelMmRef.current, projectType: 'kylmio', buildingType: 'kylmio' })
   }
 
   function onChainStep(chain, point, options = {}) {
@@ -648,13 +709,26 @@ export default function DesignerApp({
   }
 
   function onCommitRectangle(corner, opposite) {
-    const next = commitRectangle(panelRef.current, corner, opposite, panelDrawOptions())
+    const thickness = (Number(panelMmRef.current) || 100) / 1000
+    const basis = sizeBasisRef.current === 'outer' ? 'outer' : 'inner'
+    const fitted = fitAgainstRooms(corner, opposite, roomsRef.current, { thickness, basis })
+    if (fitted.rejected) {
+      setNotice(t('cold.overlap'))
+      return
+    }
+    const line = centerlineFromMeasure(fitted.corner, fitted.opposite, thickness, basis)
+    if (!line) {
+      setNotice(t('designer.minRoom'))
+      return
+    }
+    const next = commitRectangle(panelRef.current, line.corner, line.opposite, panelDrawOptions())
     if (next === panelRef.current) {
       setNotice(t('designer.minRoom'))
       return
     }
     pushUndo()
     syncPanels({ ...next, panelMm: panelMmRef.current, projectType: 'kylmio', buildingType: 'kylmio' })
+    if (fitted.snapped) setNotice(t('cold.snapAbut'))
   }
 
   function onCreateRect(x1, z1, x2, z2) {
@@ -752,6 +826,18 @@ export default function DesignerApp({
       }
     }
     const eq = makeEquipment(placingId, room, placeX, placeZ, current)
+    if (stamp.placement && template?.category === 'door') {
+      eq.x = stamp.placement.x
+      eq.z = stamp.placement.z
+      eq.wall = stamp.placement.wall
+      eq.rotation = stamp.placement.rotation
+      eq.opensOut = true
+    }
+    if (stamp.placement && template?.category === 'evaporator') {
+      eq.x = stamp.placement.x
+      eq.z = stamp.placement.z
+      eq.rotation = stamp.placement.rotation
+    }
     if (eq.refused) {
       setNotice(t(eq.refused === 'need-door' ? 'cold.needDoor' : 'cold.needEvap'))
       return
@@ -1337,7 +1423,10 @@ export default function DesignerApp({
     snapOn,
     snapFlags,
     fitToken,
-    onSelect: setSelectedIds,
+    onSelect: (ids) => {
+      setSelectedIds(ids)
+      if (ids?.length) setSelectedWalls([])
+    },
     onPreview: setRooms,
     onGestureStart: pushUndo,
     onGestureEnd: () => {},
@@ -1350,16 +1439,23 @@ export default function DesignerApp({
     onChainStep,
     onCommitRectangle,
     onEditDimension,
+    onSlideWall,
+    onDrawActive: setDrawActive,
     innerDims,
     roomShape,
+    sizeBasis,
+    editEpoch: coldTab,
     onUndo: undo,
     zoomCommand,
     onScale: (scale) => setZoomPercent(Math.round((scale / 36) * 100)),
     underlay,
-    onSelectWall: (id, shift) => setSelectedWalls((current) => {
-      if (!shift) return [id]
-      return current.includes(id) ? current.filter((item) => item !== id) : [...current, id].slice(-2)
-    }),
+    onSelectWall: (id, shift) => {
+      setSelectedIds([])
+      setSelectedWalls((current) => {
+        if (!shift) return [id]
+        return current.includes(id) ? current.filter((item) => item !== id) : [...current, id].slice(-2)
+      })
+    },
     onCreateRoute,
     onPlace,
     onPreviewPipes: setPipes,
@@ -1425,6 +1521,7 @@ export default function DesignerApp({
   }
 
   const designName = placing?.name || (tool === 'draw' ? t('tool.room') : tool === 'polygon' ? t('cold.wall') : tool === 'partition' ? t('tool.interior') : tool === 'pipe' ? t('designer.pipe') : tool === 'cable' ? t('designer.cable') : null)
+  const selectedWall = selectedWalls.length === 1 ? (panelPlan.walls || []).find((wall) => wall.id === selectedWalls[0]) : null
   const designDrawing = Boolean(designName && !placing)
   const designLabel = modeChipText({ name: designName, repeat: repeatPlace && Boolean(placing), drawing: designDrawing })
 
@@ -1458,8 +1555,8 @@ export default function DesignerApp({
               <button type="button" data-testid="unit-si" aria-pressed={unitSystem === 'SI'} onClick={() => setUnitSystem('SI')} style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid #d6d3d1', background: unitSystem === 'SI' ? '#134e4a' : '#fff', color: unitSystem === 'SI' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>SI</button>
               <button type="button" data-testid="unit-ip" aria-pressed={unitSystem === 'IP'} onClick={() => setUnitSystem('IP')} style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid #d6d3d1', background: unitSystem === 'IP' ? '#134e4a' : '#fff', color: unitSystem === 'IP' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>IP</button>
             </div>
-            <button type="button" data-testid="grid-size" onClick={() => setGridSize((g) => (g === 0.1 ? 0.25 : g === 0.25 ? 0.5 : 0.1))} style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff', color: '#44403c', fontSize: 12, cursor: 'pointer' }}>
-              {t('designer.grid', { size: snapOn ? `${gridSize} m` : t('designer.gridOff') })}
+            <button type="button" data-testid="grid-size" onClick={() => setGridSize((g) => (g >= 0.1 ? 0.05 : g >= 0.05 ? 0.01 : 0.1))} style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff', color: '#44403c', fontSize: 12, cursor: 'pointer' }}>
+              {t('snap.snap')} {snapOn ? `${Math.round(gridSize * 1000)} mm` : t('designer.gridOff')}
             </button>
           </div>
         </ProjectSettingsDialog>
@@ -1544,6 +1641,9 @@ export default function DesignerApp({
           syncPanels(joinPanelCorner(panelRef.current, selectedWalls[0], selectedWalls[1]))
         }}
         zoomPercent={zoomPercent}
+        snapOn={snapOn}
+        gridSize={gridSize}
+        onCycleGrid={() => setGridSize((g) => (g >= 0.1 ? 0.05 : g >= 0.05 ? 0.01 : 0.1))}
         onZoomIn={() => setZoomCommand({ factor: 2, n: Date.now() })}
         onZoomOut={() => setZoomCommand({ factor: 0.5, n: Date.now() })}
         onZoom100={() => setZoomCommand({ percent: 100, n: Date.now() })}
@@ -1684,7 +1784,7 @@ export default function DesignerApp({
                     <span style={{ width: 8, height: 28, borderRadius: 2, background: room.color, flexShrink: 0 }} />
                     <span style={{ minWidth: 0 }}>
                       <strong style={{ fontSize: 12 }}>{room.label}</strong> <span style={{ fontSize: 12 }}>{room.name}</span>
-                      <div style={{ fontSize: 10, color: '#78716c' }}>{room.temp}°C · {room.width.toFixed(1)}×{room.depth.toFixed(1)} m{room.parentId ? ` · ${t('cold.partitionTag')}` : ''}</div>
+                      <div style={{ fontSize: 10, color: '#78716c' }}>{room.temp}°C · {roomMeasure(room)} {t('cold.measure.inner')}{room.parentId ? ` · ${t('cold.partitionTag')}` : ''}</div>
                     </span>
                   </div>
                 </button>
@@ -1697,7 +1797,7 @@ export default function DesignerApp({
           </button>
           {templatesOpen && (
             <div style={{ padding: '2px 8px 10px' }}>
-              <div style={{ fontSize: 11, color: '#78716c', margin: '2px 4px 8px', lineHeight: 1.4 }}>{t('designer.libraryHint')}</div>
+              {coldTab === 'cooling' && <div data-testid="library-hint" style={{ fontSize: 11, color: '#78716c', margin: '2px 4px 8px', lineHeight: 1.4 }}>{t('designer.libraryHint')}</div>}
               {roomResult && (
                 <div data-testid="capacity-banner" style={{ margin: '0 4px 8px', padding: '8px 8px', borderRadius: 8, background: '#f0fdfa', border: '1px solid #99f6e4', fontSize: 11, color: '#115e59', lineHeight: 1.4 }}>
                   <strong>{t('cold.capacity', { kw: roomResult.total / 1000 < 10 ? (roomResult.total / 1000).toFixed(2) : (roomResult.total / 1000).toFixed(1) })}</strong>
@@ -1796,7 +1896,7 @@ export default function DesignerApp({
               <div style={{ fontSize: 10, color: '#78716c', marginTop: 4, lineHeight: 1.35 }}>{INTERNAL_LIQUID_TRAIN}</div>
             </div>
           )}
-          {rooms.length === 0 && view !== '3d' && view !== 'schematic' && (
+          {rooms.length === 0 && !drawActive && view !== '3d' && view !== 'schematic' && (
             <div style={{
               position: 'absolute', left: 0, right: 0, top: 72, textAlign: 'center', pointerEvents: 'none',
             }}>
@@ -1853,6 +1953,15 @@ export default function DesignerApp({
                 </label>
               )}
               {tool === 'draw' && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 650 }}>{t('cold.measure.inner')} / {t('cold.measure.outer')}</div>
+                  <div data-testid="size-basis" style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                    <button type="button" data-testid="basis-inner" aria-pressed={sizeBasis !== 'outer'} onClick={() => setSizeBasis('inner')} style={{ flex: 1, height: 32, borderRadius: 6, border: '1px solid #d6d3d1', background: sizeBasis !== 'outer' ? '#134e4a' : '#fff', color: sizeBasis !== 'outer' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>{t('cold.measure.inner')}</button>
+                    <button type="button" data-testid="basis-outer" aria-pressed={sizeBasis === 'outer'} onClick={() => setSizeBasis('outer')} style={{ flex: 1, height: 32, borderRadius: 6, border: '1px solid #d6d3d1', background: sizeBasis === 'outer' ? '#134e4a' : '#fff', color: sizeBasis === 'outer' ? '#ecfdf5' : '#1c1917', fontWeight: 700, cursor: 'pointer' }}>{t('cold.measure.outer')}</button>
+                  </div>
+                </div>
+              )}
+              {tool === 'draw' && (
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginTop: 8 }}>
                   {t('cold.shape')}
                   <select data-testid="room-shape" aria-label={t('cold.shape')} value={roomShape} onChange={(event) => setRoomShape(event.target.value === 'free' ? 'free' : 'rect')} style={{ display: 'block', width: '100%', marginTop: 4, height: 32, borderRadius: 6, border: '1px solid #d6d3d1' }}>
@@ -1896,6 +2005,44 @@ export default function DesignerApp({
                   )}
                 </div>
               )}
+            </div>
+          )}
+          {selectedWall && (
+            <div data-testid="wall-properties" style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
+              <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 8 }}>{t('cold.wall')}</div>
+              <div style={{ fontSize: 12, color: '#44403c' }}>{t('wall.length')}: {Math.round(Math.hypot(selectedWall.b.x - selectedWall.a.x, selectedWall.b.z - selectedWall.a.z) * 1000)}</div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginTop: 8 }}>
+                {t('cold.panelThickness')}
+                <select data-testid="wall-thickness" aria-label={t('cold.panelThickness')} value={String(Math.round((selectedWall.thickness || 0.1) * 1000))} onChange={(event) => {
+                  const mm = Number(event.target.value)
+                  pushUndo()
+                  const walls = (panelRef.current.walls || []).map((wall) => wall.id === selectedWall.id ? { ...wall, thickness: mm / 1000, thicknessCustom: true } : wall)
+                  syncPanels({ ...panelRef.current, walls, panelMm: mm })
+                }} style={{ display: 'block', width: '100%', marginTop: 4, height: 32, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                  {PANEL_MM.map((mm) => <option key={mm} value={mm}>{mm} mm</option>)}
+                </select>
+              </label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginTop: 8 }}>
+                {t('wall.kind')}
+                <select data-testid="wall-kind" aria-label={t('wall.kind')} value={selectedWall.kind === 'interior' ? 'interior' : 'panel'} onChange={(event) => {
+                  const kind = event.target.value === 'interior' ? 'interior' : 'panel'
+                  pushUndo()
+                  const walls = (panelRef.current.walls || []).map((wall) => wall.id === selectedWall.id ? { ...wall, kind, panel: kind === 'panel' } : wall)
+                  syncPanels({ ...panelRef.current, walls })
+                }} style={{ display: 'block', width: '100%', marginTop: 4, height: 32, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                  <option value="panel">{t('cold.wallPanel')}</option>
+                  <option value="interior">{t('tool.interior')}</option>
+                </select>
+              </label>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button type="button" data-testid="wall-straighten" onClick={() => {
+                  const next = straightenWalls(panelRef.current, 2)
+                  if (next === panelRef.current) return
+                  pushUndo()
+                  syncPanels(next)
+                }} style={{ flex: 1, height: 32, borderRadius: 6, border: '1px solid #d6d3d1', background: '#fff', cursor: 'pointer', fontWeight: 700 }}>{t('edit.straighten')}</button>
+                <button type="button" data-testid="wall-delete" onClick={deleteSelectedWalls} style={{ flex: 1, height: 32, borderRadius: 6, border: '1px solid rgba(220,38,38,0.45)', background: '#fef2f2', color: '#991b1b', cursor: 'pointer', fontWeight: 700 }}>{t('cold.wallDelete')}</button>
+              </div>
             </div>
           )}
           <UnitBoard
