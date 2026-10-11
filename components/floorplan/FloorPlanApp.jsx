@@ -207,14 +207,16 @@ import {
   exportPlanJson,
   importPlanJson,
   loadLibrary,
+  newProjectId,
   projectById,
   renameProject,
   saveProject,
   shellPlan,
 } from '@/lib/projects'
 import { registerDrawingFlush } from '@/lib/staleDeploy'
-import { shouldCloseChain, snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
-import { alignForReference, drawStepText, lockOrthoPoint, parseDrawFields, pointFromDraw } from '@/lib/drawInput'
+import { snapAlongWall, snapFixturePoint, snapPoint, snapRadius, wallHeadings } from '@/lib/snap'
+import { alignForReference, drawStepText, parseDrawFields, pointFromDraw } from '@/lib/drawInput'
+import { chainTarget } from '@/lib/wallDraw'
 import { dropDegenerateWalls, guidesAllowed, visibleSnap } from '@/lib/guides'
 import {
   applyTemporaryDimension,
@@ -2335,10 +2337,9 @@ export default function FloorPlanApp() {
 
   commitWallRef.current = (start, end) => {
     const chain = chainRef.current || (chainStart ? { start: chainStart, count: 0 } : null)
-    const locked = lockOrthoPoint(start, end, 2)
-    const closing = shouldCloseChain(chain, end) || shouldCloseChain(chain, locked)
-    const target = closing ? chain.start : locked
-    if (!start || !target || segmentLength(start, target) < 0.02) {
+    const step = chainTarget(chain, start, end)
+    const { closing, target } = step
+    if (step.skip) {
       clearGuides()
       if (closing) {
         chainRef.current = null
@@ -3644,6 +3645,18 @@ export default function FloorPlanApp() {
         onFamily={loadFamily}
         onProjectInfo={() => setInfoOpen(true)}
         onImportUnderlay={() => underlayFileRef.current?.click()}
+        onSave={storeCurrent}
+        onSaveAs={() => {
+          const name = window.prompt(t('file.saveAs'), plan.name || '')
+          if (!name) return
+          const next = { ...plan, name, projectId: newProjectId() }
+          setPlan(next)
+          setLibrary((current) => saveProject(current, next))
+        }}
+        recent={(library.projects || []).map((item) => ({ id: item.id, name: item.name }))}
+        onRecent={openStored}
+        onExport={exportPdf}
+        onPrint={() => window.print()}
         onCloseRoom={() => closeRoom(poly)}
         onYardTool={(id) => {
           if (!id || id === yardTool) { exitToSelect(); return }

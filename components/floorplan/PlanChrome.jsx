@@ -12,6 +12,7 @@ import { LanguageSwitch } from '@/components/i18n/Locale'
 import { zoomPercent } from '@/lib/zoom'
 import { CadToolbar, EditCommandItems } from './CadTools'
 import { YARD_DRAW_TOOLS } from './YardLayer'
+import { FileMenuItems } from '../chrome/FileMenuItems'
 
 const rib = (active) => ({
   height: 28,
@@ -173,6 +174,12 @@ export function PlanChrome({
   access = null,
   onProjectInfo,
   onImportUnderlay,
+  onSave,
+  onSaveAs,
+  recent = [],
+  onRecent,
+  onExport,
+  onPrint,
   compact = false,
   toolsOpen = false,
   onToggleTools,
@@ -273,13 +280,29 @@ export function PlanChrome({
   const menus = (dock) => (
     <>
       <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen} dock={dock}>
-        <button type="button" data-testid="plan-new" style={menuItem(false)} onClick={() => { close(); onNew() }}>{t('file.new')}</button>
-        <button type="button" data-testid="plan-open" style={menuItem(false)} onClick={() => { close(); onOpen() }}>{t('file.open')}</button>
-        <button type="button" data-testid="project-info" style={menuItem(false)} onClick={() => { close(); onProjectInfo?.() }}>{t('file.projectInfo')}</button>
-        <button type="button" data-testid="house-settings" style={menuItem(panel === 'house')} onClick={() => { close(); onHouse() }}>{t('file.projectSettings')}</button>
-        <button type="button" data-testid="example-house" style={menuItem(false)} onClick={() => { close(); onExample() }}>{t('file.example')}</button>
-        <button type="button" data-testid="family-house" style={menuItem(false)} onClick={() => { close(); onFamily() }}>{t('file.apartment')}</button>
-        <button type="button" data-testid="import-underlay" style={menuItem(false)} onClick={() => { close(); onImportUnderlay?.() }}>{t('underlay.import')}</button>
+        <FileMenuItems
+          t={t}
+          itemStyle={menuItem}
+          close={close}
+          onNew={onNew}
+          onOpen={onOpen}
+          onSave={onSave}
+          onSaveAs={onSaveAs}
+          recent={recent}
+          onRecent={onRecent}
+          onImportUnderlay={onImportUnderlay}
+          onExport={onExport}
+          onProjectInfo={onProjectInfo}
+          onProjectSettings={onHouse}
+          settingsOpen={panel === 'house'}
+          onPrint={onPrint}
+          extra={(
+            <>
+              <button type="button" data-testid="example-house" style={menuItem(false)} onClick={() => { close(); onExample() }}>{t('file.example')}</button>
+              <button type="button" data-testid="family-house" style={menuItem(false)} onClick={() => { close(); onFamily() }}>{t('file.apartment')}</button>
+            </>
+          )}
+        />
       </Menu>
       <Menu id="edit" label={t('menu.edit')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="undo" title={t('edit.undo')} style={menuItem(false)} onClick={() => { close(); onUndo() }}>{t('edit.undo')}</button>
@@ -296,6 +319,12 @@ export function PlanChrome({
         <button type="button" data-testid="open-display" style={menuItem(display.preset !== 'custom')} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
         <button type="button" data-testid="full-canvas" style={menuItem(false)} onClick={() => { close(); onFull?.() }}>{t('panel.full')}</button>
         {editBarItem}
+      </Menu>
+      <Menu id="draw" label={t('menu.draw')} open={open} setOpen={setOpen} dock={dock}>
+        {drawTools(menuItem)}
+      </Menu>
+      <Menu id="insert" label={t('menu.insert')} open={open} setOpen={setOpen} dock={dock}>
+        {yardTools(menuItem)}
       </Menu>
       <Menu id="print" label={t('menu.print')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="export-floor-pdf" style={menuItem(false)} onClick={() => { close(); onPdf() }}>PDF</button>
@@ -410,13 +439,29 @@ export function PlanChrome({
       </div>
       <div data-testid="menu-bar" style={{ display: 'flex', alignItems: 'center', gap: 2, height: 32, padding: '0 6px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
         <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen}>
-          <button type="button" data-testid="plan-new" style={menuItem(false)} onClick={() => { close(); onNew() }}>{t('file.new')}</button>
-          <button type="button" data-testid="plan-open" style={menuItem(false)} onClick={() => { close(); onOpen() }}>{t('file.open')}</button>
-          <button type="button" data-testid="project-info" style={menuItem(false)} onClick={() => { close(); onProjectInfo?.() }}>{t('file.projectInfo')}</button>
-          <button type="button" data-testid="house-settings" style={menuItem(panel === 'house')} onClick={() => { close(); onHouse() }}>{t('file.projectSettings')}</button>
-          <button type="button" data-testid="example-house" style={menuItem(false)} onClick={() => { close(); onExample() }}>{t('file.example')}</button>
-          <button type="button" data-testid="family-house" style={menuItem(false)} onClick={() => { close(); onFamily() }}>{t('file.apartment')}</button>
-          <button type="button" data-testid="import-underlay" style={menuItem(false)} onClick={() => { close(); onImportUnderlay?.() }}>{t('underlay.import')}</button>
+          <FileMenuItems
+            t={t}
+            itemStyle={menuItem}
+            close={close}
+            onNew={onNew}
+            onOpen={onOpen}
+            onSave={onSave}
+            onSaveAs={onSaveAs}
+            recent={recent}
+            onRecent={onRecent}
+            onImportUnderlay={onImportUnderlay}
+            onExport={onExport}
+            onProjectInfo={onProjectInfo}
+            onProjectSettings={onHouse}
+            settingsOpen={panel === 'house'}
+            onPrint={onPrint}
+            extra={(
+              <>
+                <button type="button" data-testid="example-house" style={menuItem(false)} onClick={() => { close(); onExample() }}>{t('file.example')}</button>
+                <button type="button" data-testid="family-house" style={menuItem(false)} onClick={() => { close(); onFamily() }}>{t('file.apartment')}</button>
+              </>
+            )}
+          />
         </Menu>
         <Menu id="edit" label={t('menu.edit')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="undo" title={t('edit.undo')} style={menuItem(false)} onClick={() => { close(); onUndo() }}>{t('edit.undo')}</button>
@@ -437,10 +482,10 @@ export function PlanChrome({
           {!onSheet && zoomTools}
         </Menu>
         <Menu id="draw" label={t('menu.draw')} open={open} setOpen={setOpen}>
-          {onPlan ? <div style={{ fontSize: 12, color: '#78716c', padding: '4px 8px' }}>{t('menu.onRibbon')}</div> : drawTools(menuItem)}
+          {drawTools(menuItem)}
         </Menu>
         <Menu id="insert" label={t('menu.insert')} open={open} setOpen={setOpen}>
-          {onSite ? <div style={{ fontSize: 12, color: '#78716c', padding: '4px 8px' }}>{t('menu.onRibbon')}</div> : yardTools(menuItem)}
+          {yardTools(menuItem)}
         </Menu>
         <Menu id="services" label={t('menu.services')} open={open} setOpen={setOpen}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '2px 4px' }}>
