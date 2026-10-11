@@ -306,6 +306,7 @@ export default function DesignerApp({
   const [cad, setCad] = useState(null)
   const [placingId, setPlacingId] = useState(null)
   const [rails, setRails] = useState(() => ({ ...readPanels(null), editBar: false }))
+  const [innerDims, setInnerDims] = useState(true)
   const railsOwner = useRef('local')
   useEffect(() => {
     const id = user?.id || 'local'
@@ -1348,6 +1349,7 @@ export default function DesignerApp({
     onChainStep,
     onCommitRectangle,
     onEditDimension,
+    innerDims,
     onUndo: undo,
     zoomCommand,
     onScale: (scale) => setZoomPercent(Math.round((scale / 36) * 100)),
@@ -1492,6 +1494,8 @@ export default function DesignerApp({
         onRedo={redo}
         onFit={() => setFitToken((token) => token + 1)}
         showLegend={rails.legend}
+        innerDims={innerDims}
+        onInnerDims={setInnerDims}
         onLegend={(legend) => setRails((current) => {
           const next = { ...current, legend }
           writePanels(user?.id, next)

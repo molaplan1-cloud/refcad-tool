@@ -5,7 +5,7 @@ import { useLocale } from '@/components/i18n/Locale'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
 import { drawCursor, parseRectangleSize, rectangleCursor } from '@/lib/wallDraw'
-import { coldDimensionFigures } from '@/lib/coldDimensions'
+import { coldDimensionFigures, innerDimHitsLabel, layoutColdInnerDims } from '@/lib/coldDimensions'
 import { wallForDimension } from '@/lib/floorplan'
 import { wallFigures } from '@/lib/wall-outline'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
@@ -63,13 +63,38 @@ function vertexAverage(points) {
   }
 }
 
-function labelAnchor(room, inner, scale, line1, line2) {
+function hitsAvoid(point, chipW, chipH, avoid) {
+  return (avoid || []).some((box) => (
+    Math.abs(point.x - box.cx) < (chipW + box.w) / 2 + 0.06
+    && Math.abs(point.z - box.cz) < (chipH + box.h) / 2 + 0.06
+  ))
+}
+
+function nudgeOffLabel(point, chipW, chipH, avoid) {
+  let x = point.x
+  let z = point.z
+  for (let pass = 0; pass < 3; pass += 1) {
+    ;(avoid || []).forEach((box) => {
+      const overlapX = (chipW + box.w) / 2 + 0.08 - Math.abs(x - box.cx)
+      const overlapZ = (chipH + box.h) / 2 + 0.08 - Math.abs(z - box.cz)
+      if (overlapX <= 0 || overlapZ <= 0) return
+      if (overlapX < overlapZ) x += Math.sign(x - box.cx || 1) * (overlapX + 0.03)
+      else z += Math.sign(z - box.cz || -1) * (overlapZ + 0.03)
+    })
+  }
+  return { x, z }
+}
+
+function labelAnchor(room, inner, scale, line1, line2, prefer, avoid = []) {
   const box = bboxOf(inner)
   const center = vertexAverage(inner)
   const px = Math.max(line1.length, line2.length) * 7.1 + 22
   const chipW = Math.min(box.width * 0.78, px / Math.max(scale, 1))
   const chipH = 34 / Math.max(scale, 1)
+  const nudged = avoid.length ? nudgeOffLabel(prefer || center, chipW, chipH, avoid) : null
   const candidates = [
+    prefer,
+    nudged,
     center,
     { x: center.x, z: box.top + box.depth * 0.22 },
     { x: center.x, z: box.bottom - box.depth * 0.22 },
@@ -77,7 +102,7 @@ function labelAnchor(room, inner, scale, line1, line2) {
     { x: box.right - box.width * 0.24, z: center.z },
     { x: box.left + box.width * 0.26, z: box.top + box.depth * 0.26 },
     { x: box.right - box.width * 0.26, z: box.bottom - box.depth * 0.26 },
-  ]
+  ].filter(Boolean)
   const blocks = (room.equipment || []).map((eq) => {
     const alongX = eq.rotation !== 90
     const halfW = (alongX ? eq.width : eq.depth) / 2 + 0.28
@@ -92,6 +117,7 @@ function labelAnchor(room, inner, scale, line1, line2) {
       [point.x + chipW / 2, point.z + chipH / 2],
     ]
     if (corners.some(([x, z]) => !pointInPolygon(x, z, inner))) return false
+    if (hitsAvoid(point, chipW, chipH, avoid)) return false
     return !blocks.some((block) => (
       Math.abs(point.x - block.x) < chipW / 2 + block.halfW
       && Math.abs(point.z - block.z) < chipH / 2 + block.halfD
@@ -487,6 +513,7 @@ export default function PlanView({
   onChainStep,
   onCommitRectangle,
   onEditDimension,
+  innerDims = true,
   onUndo,
   onSelectWall,
   walls = [],
@@ -1539,10 +1566,15 @@ export default function PlanView({
     () => wallFigures(walls || [], [], (wall) => wall.thickness || 0.1),
     [walls],
   )
-  const dimFigures = useMemo(
-    () => coldDimensionFigures({ walls: walls || [] }, rooms, 22 / Math.max(view.scale, 6)),
-    [walls, rooms, view.scale],
+  const dimLayout = useMemo(
+    () => layoutColdInnerDims(
+      coldDimensionFigures({ walls: walls || [] }, rooms, 22 / Math.max(view.scale, 6)),
+      rooms,
+      { scale: view.scale, enabled: innerDims !== false },
+    ),
+    [walls, rooms, view.scale, innerDims],
   )
+  const dimFigures = dimLayout.figures
   const dimPlan = useMemo(() => ({ walls: walls || [] }), [walls])
   const selected = new Set(selectedIds)
   const drawing = tool === 'draw' || tool === 'polygon' || tool === 'partition' || isRouteTool(tool)
@@ -1568,6 +1600,7 @@ export default function PlanView({
     })
   })
 
+  const labelBoxes = new Map()
   const rectDraft = draft?.kind === 'rect' ? draft : null
   const draftWidth = rectDraft ? Math.abs(rectDraft.x2 - rectDraft.x1) : 0
   const draftDepth = rectDraft ? Math.abs(rectDraft.z2 - rectDraft.z1) : 0
@@ -1676,7 +1709,16 @@ export default function PlanView({
             const dims = metricsOf(room)
             const line1 = `${room.label}  ${formatTemp(room.temp, unitSystem, 0)}`
             const line2 = `${dims.area.toFixed(1)} m²`
-            const label = labelAnchor(room, inner, view.scale, line1, line2)
+            const roomDims = dimFigures.filter((item) => item.dim.kind === 'internal' && item.dim.roomId === room.id)
+            const avoid = roomDims.map((item) => {
+              const dim = item.dim
+              const horizontal = Math.abs(dim.z2 - dim.z1) <= Math.abs(dim.x2 - dim.x1)
+              return horizontal
+                ? { cx: (dim.x1 + dim.x2) / 2, cz: (dim.z1 + dim.z2) / 2, w: Math.abs(dim.x2 - dim.x1), h: 0.34 }
+                : { cx: (dim.x1 + dim.x2) / 2, cz: (dim.z1 + dim.z2) / 2, w: 0.34, h: Math.abs(dim.z2 - dim.z1) }
+            })
+            const label = labelAnchor(room, inner, view.scale, line1, line2, dimLayout.anchors[room.id], avoid)
+            labelBoxes.set(room.id, label)
             const showHandles = active && selectedIds.length === 1 && tool === 'select' && !placing
             const rectLike = !isCustomOutline(room)
             return (
@@ -1950,7 +1992,10 @@ export default function PlanView({
               </g>
             )
           })}
-          {dimFigures.map((item, index) => (
+          {dimFigures.filter((item) => {
+            if (item.dim.kind !== 'internal') return true
+            return !innerDimHitsLabel(item.dim, labelBoxes.get(item.dim.roomId))
+          }).map((item, index) => (
             <ChainDim
               key={`dim-${item.dim.kind}-${index}-${item.dim.label}`}
               dim={item.dim}

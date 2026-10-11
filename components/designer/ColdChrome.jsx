@@ -139,6 +139,8 @@ export default function ColdChrome({
   onFit,
   showLegend = false,
   onLegend,
+  innerDims = true,
+  onInnerDims,
   onFull,
   editBar = false,
   onEditBar,
@@ -294,6 +296,7 @@ export default function ColdChrome({
         <button type="button" style={menuItem(view === 'schematic')} onClick={() => { close(); onView('schematic') }}>{t('designer.schematic')}</button>
         <button type="button" style={menuItem(false)} onClick={() => { close(); onFit?.() }}>{t('snap.fit')}</button>
         <button type="button" data-testid="toggle-legend" style={menuItem(showLegend)} onClick={() => { close(); onLegend?.(!showLegend) }}>{t('display.legend')}</button>
+        <button type="button" data-testid="toggle-inner-dims" aria-pressed={innerDims !== false} style={menuItem(innerDims !== false)} onClick={() => { close(); onInnerDims?.(!innerDims) }}>{t('display.internal')}</button>
         <button type="button" data-testid="full-canvas" style={menuItem(false)} onClick={() => { close(); onFull?.() }}>{t('panel.full')}</button>
         <button type="button" data-testid="toggle-edit-bar" aria-pressed={Boolean(editBar)} style={menuItem(Boolean(editBar))} onClick={() => { close(); onEditBar?.() }}>{t('view.editBar')}</button>
         <button type="button" data-testid="menu-zoom-out" style={menuItem(false)} onClick={() => { close(); onZoomOut?.() }}>{t('snap.zoomOut')}</button>
