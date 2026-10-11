@@ -68,6 +68,7 @@ export function DisplayPanel({ plan, display, workspace = 'rakenne', sheet = 'pl
         <Check testid="show-areas" label={t('display.areas')} checked={display.areas} onChange={(areas) => onChange({ areas })} />
         <Check testid="show-opening-sizes" label={t('display.openingSizes')} checked={display.openingSizes} onChange={(openingSizes) => onChange({ openingSizes })} />
         <Check testid="show-structures" label={t('display.structures')} checked={display.structures} onChange={(structures) => onChange({ structures })} />
+        <Check testid="show-legend" label={t('display.legend')} checked={display.legend === true} onChange={(legend) => onChange({ legend })} />
         <Check testid="show-fixtures" label={t('display.fixtures')} checked={layerEyeOn(plan, 'fixtures', workspace, sheet)} onChange={(visible) => onLayer('fixtures', visible)} />
         {plan?.underlay?.image && (
           <Check testid="show-underlay" label={t('underlay.layer')} checked={layerEyeOn(plan, 'underlay', workspace, sheet)} onChange={(visible) => onLayer('underlay', visible)} />

@@ -33,6 +33,7 @@ const iconBtn = (active) => ({
 })
 
 const EXTRA = [
+  { id: 'square', key: 'cad.square', testid: 'cad-square', label: 'Suorista', shortcut: 'Q' },
   { id: 'rotate90', key: 'cad.rotate90', testid: 'cad-rotate-90', label: 'Käännä 90°', shortcut: 'R' },
   { id: 'delete', key: 'cad.delete', testid: 'cad-delete', label: 'Poista', shortcut: 'Del' },
   { id: 'group', key: 'cad.group', testid: 'cad-group', label: 'Ryhmitä', shortcut: 'Ctrl+G' },
@@ -59,7 +60,7 @@ const COMMANDS = [
 
 const GROUPS = [
   ['move', 'copy', 'rotate', 'rotate90', 'scale', 'mirror'],
-  ['array', 'offset', 'stretch', 'align', 'measure'],
+  ['array', 'offset', 'stretch', 'align', 'square', 'measure'],
   ['delete', 'group', 'ungroup', 'lock', 'unlock'],
   ['hide', 'isolate', 'show', 'similar', 'match'],
 ]

@@ -73,6 +73,12 @@ const PATHS = {
       <path d="M6.2 4.2v7.6M9.8 4.2v7.6" {...stroke} />
     </>
   ),
+  square: (
+    <>
+      <path d="M3 12.6h6.2V6.4" {...stroke} />
+      <path d="M9.2 3.2v3.2h3.2" {...stroke} />
+    </>
+  ),
   align: (
     <>
       <path d="M2.2 2.2v11.6" {...stroke} />

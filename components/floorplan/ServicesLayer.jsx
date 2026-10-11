@@ -310,7 +310,7 @@ function siteRun(plan, run) {
   return (run.points || []).some((point) => !insideHouse(plan, point.x, point.z))
 }
 
-export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null, revealSystems = null, legendSystems = null, zoom = 1, camera = null, viewport = null, roomLabels = [], dimensions = [] }) {
+export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, preview, onContext, selected, onRouteDown, quietLabels = false, siteMode = false, flashId = null, activeSystems = null, revealSystems = null, legendSystems = null, showLegend = false, zoom = 1, camera = null, viewport = null, roomLabels = [], dimensions = [] }) {
   const { t } = usePlanLocale(plan)
   const services = ensureServices(plan)
   const revealed = (item) => {
@@ -671,7 +671,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           style={{ pointerEvents: 'none' }}
         />
       )}
-      {legendH > 0 && (
+      {showLegend && legendH > 0 && (
         <g data-testid="service-legend" transform={`translate(${legendX} ${legendY}) scale(${legendScale})`} style={{ pointerEvents: 'none' }}>
           <rect width={legendW} height={legendH} fill="#ffffff" stroke="#1c1917" strokeWidth={1 / legendScale} />
           <text x={8} y={legendTitle} fontSize={legendFont} fontWeight="700" fill="#1c1917">{t('legend.title')}</text>

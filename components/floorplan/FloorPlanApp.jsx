@@ -4,12 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import {
   FIXTURES,
-  MATERIALS,
   ROOF_TYPES,
   addFixture,
   addOpening,
   addWall,
-  claddingAreas,
   cornerAngles,
   cornerJoint,
   deleteOpening,
@@ -28,7 +26,6 @@ import {
   familyHouse,
   formatArea,
   formatMm,
-  formatQuantity,
   hitTest,
   materialOf,
   materialsList,
@@ -48,6 +45,7 @@ import {
   planDimensions,
   dedupeDimensions,
   straightenWalls,
+  squareWalls,
   structureMarks,
   pointInPolygon,
   duplicateFixture,
@@ -97,6 +95,10 @@ import {
 } from '@/lib/cadEdit'
 import { CadPrompt } from './CadTools'
 import { LayerBar, PlanChrome } from './PlanChrome'
+import { MaterialsDialog } from './MaterialsDialog'
+import { SideRail } from './SideRail'
+import { buildMaterialsPdf, materialsCsv } from '@/lib/materialsReport'
+import { applyPanelCommand, panelCommand, readPanels, writePanels } from '@/lib/panels'
 import { buildPlanPdf } from '@/lib/roominfo'
 import { accessFor } from '@/lib/access'
 import { stampDemoWatermark } from '@/lib/watermark'
@@ -224,7 +226,7 @@ import {
 import { WORKSPACES, applyWorkspaceSwitch, workspaceAllows, workspaceSystems } from '@/lib/workspaces'
 import { applyProjectType, hasHouseElements, isColdProject, stripHouseElements } from '@/lib/projectMode'
 import ColdWorkspace from './ColdWorkspace'
-import { FIT_CAMERA, fitRect, panBy, pinchZoom, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
+import { FIT_CAMERA, fitRect, holdSheetView, panBy, pinchZoom, wheelZoomFactor, zoomAt, zoomPercent } from '@/lib/zoom'
 import { touchAction } from '@/lib/touch'
 import { useViewport } from '@/components/useViewport'
 import { LanguageSwitch, usePlanLocale } from '@/components/i18n/Locale'
@@ -1049,6 +1051,11 @@ export default function FloorPlanApp() {
   const [sheetMode, setSheetMode] = useState('plan')
   const [workspace, setWorkspace] = useState('rakenne')
   const [account, setAccount] = useState(null)
+  const [panels, setPanels] = useState(() => readPanels(null))
+  const [materialsOpen, setMaterialsOpen] = useState(false)
+  const accountRef = useRef(null)
+  accountRef.current = account
+  const panelsOwner = useRef('local')
   const [ghosts, setGhosts] = useState([])
   const [fixtureGroup, setFixtureGroup] = useState('Kaikki')
   const [displayOpen, setDisplayOpen] = useState(false)
@@ -1121,6 +1128,7 @@ export default function FloorPlanApp() {
   const flashTimer = useRef(0)
   const fitRequest = useRef({ plan: null, mode: 'plan', token: 0 })
   const fittedToken = useRef(null)
+  const fittedSize = useRef(null)
   const [fitTick, setFitTick] = useState(0)
   const endDrawingRef = useRef(() => {})
   const suppressMenu = useRef(false)
@@ -1170,6 +1178,13 @@ export default function FloorPlanApp() {
       .catch(() => { if (!cancel) setAccount(null) })
     return () => { cancel = true }
   }, [])
+
+  useEffect(() => {
+    const id = account?.id || 'local'
+    if (panelsOwner.current === id && account) return
+    panelsOwner.current = id
+    setPanels(readPanels(account?.id))
+  }, [account])
 
   useEffect(() => {
     const storedLibrary = loadLibrary(window.localStorage.getItem(LIBRARY_KEY))
@@ -1302,10 +1317,32 @@ export default function FloorPlanApp() {
       return
     }
     const req = fitRequest.current
-    const key = `${req.token}:${w}x${h}`
-    if (fittedToken.current === key) return
-    fittedToken.current = key
-    setCamera(cameraForBuilding(req.plan || plan, req.plan ? req.mode : sheetMode, { w, h }))
+    const site = (req.plan ? req.mode : sheetMode) === 'site'
+    const planFor = req.plan || plan
+    if (fittedToken.current !== req.token) {
+      fittedToken.current = req.token
+      fittedSize.current = { w, h }
+      setCamera(cameraForBuilding(planFor, site ? 'site' : 'plan', { w, h }))
+      return
+    }
+    const prev = fittedSize.current
+    if (!prev || (prev.w === w && prev.h === h)) return
+    const before = sheetPixels(prev, planFor, site)
+    const after = sheetPixels({ w, h }, planFor, site)
+    fittedSize.current = { w, h }
+    setCamera((current) => holdSheetView(current, {
+      w: prev.w,
+      h: prev.h,
+      sheetX: before.x,
+      sheetY: before.y,
+      k: before.k,
+    }, {
+      w,
+      h,
+      sheetX: after.x,
+      sheetY: after.y,
+      k: after.k,
+    }))
   }, [ready, view, fitTick, size, plan, sheetMode])
 
   const flashItem = useCallback((id) => {
@@ -1496,6 +1533,16 @@ export default function FloorPlanApp() {
     if (name === 'delete') {
       commit(deleteSelection(plan, selected))
       remember([])
+      setMenu(null)
+      return
+    }
+    if (name === 'square') {
+      const ids = selected.filter((item) => item.kind === 'wall').map((item) => item.id)
+      if (!ids.length) { showToast(t('toast.squareNone')); setMenu(null); return }
+      const next = squareWalls(plan, ids)
+      if (next === plan) { showToast(t('toast.alreadyStraight')); setMenu(null); return }
+      commit(next)
+      showToast(t('toast.squared'))
       setMenu(null)
       return
     }
@@ -2198,7 +2245,7 @@ export default function FloorPlanApp() {
     const locked = lockOrthoPoint(start, end, 2)
     const closing = shouldCloseChain(chain, end) || shouldCloseChain(chain, locked)
     const target = closing ? chain.start : locked
-    if (!start || !target || segmentLength(start, target) <= 0.05) {
+    if (!start || !target || segmentLength(start, target) < 0.02) {
       clearGuides()
       if (closing) {
         chainRef.current = null
@@ -2470,6 +2517,16 @@ export default function FloorPlanApp() {
       const tag = event.target?.tagName
       const textEntry = tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable
         || (tag === 'INPUT' && !['checkbox', 'radio', 'button'].includes(event.target?.type))
+      const panelsKey = panelCommand(event)
+      if (panelsKey) {
+        event.preventDefault()
+        setPanels((current) => {
+          const next = applyPanelCommand(current, panelsKey)
+          writePanels(accountRef.current?.id, next)
+          return next
+        })
+        return
+      }
       if (event.key === 'Escape' && displayOpenRef.current) {
         event.preventDefault()
         setDisplayOpen(false)
@@ -3101,6 +3158,17 @@ export default function FloorPlanApp() {
   const display = normalizeDisplay(plan.sheetDisplay?.[sheetKey] || plan.display)
   const setDisplay = (patch) => setPlan((current) => applyDisplay(current, patch, sheetKey))
   const rows = materialsList(plan)
+  const reportRows = rows.map((row) => ({
+    group: row.group,
+    name: row.group === 'structure'
+      ? `${row.code} ${text(locale, `struct.${row.structureId}`, row.structureName)}: ${text(locale, `layer.${row.materialId}`, row.name)}`
+      : `${row.roomName ? `${row.roomName}: ` : ''}${text(locale, `group.${row.group}`, row.groupLabel)}: ${text(locale, `mat.${row.group}.${row.id}`, row.name)}${row.code ? ` ${row.code}` : ''}`,
+    room: row.roomName || '',
+    quantity: num(row.area || 0, row.unit === 'm³' ? 2 : 1),
+    unit: row.unit || 'm²',
+    code: row.code || '',
+    color: row.color,
+  }))
   const query = fixtureQuery.trim().toLowerCase()
   const fixtureName = (item) => (item?.nameKey ? t(item.nameKey) : item?.name || '')
   const matchesQuery = (item) => !query || item.name.toLowerCase().includes(query) || fixtureName(item).toLowerCase().includes(query) || item.group.toLowerCase().includes(query)
@@ -3589,6 +3657,12 @@ export default function FloorPlanApp() {
         onHeatTable={() => { setView('2d'); setHeatView('table'); setElectricView(null) }}
         onHeatSchematic={() => { setView('2d'); setHeatView('schematic'); setElectricView(null) }}
         onPdf={exportPdf}
+        onMaterials={() => setMaterialsOpen(true)}
+        onFull={() => setPanels((current) => {
+          const next = applyPanelCommand(current, 'full')
+          writePanels(accountRef.current?.id, next)
+          return next
+        })}
         onServicePdf={(id) => {
           if (id === 'site') {
             savePdf(buildSitePdf(plan), `${(plan.name || 'site').replace(/\s+/g, '-')}-site.pdf`)
@@ -3626,6 +3700,7 @@ export default function FloorPlanApp() {
           commit(next)
           showToast(t('toast.straightened'))
         }}
+        onSquare={() => beginCommand('square')}
       />
       <LayerBar
         plan={plan}
@@ -3698,11 +3773,22 @@ export default function FloorPlanApp() {
         {compact && drawer && (
           <button type="button" className="drawer-backdrop" data-testid="drawer-backdrop" aria-label={t('panel.closeInfo')} onClick={() => setDrawer(null)} />
         )}
-        <aside
+        <SideRail
+          side="left"
           className="plan-drawer"
-          data-testid="plan-side"
-          data-open={compact && drawer === 'library' ? 'true' : 'false'}
-          style={compact ? undefined : { width: 232, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderRight: '1px solid #d6d3d1', padding: '10px 10px 18px' }}
+          testId="plan-side"
+          compact={compact}
+          open={drawer === 'library'}
+          collapsed={panels.left}
+          onToggle={() => setPanels((current) => {
+            const next = { ...current, left: !current.left }
+            writePanels(accountRef.current?.id, next)
+            return next
+          })}
+          width={260}
+          pad="10px 10px 18px"
+          collapseLabel={t('panel.collapse')}
+          expandLabel={t('panel.expand')}
         >
           {compact && <button type="button" data-testid="close-drawer" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
           <div data-testid="workspace-side-title" style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.4, color: '#0f766e', margin: '0 4px 8px' }}>{workspaceName}</div>
@@ -3894,7 +3980,7 @@ export default function FloorPlanApp() {
           )}
           </>
           )}
-        </aside>
+        </SideRail>
 
         <div className="plan-stage" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
           <div className="plan-status" style={{ minHeight: 28, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 12, color: '#44403c', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4', minWidth: 0, overflow: 'hidden' }}>
@@ -4351,7 +4437,7 @@ export default function FloorPlanApp() {
                     {mark.code}
                   </text>
                 ))}
-                {sheetMode !== 'site' && display.structures && structureCatalog(plan).length > 0 && (
+                {sheetMode !== 'site' && display.legend && structureCatalog(plan).length > 0 && (
                   <g data-testid="structure-legend" style={{ pointerEvents: 'none' }}>
                     {(() => {
                       const rows = structureCatalog(plan)
@@ -4552,6 +4638,7 @@ export default function FloorPlanApp() {
                   sheet={sheet}
                   quietLabels={sheetMode === 'site' || (display.preset === 'all' ? activeSystems.length > 1 : workspaceSystems(workspace).length !== 1)}
                   legendSystems={display.preset === 'all' ? null : workspaceSystems(workspace)}
+                  showLegend={display.legend === true}
                   siteMode={sheetMode === 'site'}
                   legendBox={sheetMode === 'site' ? {
                     x: sheet.x + layout.title.x * k,
@@ -4795,11 +4882,22 @@ export default function FloorPlanApp() {
           )}
         </div>
 
-        <aside
-          data-testid="materials-panel"
+        <SideRail
+          side="right"
+          testId="materials-panel"
           className="plan-info"
-          data-open={compact && drawer === 'info' ? 'true' : 'false'}
-          style={compact ? undefined : { width: 280, flexShrink: 0, overflowY: 'auto', background: '#fafaf9', borderLeft: '1px solid #d6d3d1', padding: '12px 12px 20px' }}
+          compact={compact}
+          open={drawer === 'info'}
+          collapsed={panels.right}
+          onToggle={() => setPanels((current) => {
+            const next = { ...current, right: !current.right }
+            writePanels(accountRef.current?.id, next)
+            return next
+          })}
+          width={308}
+          pad="12px 12px 20px"
+          collapseLabel={t('panel.collapse')}
+          expandLabel={t('panel.expand')}
         >
           {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
           {(tool === 'room' || tool === 'detect' || tool === 'exterior' || tool === 'interior' || (tool === 'door' && pick?.kind !== 'door')) && (
@@ -4833,40 +4931,10 @@ export default function FloorPlanApp() {
           {pick?.kind === 'room' && room && (
             <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>
           )}
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>{t('bom.title')}</div>
-          {rows.length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>{t('bom.empty')}</div>}
-          {rows.map((row) => (
-            <div key={row.key} data-testid={row.group === 'structure' ? 'structure-bom' : row.group === 'cover' ? 'cover-bom' : row.group === 'ground' ? 'ground-bom' : undefined} data-code={row.code || undefined} data-unit={row.unit || undefined} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6, fontSize: 12, lineHeight: 1.3 }}>
-              <span style={{ width: 14, height: 14, borderRadius: 3, background: row.color, border: '1px solid #a8a29e', flexShrink: 0 }} />
-              <span data-testid={row.group === 'plinth' ? 'plinth-bom' : 'bom-line'} data-code={row.code || ''} style={{ flex: 1 }}>{row.group === 'structure' ? `${row.code} ${text(locale, `struct.${row.structureId}`, row.structureName)}: ${text(locale, `layer.${row.materialId}`, row.name)}` : `${row.roomName ? `${row.roomName}: ` : ''}${text(locale, `group.${row.group}`, row.groupLabel)}: ${text(locale, `mat.${row.group}.${row.id}`, row.name)}${row.code ? ` ${row.code}` : ''}`}</span>
-              <span style={{ color: '#78716c' }}>{row.unit ? `${num(row.area || 0, row.unit === 'm³' ? 2 : 1)} ${row.unit}` : `${num(row.area || 0, 1)} m²`}</span>
-            </div>
-          ))}
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '14px 0 8px' }}>{t('bom.legend')}</div>
-          {['floor', 'interior', 'ceiling', 'exterior', 'roof'].map((group) => (
-            <div key={group} style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{t(`group.${group}`)}</div>
-              {MATERIALS[group].map((item) => (
-                <div key={`${group}-${item.id}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, lineHeight: 1.3, color: '#44403c', marginBottom: 3 }}>
-                  <span style={{ width: 12, height: 12, background: item.color, border: '1px solid #d6d3d1' }} />
-                  <span>{text(locale, `mat.${group}.${item.id}`, item.name)}</span>
-                </div>
-              ))}
-            </div>
-          ))}
-          {claddingAreas(plan).length > 0 && (
-            <div data-testid="facade-area-legend" style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{t('house.facade')}</div>
-              {claddingAreas(plan).map((item) => (
-                <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, lineHeight: 1.3, color: '#44403c', marginBottom: 3 }}>
-                  <span style={{ width: 12, height: 12, background: item.color, border: '1px solid #d6d3d1' }} />
-                  <span style={{ flex: 1 }}>{item.group}: {item.name}</span>
-                  <span>{formatArea(item.area)}</span>
-                </div>
-              ))}
-            </div>
+          {!pick && tool !== 'room' && tool !== 'detect' && tool !== 'exterior' && tool !== 'interior' && !(tool === 'door' && pick?.kind !== 'door') && (
+            <p data-testid="panel-empty" style={{ margin: '8px 4px', fontSize: 13, lineHeight: 1.45, color: '#78716c' }}>{t('panel.empty')}</p>
           )}
-        </aside>
+        </SideRail>
       </div>
       {startOpen && !newOpen && (
         <StartDialog
@@ -4882,6 +4950,26 @@ export default function FloorPlanApp() {
           onCancel={() => { setNewOpen(false); if (!ready) setStartOpen(true) }}
           onCreate={createShell}
           onExample={loadExample}
+        />
+      )}
+      {materialsOpen && (
+        <MaterialsDialog
+          title={t('bom.title')}
+          empty={t('bom.empty')}
+          closeLabel={t('panel.close')}
+          csvLabel={t('bom.exportCsv')}
+          pdfLabel={t('bom.exportPdf')}
+          rows={reportRows}
+          onClose={() => setMaterialsOpen(false)}
+          onCsv={() => {
+            const blob = new Blob([materialsCsv(reportRows)], { type: 'text/csv;charset=utf-8' })
+            const link = document.createElement('a')
+            link.href = URL.createObjectURL(blob)
+            link.download = `${(plan.name || 'materiaalit').replace(/\s+/g, '-')}-materiaalit.csv`
+            link.click()
+            URL.revokeObjectURL(link.href)
+          }}
+          onPdf={() => savePdf(buildMaterialsPdf(t('bom.title'), reportRows), `${(plan.name || 'materiaalit').replace(/\s+/g, '-')}-materiaalit.pdf`)}
         />
       )}
       {libraryOpen && (

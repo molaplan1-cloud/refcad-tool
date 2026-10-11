@@ -401,6 +401,7 @@ export default function PlanView({
 }) {
   const { t } = useLocale()
   const hostRef = useRef(null)
+  const sizeRef = useRef({ w: 0, h: 0 })
   const viewRef = useRef({ scale: 36, offsetX: 480, offsetY: 320 })
   const [view, setView] = useState(viewRef.current)
   const [size, setSize] = useState({ w: 800, h: 600 })
@@ -439,10 +440,24 @@ export default function PlanView({
     if (!host) return undefined
     const measure = () => {
       const next = { w: host.clientWidth, h: host.clientHeight }
+      const prev = sizeRef.current
+      sizeRef.current = next
       setSize(next)
-      if (autoFit.current && next.w > 40 && next.h > 40) {
-        setCamera(fitView(propsRef.current.rooms, next.w, next.h))
+      if (next.w < 40 || next.h < 40) return
+      if (prev.w < 40 || prev.h < 40) {
+        if (autoFit.current) setCamera(fitView(propsRef.current.rooms, next.w, next.h))
+        return
       }
+      if (Math.abs(prev.w - next.w) < 1 && Math.abs(prev.h - next.h) < 1) return
+      const current = viewRef.current
+      const scale = current.scale || 1
+      const worldX = (prev.w / 2 - current.offsetX) / scale
+      const worldZ = (prev.h / 2 - current.offsetY) / scale
+      setCamera({
+        ...current,
+        offsetX: next.w / 2 - worldX * scale,
+        offsetY: next.h / 2 - worldZ * scale,
+      })
     }
     measure()
     const observer = new ResizeObserver(measure)
