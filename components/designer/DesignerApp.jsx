@@ -337,6 +337,16 @@ export default function DesignerApp({
     const onKey = (e) => {
       const tag = e.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      const panelsKey = panelCommand(e)
+      if (panelsKey) {
+        e.preventDefault()
+        setRails((current) => {
+          const next = applyPanelCommand(current, panelsKey)
+          writePanels(user?.id, next)
+          return next
+        })
+        return
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault()
         undo()
@@ -408,19 +418,11 @@ export default function DesignerApp({
       else if (e.key.toLowerCase() === 'r') setTool('draw')
       else if (e.key.toLowerCase() === 'p') setTool('polygon')
       else if (e.key.toLowerCase() === 'w') setTool('partition')
-      else if (e.key.toLowerCase() === 'f') setFitToken((token) => token + 1)
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'f') setFitToken((token) => token + 1)
       else if (e.key.toLowerCase() === 'g') setSnapOn((value) => !value)
       else if (e.key.toLowerCase() === 'l') setTool('pipe')
       else if (e.key.toLowerCase() === 'k') setTool('cable')
-      else if (panelCommand(e)) {
-        e.preventDefault()
-        const command = panelCommand(e)
-        setRails((current) => {
-          const next = applyPanelCommand(current, command)
-          writePanels(user?.id, next)
-          return next
-        })
-      } else if (e.key === ']' || e.key === '[') rotateSelected(e.key === ']' ? 90 : -90)
+      else if (e.key === ']' || e.key === '[') rotateSelected(e.key === ']' ? 90 : -90)
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
         e.preventDefault()
         duplicateSelected()
