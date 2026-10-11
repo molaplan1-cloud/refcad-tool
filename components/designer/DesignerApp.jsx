@@ -2116,6 +2116,8 @@ export default function DesignerApp({
             result={result}
             roomResult={roomResult}
             unitSystem={unitSystem}
+            units={schematic.units || []}
+            diversity={schematic.diversity}
             onPatch={patchSelected}
             onFocusEdit={() => { editSnap.current = snapshot() }}
             onBlurEdit={() => {

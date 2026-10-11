@@ -13,6 +13,7 @@ import { sizePlacedPipe } from '@/lib/pipeDuty'
 import { HEIGHT_PRESETS, insulationOptions, materialOptions, routeLength as polyLength } from '@/lib/routeEdit'
 import { defaultElevation, mountLabel } from '@/lib/placement'
 import { formatDeviceLink, isColdDevice } from '@/lib/coldDevices'
+import { equipmentBrief, formatEquipmentLine } from '@/lib/coldUnits'
 
 const labelStyle = {
   fontSize: 10, color: '#78716c', fontWeight: 700,
@@ -221,6 +222,8 @@ export default function HeatLoadPanel({
   result,
   roomResult,
   unitSystem,
+  units,
+  diversity,
   onPatch,
   onFocusEdit,
   onBlurEdit,
@@ -248,6 +251,7 @@ export default function HeatLoadPanel({
   }
   const setLoadTemp = (key, display) => setLoad(key, fromTemp(display, unitSystem))
 
+  const siteUnits = result ? equipmentBrief(rooms || [], result, { units, diversity }) : []
   const maxAbs = roomResult ? Math.max(1, ...roomResult.lines.map((item) => Math.abs(item.watts))) : 1
   const grouped = roomResult
     ? GROUP_LABELS.map(([id]) => ({ id, label: t(`cold.${id}`), lines: roomResult.lines.filter((item) => item.group === id) })).filter((group) => group.lines.length)
@@ -261,7 +265,13 @@ export default function HeatLoadPanel({
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
           <div style={{ fontSize: 10, letterSpacing: 0.8, color: '#78716c', fontWeight: 700 }}>{t('designer.whole')}</div>
-          <div style={{ fontSize: 11, color: '#0f766e' }}>{result.suggestedEvap.count} × {result.suggestedEvap.template.name}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, minWidth: 0 }}>
+            {siteUnits.map((group) => (
+              <div key={group.id} data-testid={`site-unit-${group.name || 'none'}`} style={{ fontSize: 11, color: '#0f766e', textAlign: 'right', lineHeight: 1.35 }}>
+                {formatEquipmentLine(group, { unassigned: t('cold.unassigned') })}
+              </div>
+            ))}
+          </div>
         </div>
         <div style={{ fontSize: 26, fontWeight: 750, color: '#1c1917', lineHeight: 1.05, letterSpacing: -0.4, marginTop: 2 }}>
           {formatKw(result.total)}
