@@ -728,7 +728,7 @@ export default function DesignerApp({
     }
     pushUndo()
     syncPanels({ ...next, panelMm: panelMmRef.current, projectType: 'kylmio', buildingType: 'kylmio' })
-    if (fitted.snapped) setNotice(t('cold.snapAbut'))
+    setNotice(fitted.snapped ? t('cold.snapAbut') : '')
   }
 
   function onCreateRect(x1, z1, x2, z2) {

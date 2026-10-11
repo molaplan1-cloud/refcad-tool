@@ -1229,7 +1229,43 @@ export default function PlanView({
     }
   }, [])
 
+  const onMouseDownCapture = (event) => {
+    if (event.button !== 0 || event.target?.closest?.('[data-testid=dim-editor]')) return
+    const onDim = event.target?.closest?.('[data-testid=dim-hit], [data-testid=dim-internal], [data-testid=dim-overall]')
+    if (!onDim) return
+    const p = propsRef.current
+    const host = hostRef.current
+    if (!host || p.tool !== 'select' || p.placing) return
+    const world = {
+      x: (event.clientX - host.getBoundingClientRect().left - view.offsetX) / view.scale,
+      z: (event.clientY - host.getBoundingClientRect().top - view.offsetY) / view.scale,
+    }
+    if (hitEquipment(p.rooms, world.x, world.z)) return
+    const reach = Math.max(0.12, 10 / view.scale)
+    let grip = null
+    ;(p.walls || []).forEach((wall) => {
+      ;['a', 'b'].forEach((end) => {
+        const point = wall[end]
+        if (!point) return
+        const dist = Math.hypot(world.x - point.x, world.z - point.z)
+        if (dist <= reach && (!grip || dist < grip.dist)) grip = { wall, end, dist, from: point }
+      })
+    })
+    const near = grip ? null : nearestWall(p.walls, world, Math.max(0.08, 8 / view.scale))
+    if (!grip && !near) return
+    event.stopPropagation()
+    event.preventDefault()
+    if (grip) {
+      p.onSelectWall?.(grip.wall.id, event.shiftKey)
+      gesture.current = { kind: 'panel-end', id: grip.wall.id, end: grip.end, from: grip.from }
+      return
+    }
+    p.onSelectWall?.(near.wall.id, event.shiftKey)
+    gesture.current = { kind: 'wall-slide', id: near.wall.id, startX: world.x, startZ: world.z, dx: 0, dz: 0, started: false }
+  }
+
   const onMouseDown = (event) => {
+    if (gesture.current?.kind === 'wall-slide' || gesture.current?.kind === 'panel-end') return
     if (touching.current && !event.fromTouch) return
     const host = hostRef.current
     const world = {
@@ -1264,6 +1300,7 @@ export default function PlanView({
       return
     }
     if (event.button !== 0) return
+    if (event.target?.closest?.('[data-testid=dim-editor]')) return
     const p = propsRef.current
     const touchHand = Boolean(event.fromTouch && p.hand)
     if (p.cad && p.tool === 'select' && !p.placing) {
@@ -1318,6 +1355,23 @@ export default function PlanView({
     }
     const panelEnd = event.target?.dataset?.panelEnd
     const panelWall = event.target?.dataset?.panelWall
+    if (p.tool === 'select' && !p.placing && !handle && !hitEquipment(p.rooms, world.x, world.z)) {
+      const reach = Math.max(0.12, 10 / view.scale)
+      let grip = null
+      ;(p.walls || []).forEach((wall) => {
+        ;['a', 'b'].forEach((end) => {
+          const point = wall[end]
+          if (!point) return
+          const dist = Math.hypot(world.x - point.x, world.z - point.z)
+          if (dist <= reach && (!grip || dist < grip.dist)) grip = { wall, end, dist, from: point }
+        })
+      })
+      if (grip) {
+        p.onSelectWall?.(grip.wall.id, event.shiftKey)
+        gesture.current = { kind: 'panel-end', id: grip.wall.id, end: grip.end, from: grip.from }
+        return
+      }
+    }
     if (panelWall && !panelEnd && p.tool === 'select' && !p.placing) {
       p.onSelectWall?.(panelWall, event.shiftKey)
       gesture.current = { kind: 'wall-slide', id: panelWall, startX: world.x, startZ: world.z, dx: 0, dz: 0, started: false }
@@ -1710,6 +1764,7 @@ export default function PlanView({
     <div
       ref={hostRef}
       data-testid="plan-canvas"
+      onMouseDownCapture={onMouseDownCapture}
       onMouseDown={onMouseDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
