@@ -9,8 +9,8 @@ import { SideRail } from '@/components/floorplan/SideRail'
 import { SelectionActions } from '@/components/floorplan/CadTools'
 import { applyPanelCommand, panelCommand, readPanels, writePanels } from '@/lib/panels'
 import PlanView from './PlanView'
-import HeatLoadPanel from './HeatLoadPanel'
-import { TEMPLATES, TEMPLATE_GROUPS, coldDutyTypes, getTemplate, isRefrigerated } from '@/lib/catalog'
+import HeatLoadPanel, { DutyTypeSelect } from './HeatLoadPanel'
+import { TEMPLATES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
 import { PANEL_MM, commitPanel, emptyPanelPlan, extendPanel, joinPanelCorner, roomsFromPanels, setPanelEnd, snapDoorToPanel } from '@/lib/coldPanels'
 import { applyUnitChoice, assignRooms, groupUnits } from '@/lib/coldUnits'
 import { formatDeviceLink, isColdDevice, removalPrompt } from '@/lib/coldDevices'
@@ -37,12 +37,9 @@ import { heightMetres, insertRisers, moveVertexPoints, riseMetres, setRunMount, 
 import {
   defaultElevation,
   doorOnWall,
-  insideRefrigerated,
-  isOutdoorCategory,
   outlinePoints,
   pointInOutline,
   rotateDoorWall,
-  snapOutdoorUnit,
 } from '@/lib/placement'
 import { judgePlacement, removeStackedEquipment } from '@/lib/placeOnce'
 import { ModeChip, PlaceToast, modeChipText, placeFrame } from '@/components/mode/PlaceMode'
@@ -727,7 +724,7 @@ export default function DesignerApp({
       item.id === roomId ? { ...item, equipment: [...item.equipment, eq] } : item
     )))
     setSelectedIds([eq.id])
-    setNotice(warning || t('designer.placedIn', { name: eq.name, room: room.label }))
+    setNotice(warning ? t(warning) : t('designer.placedIn', { name: eq.name, room: room.label }))
     if (!stamp.shift && !repeatPlace) {
       setPlacingId(null)
       setTool('select')
@@ -1176,20 +1173,7 @@ export default function DesignerApp({
     onSelect: setSelectedIds,
     onPreview: setRooms,
     onGestureStart: pushUndo,
-    onGestureEnd: () => {
-      setRooms((current) => current.map((room) => ({
-        ...room,
-        equipment: (room.equipment || []).map((eq) => {
-          if (!isOutdoorCategory(eq.category)) return eq
-          const wx = room.x + eq.x
-          const wz = room.z + eq.z
-          if (!insideRefrigerated(current, wx, wz)) return eq
-          const snapped = snapOutdoorUnit(current, eq, wx, wz, { mount: eq.mount || 'wall' })
-          setNotice(snapped.warning || t('designer.movedOut'))
-          return { ...eq, x: snapped.x - room.x, z: snapped.z - room.z, rotation: snapped.rotation, mount: eq.mount || snapped.mount }
-        }),
-      })))
-    },
+    onGestureEnd: () => {},
     onCreateRect,
     onCreatePolygon,
     walls: panelPlan.walls || [],
@@ -1635,9 +1619,7 @@ export default function DesignerApp({
               {(tool === 'draw' || tool === 'polygon') && (
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 650 }}>
                   {t('designer.roomType')}
-                  <select data-testid="room-type" aria-label={t('designer.roomType')} value={drawType} onChange={(event) => setDrawType(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 4, height: 32, borderRadius: 6, border: '1px solid #d6d3d1' }}>
-                    {coldDutyTypes().map((type) => <option key={type.id} value={type.id}>{t(`cold.type.${type.id}`)}</option>)}
-                  </select>
+                  <DutyTypeSelect testId="room-type" ariaLabel={t('designer.roomType')} value={drawType} onChange={setDrawType} />
                 </label>
               )}
               {(tool === 'draw' || tool === 'polygon') && (

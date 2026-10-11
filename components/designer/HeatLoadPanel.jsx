@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useLocale } from '@/components/i18n/Locale'
 import { PRODUCTS, coldDutyTypes, getProduct, getType, isRefrigerated } from '@/lib/catalog'
 import { applyType, internalDims } from '@/lib/geometry'
@@ -77,6 +78,117 @@ function LineRow({ item, unitSystem, maxAbs, subtotal }) {
       </div>
       {unitSystem === 'IP' && (
         <div style={{ fontSize: 10, color: '#0f766e' }}>{formatPower(item.watts, 'IP')}</div>
+      )}
+    </div>
+  )
+}
+
+export function DutyTypeSelect({ value, onChange, testId = 'room-type', ariaLabel, onFocus, onBlur, extra = [] }) {
+  const { t } = useLocale()
+  const [open, setOpen] = useState(false)
+  const [box, setBox] = useState(null)
+  const buttonRef = useRef(null)
+  const menuRef = useRef(null)
+  const duties = coldDutyTypes()
+  const options = [
+    ...duties.map((type) => ({ id: type.id, label: t(`cold.type.${type.id}`) })),
+    ...extra.filter((item) => item?.id && !duties.some((type) => type.id === item.id)),
+  ]
+  const current = options.find((item) => item.id === value)
+  const label = current?.label || value || ''
+
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (event) => {
+      const target = event.target
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [open])
+
+  function placeMenu() {
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const width = Math.max(rect.width, 280)
+    let left = rect.right - width
+    if (left < 8) left = 8
+    if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - width)
+    const below = rect.bottom + 4
+    const top = below + 280 > window.innerHeight - 8 ? Math.max(8, rect.top - 4 - 280) : below
+    setBox({ left, top, width })
+  }
+
+  return (
+    <div>
+      <button
+        ref={buttonRef}
+        type="button"
+        data-testid={testId}
+        data-value={value || ''}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onClick={() => {
+          if (open) {
+            setOpen(false)
+            return
+          }
+          placeMenu()
+          setOpen(true)
+        }}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          width: '100%', minHeight: 34, marginTop: 4, padding: '6px 8px',
+          background: '#fff', color: '#1c1917', border: '1px solid #d6d3d1', borderRadius: 6,
+          fontSize: 13, lineHeight: 1.35, textAlign: 'left', cursor: 'pointer',
+        }}
+      >
+        <span style={{ whiteSpace: 'normal' }}>{label}</span>
+        <span aria-hidden="true" style={{ color: '#78716c', flex: 'none' }}>▾</span>
+      </button>
+      {open && box && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={menuRef}
+          role="listbox"
+          data-testid={`${testId}-menu`}
+          style={{
+            position: 'fixed', left: box.left, top: box.top, width: box.width, zIndex: 80,
+            maxHeight: 320, overflowY: 'auto', background: '#fff', border: '1px solid #d6d3d1',
+            borderRadius: 8, boxShadow: '0 12px 28px rgba(28,25,23,0.16)', padding: 4,
+          }}
+        >
+          {options.map((type) => (
+            <button
+              key={type.id}
+              type="button"
+              role="option"
+              aria-selected={type.id === value}
+              data-testid={`${testId}-option-${type.id}`}
+              onMouseDown={(event) => {
+                event.preventDefault()
+                onChange(type.id)
+                setOpen(false)
+              }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', padding: '7px 8px',
+                border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, lineHeight: 1.35,
+                background: type.id === value ? '#f0fdfa' : 'transparent', color: '#1c1917',
+                whiteSpace: 'normal',
+              }}
+            >
+              {type.label}
+            </button>
+          ))}
+        </div>,
+        document.body,
       )}
     </div>
   )
@@ -235,20 +347,15 @@ export default function HeatLoadPanel({
           <Fold title={t('designer.roomType')}>
           <label style={{ display: 'block' }}>
             <span style={labelStyle}>{t('designer.roomType')}</span>
-            <select
+            <DutyTypeSelect
+              testId="room-duty"
+              ariaLabel={t('designer.roomType')}
               value={room.type}
+              onChange={(id) => onPatch(applyType(room, id, rooms))}
               onFocus={onFocusEdit}
               onBlur={onBlurEdit}
-              onChange={(e) => onPatch(applyType(room, e.target.value, rooms))}
-              style={inputStyle}
-            >
-              {coldDutyTypes().map((type) => (
-                <option key={type.id} value={type.id}>{t(`cold.type.${type.id}`)}</option>
-              ))}
-              {!coldDutyTypes().some((type) => type.id === room.type) && (
-                <option value={room.type}>{getType(room.type).name}</option>
-              )}
-            </select>
+              extra={coldDutyTypes().some((type) => type.id === room.type) ? [] : [{ id: room.type, label: getType(room.type).name }]}
+            />
           </label>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

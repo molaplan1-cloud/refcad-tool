@@ -218,26 +218,103 @@ function edgeDimension(edge, points, scale, unitSystem) {
   )
 }
 
+function tagShift(eq, kind) {
+  const along = 0.1
+  const out = 0.16
+  const wall = eq.wall || 's'
+  if (kind === 'defrost') return { x: 0.1, y: -0.1, anchor: 'start' }
+  if (kind === 'controller' || eq.face === 'outer') {
+    if (wall === 'n') return { x: along, y: -out, anchor: 'start' }
+    if (wall === 'e') return { x: out, y: 0, anchor: 'start' }
+    if (wall === 'w') return { x: -out, y: 0, anchor: 'end' }
+    return { x: along, y: out, anchor: 'start' }
+  }
+  if (kind === 'door' || eq.face === 'frame') {
+    const side = eq.hostSide === -1 ? -1 : 1
+    if (wall === 'e' || wall === 'w') {
+      return { x: wall === 'e' ? out * 0.4 : -out * 0.4, y: side * along, anchor: wall === 'e' ? 'start' : 'end' }
+    }
+    return side < 0
+      ? { x: -along, y: wall === 'n' ? -out * 0.35 : out * 0.35, anchor: 'end' }
+      : { x: along, y: wall === 'n' ? -out * 0.35 : out * 0.35, anchor: 'start' }
+  }
+  if (wall === 'n') return { x: along, y: out, anchor: 'start' }
+  if (wall === 'e') return { x: -out, y: 0, anchor: 'end' }
+  if (wall === 'w') return { x: out, y: 0, anchor: 'start' }
+  return { x: along, y: -out, anchor: 'start' }
+}
+
+function ColdDeviceMark({ eq, scale }) {
+  const u = 0.05
+  const kind = eq.sensor === 'door'
+    ? 'door'
+    : eq.category === 'controller' || eq.sensor === 'controller'
+      ? 'controller'
+      : eq.sensor === 'defrost'
+        ? 'defrost'
+        : eq.sensor === 'room'
+          ? 'room'
+          : 'sensor'
+  const ink = kind === 'controller' ? '#0f766e' : kind === 'door' ? '#9a3412' : '#0369a1'
+  const shift = tagShift(eq, kind)
+  const font = 11 / Math.max(scale, 1)
+  const upright = -(eq.rotation || 0)
+  return (
+    <g data-testid={`cold-symbol-${kind}`}>
+      {kind !== 'defrost' && (
+        <g transform={`scale(${u})`} fill="#fff" stroke={ink} strokeWidth={0.32} strokeLinecap="round" strokeLinejoin="round">
+          {kind === 'door' && (
+            <>
+              <circle r={1.7} />
+              <line x1={0.2} y1={0.15} x2={1.55} y2={-1.5} />
+            </>
+          )}
+          {kind === 'controller' && (
+            <>
+              <rect x={-2.2} y={-1.55} width={4.4} height={3.1} rx={0.35} fill="#f0fdfa" />
+              <circle r={0.7} />
+            </>
+          )}
+          {kind === 'room' && (
+            <>
+              <circle r={1.55} />
+              <circle r={0.42} fill={ink} stroke="none" />
+            </>
+          )}
+          {kind === 'sensor' && <circle r={1.55} />}
+        </g>
+      )}
+      <g transform={`rotate(${upright})`}>
+        {kind === 'defrost' && (
+          <text textAnchor="middle" dominantBaseline="central" fontSize={2.2 * u} fontWeight={700} fill={ink} fontFamily="ui-sans-serif, system-ui, sans-serif">S</text>
+        )}
+        {eq.name && (
+          <text
+            x={shift.x}
+            y={shift.y}
+            textAnchor={shift.anchor}
+            dominantBaseline="middle"
+            fill={ink}
+            fontSize={font}
+            fontFamily="ui-sans-serif, system-ui, sans-serif"
+            stroke="#fff"
+            strokeWidth={3 / Math.max(scale, 1)}
+            paintOrder="stroke"
+          >
+            {eq.name}
+          </text>
+        )}
+      </g>
+    </g>
+  )
+}
+
 function EquipmentMark({ eq, scale }) {
   const w = eq.width
   const d = eq.depth
   const sw = 1 / Math.max(scale, 1)
-  if (eq.category === 'sensor') {
-    const letter = eq.sensor === 'door' ? 'O' : eq.sensor === 'defrost' ? 'S' : eq.sensor === 'evap' ? 'H' : 'T'
-    return (
-      <g>
-        <circle r={0.13} fill="#fff" stroke="#0369a1" strokeWidth={sw * 1.4} />
-        <text y={4 / scale} textAnchor="middle" fontSize={11 / scale} fill="#0369a1" fontFamily="ui-sans-serif, system-ui, sans-serif">{letter}</text>
-      </g>
-    )
-  }
-  if (eq.category === 'controller') {
-    return (
-      <g>
-        <rect x={-w / 2} y={-d / 2} width={w} height={d} rx={0.03} fill="#ccfbf1" stroke="#0f766e" strokeWidth={sw} />
-        <text y={4 / scale} textAnchor="middle" fontSize={12 / scale} fill="#0f766e" fontFamily="ui-sans-serif, system-ui, sans-serif">S</text>
-      </g>
-    )
+  if (eq.category === 'sensor' || eq.category === 'controller') {
+    return <ColdDeviceMark eq={eq} scale={scale} />
   }
   if (eq.category === 'column') {
     return <rect x={-w / 2} y={-d / 2} width={w} height={d} fill="#d6d3d1" stroke="#57534e" strokeWidth={sw * 1.4} />
@@ -1834,7 +1911,7 @@ export default function PlanView({
         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#44403c' }}>{t('north.label').toUpperCase()}</span>
       </div>
       {notice && (
-        <div style={{ position: 'absolute', left: 14, top: 44, maxWidth: 420, padding: '6px 10px', background: 'rgba(255,251,235,0.95)', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#78350f' }}>
+        <div data-testid="plan-notice" style={{ position: 'absolute', left: 14, top: 44, maxWidth: 460, padding: '6px 10px', background: 'rgba(255,251,235,0.95)', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#78350f' }}>
           {notice}
         </div>
       )}
