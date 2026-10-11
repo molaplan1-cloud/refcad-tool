@@ -1290,6 +1290,17 @@ export default function PlanView({
       setPoly([...polyRef.current, { x: point.x, z: point.z }])
       return
     }
+    if (!touchHand && p.placing) {
+      let room = hitRoom(p.rooms, world.x, world.z)
+      const outdoor = ['condenser', 'unit', 'combo', 'compressor'].includes(p.placing.category)
+      if (!room && outdoor) {
+        room = [...p.rooms].sort((a, b) => Math.hypot(a.x - world.x, a.z - world.z) - Math.hypot(b.x - world.x, b.z - world.z))[0]
+      }
+      if (room) {
+        p.onPlace(room.id, world.x, world.z, { at: Date.now(), px: event.clientX, py: event.clientY, shift: event.shiftKey })
+      }
+      return
+    }
     const panelEnd = event.target?.dataset?.panelEnd
     const panelWall = event.target?.dataset?.panelWall
     if (panelWall && !panelEnd && p.tool === 'select') {
@@ -1328,17 +1339,6 @@ export default function PlanView({
       chainRef.current = result?.chain || null
       setPoly(result?.chain?.anchor ? [result.chain.anchor] : [])
       setPolyHover(null)
-      return
-    }
-    if (!touchHand && p.placing) {
-      let room = hitRoom(p.rooms, world.x, world.z)
-      const outdoor = ['condenser', 'unit', 'combo', 'compressor'].includes(p.placing.category)
-      if (!room && outdoor) {
-        room = [...p.rooms].sort((a, b) => Math.hypot(a.x - world.x, a.z - world.z) - Math.hypot(b.x - world.x, b.z - world.z))[0]
-      }
-      if (room) {
-        p.onPlace(room.id, world.x, world.z, { at: Date.now(), px: event.clientX, py: event.clientY, shift: event.shiftKey })
-      }
       return
     }
     const routeHandle = event.target?.dataset?.routeHandle
