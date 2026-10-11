@@ -11,7 +11,7 @@ import { pipeSupports } from '@/lib/pipeTopology'
 import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
 import { sharedWallPanels } from '@/lib/sharedWalls'
 import { buildingDimensionSpec, dimensionStyle, layoutRoomTags } from '@/lib/sceneDims'
-import { doorFrame, resolveDoor } from '@/lib/doors'
+import { doorScenePose } from '@/lib/doors'
 import { translate } from '@/lib/i18n'
 
 const DOOR_PART = {
@@ -73,21 +73,21 @@ function footprintGeometry(points, height) {
 }
 
 function doorBasis(room, eq) {
-  const spec = resolveDoor(eq)
-  const frame = doorFrame(room, eq)
+  const pose = doorScenePose(room, eq)
   const basis = new THREE.Matrix4().makeBasis(
-    new THREE.Vector3(frame.tangent.x, 0, frame.tangent.z),
+    new THREE.Vector3(pose.tangent.x, 0, pose.tangent.z),
     new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(frame.outward.x, 0, frame.outward.z),
+    new THREE.Vector3(pose.outward.x, 0, pose.outward.z),
   )
   const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
   return {
-    w: frame.width,
-    h: frame.height,
-    hinge: frame.hinge,
+    w: pose.width,
+    h: pose.height,
+    hinge: pose.origin,
     quaternion,
-    spec,
-    thick: frame.thick,
+    spec: pose.spec,
+    thick: pose.thick,
+    slide: pose.slide,
   }
 }
 
@@ -123,7 +123,7 @@ function DoorLeaf({ w, h, glass = false }) {
 }
 
 function DoorMesh({ room, eq, onSelect, onContext }) {
-  const { w, h, hinge, quaternion, spec, thick } = useMemo(() => doorBasis(room, eq), [room, eq])
+  const { w, h, hinge, quaternion, spec, thick, slide } = useMemo(() => doorBasis(room, eq), [room, eq])
   const leafDepth = Math.max(0.04, Math.min(0.06, (thick || 0.1) * 0.45))
   const doors = (room.equipment || []).filter((item) => item.category === 'door')
   const number = Math.max(1, doors.findIndex((item) => item.id === eq.id) + 1)
@@ -156,7 +156,9 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
           <DoorPart part="frame" args={[jamb, h + 0.06, frameDepth]} position={[w + jamb / 2, h / 2, 0]} />
           <DoorPart part="frame" args={[w + jamb * 2, 0.06, frameDepth]} position={[w / 2, h + 0.02, 0]} />
           {style === 'freezer' && <DoorPart part="heat" args={[0.02, h, 0.02]} position={[0.05, h / 2, 0.07]} />}
-          {style === 'sliding' && <DoorPart part="track" args={[w * 1.7, 0.04, 0.06]} position={[w * 0.72, h + 0.08, 0]} />}
+          {style === 'sliding' && slide && (
+            <DoorPart part="track" args={[slide.rail.w, 0.04, slide.rail.d]} position={[slide.rail.x, slide.rail.y, slide.rail.z]} />
+          )}
           {(style === 'roll' || style === 'speed-roll') && (
             <DoorPart part="hood" args={[w + 0.28, style === 'speed-roll' ? 0.16 : 0.32, style === 'speed-roll' ? 0.16 : 0.28]} position={[w / 2, h + (style === 'speed-roll' ? 0.12 : 0.18), 0.08]} />
           )}
@@ -182,10 +184,10 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
               </group>
             </>
           )}
-          {style === 'sliding' && (
-            <group position={[w * 0.14, 0, 0.02]}>
-              <DoorPart part="leaf" args={[w - 0.08, h - 0.1, 0.04]} position={[w / 2, h / 2, 0]} />
-              <DoorPart part="handle" args={[0.1, 0.22, 0.03]} position={[w * 0.22, h * 0.48, 0.04]} />
+          {style === 'sliding' && slide && (
+            <group>
+              <DoorPart part="leaf" args={[slide.leaf.w, h - 0.08, slide.leaf.d]} position={[slide.leaf.x, slide.leaf.y, slide.leaf.z]} />
+              <DoorPart part="handle" args={[0.08, 0.22, 0.03]} position={[slide.leaf.x, h * 0.48, slide.leaf.z + slide.leaf.d / 2 + 0.02]} />
             </group>
           )}
           {(style === 'double' || style === 'impact') && (
