@@ -126,6 +126,7 @@ import { DisplayPanel } from './DisplayPanel'
 import { DoorPlaceControls, FloorMenu, HouseSettings, SelectionPanel, WallToolSettings, selectionLabel } from './FloorMenus'
 import { LibraryDialog, ProjectInfoDialog, ProjectSettingsDialog, ShellDialog, StartDialog } from './ProjectDialogs'
 import FacadeView from './FacadeView'
+import SectionView from './SectionView'
 import { ElectricGlyph, ServiceDrawing, ServiceMenu } from './ServicesLayer'
 import { ModeChip, PlaceToast, modeChipText, placeFrame } from '@/components/mode/PlaceMode'
 import { judgePlacement, placeServiceNode, removeStacked, fixtureKey } from '@/lib/placeOnce'
@@ -180,6 +181,7 @@ import {
   buildElectricPdf,
   buildHydronicPdf,
   buildServicePdf,
+  partsList,
   SERVICE_SYSTEMS,
   ensureServices,
   hitService,
@@ -3358,7 +3360,7 @@ export default function FloorPlanApp() {
         plan={plan}
         locale={locale}
         setLocale={(next) => { setLocale(next); setPlan((current) => ({ ...current, locale: next })) }}
-        mode={view === '3d' ? '3d' : view === 'facade' ? 'facade' : sheetMode === 'site' ? 'site' : 'plan'}
+        mode={view === '3d' ? '3d' : view === 'facade' ? 'facade' : view === 'section' ? 'section' : sheetMode === 'site' ? 'site' : 'plan'}
         tool={tool}
         placing={placing}
         roomShape={roomShape}
@@ -3381,6 +3383,7 @@ export default function FloorPlanApp() {
         onMode={(next) => {
           if (next === '3d') setView('3d')
           else if (next === 'facade') setView('facade')
+          else if (next === 'section') setView('section')
           else if (next === 'site') { setWorkspace('piha'); setView('2d'); setSheetMode('site'); requestFit(plan, 'site'); setYardTool(null); setYardPoints([]) }
           else {
             const entering = view !== '2d' || sheetMode !== 'plan' || workspace === 'piha'
@@ -3497,7 +3500,9 @@ export default function FloorPlanApp() {
           if (notes.length) showToast(notes.join(' · '))
           else if (changed) showToast(t('toast.routesUpdated'))
           else showToast(t('service.upToDate'))
-          if (changed) commit(syncYardServices(clean))
+          // autoRoute already joined the devices in this workspace. Yard sync
+          // would rewire every system and draw cables the user did not ask for.
+          if (changed) commit(clean)
           setSvcPoints([])
         }}
         workspace={workspace}
@@ -3960,6 +3965,8 @@ export default function FloorPlanApp() {
                 setPanel('object')
               }}
             />
+          ) : view === 'section' ? (
+            <SectionView plan={plan} />
           ) : view === '2d' ? (
             <div
               ref={hostRef}
@@ -4834,6 +4841,17 @@ export default function FloorPlanApp() {
           )}
           {pick?.kind === 'room' && room && (
             <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>
+          )}
+          {partsList(plan).some((row) => row.key) && (
+            <div data-testid="zone-bom" style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>{t('zone.bom')}</div>
+              {partsList(plan).filter((row) => row.key).map((row) => (
+                <div key={row.code || row.key} data-testid="iv-bom-line" data-code={row.code || ''} style={{ display: 'flex', gap: 8, marginBottom: 4, fontSize: 12 }}>
+                  <span style={{ flex: 1 }}>{row.key ? t(row.key) : row.name}</span>
+                  <span style={{ color: '#78716c' }}>{num(row.qty, 1)} {row.unit}</span>
+                </div>
+              ))}
+            </div>
           )}
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#78716c', margin: '8px 0' }}>{t('bom.title')}</div>
           {rows.length === 0 && <div style={{ fontSize: 12, color: '#78716c' }}>{t('bom.empty')}</div>}
