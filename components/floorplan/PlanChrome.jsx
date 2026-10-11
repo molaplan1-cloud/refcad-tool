@@ -106,25 +106,31 @@ function EyeIcon({ on }) {
   )
 }
 
-export function LayerBar({ plan, workspace, sheet = 'plan', t, onToggle, onShowAll, onHideAll }) {
+export function LayerBar({ plan, workspace, sheet = 'plan', t, onToggle, onShowAll, onHideAll, onUnderlayLock }) {
   return (
     <div data-testid="layer-bar" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4', flexWrap: 'wrap', flexShrink: 0 }}>
-      {LAYER_EYES.map((item) => {
+      {LAYER_EYES.filter((item) => item.id !== 'underlay' || plan?.underlay?.image).map((item) => {
         const on = layerEyeOn(plan, item.id, workspace, sheet)
         const pinned = pinnedLayers(workspace).includes(item.id)
         return (
-          <button
-            key={item.id}
-            type="button"
-            data-testid={`layer-eye-${item.id}`}
-            aria-pressed={on}
-            title={pinned ? t('layer.pinned') : t(item.key)}
-            onClick={() => onToggle(item.id, !on)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 28, padding: '0 8px', borderRadius: 7, border: '1px solid #e7e5e4', background: on ? '#f0fdfa' : '#fff', color: on ? '#134e4a' : '#78716c', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-          >
-            <EyeIcon on={on} />
-            {t(item.key)}
-          </button>
+          <span key={item.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+            <button
+              type="button"
+              data-testid={`layer-eye-${item.id}`}
+              aria-pressed={on}
+              title={pinned ? t('layer.pinned') : t(item.key)}
+              onClick={() => onToggle(item.id, !on)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 28, padding: '0 8px', borderRadius: 7, border: '1px solid #e7e5e4', background: on ? '#f0fdfa' : '#fff', color: on ? '#134e4a' : '#78716c', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+            >
+              <EyeIcon on={on} />
+              {t(item.key)}
+            </button>
+            {item.id === 'underlay' && (
+              <button type="button" data-testid="layer-underlay-lock" aria-pressed={plan.underlay.locked !== false} title={plan.underlay.locked !== false ? t('underlay.unlock') : t('underlay.lock')} onClick={() => onUnderlayLock?.(plan.underlay.locked === false)} style={{ height: 28, padding: '0 8px', borderRadius: 7, border: '1px solid #e7e5e4', background: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                {plan.underlay.locked !== false ? t('underlay.lock') : t('underlay.unlock')}
+              </button>
+            )}
+          </span>
         )
       })}
       <button type="button" data-testid="layers-show-all" onClick={onShowAll} style={{ height: 28, padding: '0 8px', borderRadius: 7, border: '1px solid #d6d3d1', background: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{t('layer.showAll')}</button>
@@ -166,6 +172,7 @@ export function PlanChrome({
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
   access = null,
   onProjectInfo,
+  onImportUnderlay,
   compact = false,
   toolsOpen = false,
   onToggleTools,
@@ -261,6 +268,7 @@ export function PlanChrome({
         <button type="button" data-testid="house-settings" style={menuItem(panel === 'house')} onClick={() => { close(); onHouse() }}>{t('file.projectSettings')}</button>
         <button type="button" data-testid="example-house" style={menuItem(false)} onClick={() => { close(); onExample() }}>{t('file.example')}</button>
         <button type="button" data-testid="family-house" style={menuItem(false)} onClick={() => { close(); onFamily() }}>{t('file.apartment')}</button>
+        <button type="button" data-testid="import-underlay" style={menuItem(false)} onClick={() => { close(); onImportUnderlay?.() }}>{t('underlay.import')}</button>
       </Menu>
       <Menu id="edit" label={t('menu.edit')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="undo" title={t('edit.undo')} style={menuItem(false)} onClick={() => { close(); onUndo() }}>{t('edit.undo')}</button>
@@ -392,6 +400,7 @@ export function PlanChrome({
           <button type="button" data-testid="house-settings" style={menuItem(panel === 'house')} onClick={() => { close(); onHouse() }}>{t('file.projectSettings')}</button>
           <button type="button" data-testid="example-house" style={menuItem(false)} onClick={() => { close(); onExample() }}>{t('file.example')}</button>
           <button type="button" data-testid="family-house" style={menuItem(false)} onClick={() => { close(); onFamily() }}>{t('file.apartment')}</button>
+          <button type="button" data-testid="import-underlay" style={menuItem(false)} onClick={() => { close(); onImportUnderlay?.() }}>{t('underlay.import')}</button>
         </Menu>
         <Menu id="edit" label={t('menu.edit')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="undo" title={t('edit.undo')} style={menuItem(false)} onClick={() => { close(); onUndo() }}>{t('edit.undo')}</button>
