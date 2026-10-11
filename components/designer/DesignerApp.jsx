@@ -307,6 +307,7 @@ export default function DesignerApp({
   const [placingId, setPlacingId] = useState(null)
   const [rails, setRails] = useState(() => ({ ...readPanels(null), editBar: false }))
   const [innerDims, setInnerDims] = useState(true)
+  const [roomShape, setRoomShape] = useState('rect')
   const railsOwner = useRef('local')
   useEffect(() => {
     const id = user?.id || 'local'
@@ -1350,6 +1351,7 @@ export default function DesignerApp({
     onCommitRectangle,
     onEditDimension,
     innerDims,
+    roomShape,
     onUndo: undo,
     zoomCommand,
     onScale: (scale) => setZoomPercent(Math.round((scale / 36) * 100)),
@@ -1422,7 +1424,7 @@ export default function DesignerApp({
     router.push('/pohjakuva')
   }
 
-  const designName = placing?.name || (tool === 'draw' ? t('tool.rectangle') : tool === 'polygon' ? t('cold.wall') : tool === 'partition' ? t('tool.interior') : tool === 'pipe' ? t('designer.pipe') : tool === 'cable' ? t('designer.cable') : null)
+  const designName = placing?.name || (tool === 'draw' ? t('tool.room') : tool === 'polygon' ? t('cold.wall') : tool === 'partition' ? t('tool.interior') : tool === 'pipe' ? t('designer.pipe') : tool === 'cable' ? t('designer.cable') : null)
   const designDrawing = Boolean(designName && !placing)
   const designLabel = modeChipText({ name: designName, repeat: repeatPlace && Boolean(placing), drawing: designDrawing })
 
@@ -1850,6 +1852,15 @@ export default function DesignerApp({
                   <DutyTypeSelect testId="room-type" ariaLabel={t('designer.roomType')} value={drawType} onChange={setDrawType} />
                 </label>
               )}
+              {tool === 'draw' && (
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginTop: 8 }}>
+                  {t('cold.shape')}
+                  <select data-testid="room-shape" aria-label={t('cold.shape')} value={roomShape} onChange={(event) => setRoomShape(event.target.value === 'free' ? 'free' : 'rect')} style={{ display: 'block', width: '100%', marginTop: 4, height: 32, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                    <option value="rect">{t('cold.shape.rect')}</option>
+                    <option value="free">{t('cold.shape.free')}</option>
+                  </select>
+                </label>
+              )}
               {(tool === 'draw' || tool === 'polygon' || tool === 'partition') && (
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginTop: 8 }}>
                   {t('cold.panelThickness')}
@@ -1858,7 +1869,7 @@ export default function DesignerApp({
                   </select>
                 </label>
               )}
-              {tool === 'draw' && <div style={{ fontSize: 11, color: '#57534e', marginTop: 8, lineHeight: 1.4 }}>{t('cold.drawHint')}</div>}
+              {tool === 'draw' && <div style={{ fontSize: 11, color: '#57534e', marginTop: 8, lineHeight: 1.4 }}>{roomShape === 'free' ? t('cold.freeHint') : t('cold.drawHint')}</div>}
               {(tool === 'polygon' || tool === 'partition') && <div style={{ fontSize: 11, color: '#57534e', marginTop: 8, lineHeight: 1.4 }}>{t('cold.chainHint')}</div>}
               {(tool === 'pipe' || tool === 'cable') && (
                 <div data-testid="pipe-settings" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

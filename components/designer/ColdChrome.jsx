@@ -187,7 +187,7 @@ export default function ColdChrome({
   const drawButtons = (style) => (
     <>
       <button type="button" data-testid="tool-select" aria-pressed={selectOn} style={style(selectOn)} onClick={() => { close(); onTool('select') }}>{t('tool.select')}</button>
-      <button type="button" data-testid="tool-draw" title={t('designer.roomTitle')} aria-pressed={tool === 'draw'} style={style(tool === 'draw')} onClick={() => { close(); onTool('draw') }}>{t('tool.rectangle')}</button>
+      <button type="button" data-testid="tool-draw" title={t('designer.roomTitle')} aria-pressed={tool === 'draw'} style={style(tool === 'draw')} onClick={() => { close(); onTool('draw') }}>{t('tool.room')}</button>
       <button type="button" data-testid="tool-polygon" aria-pressed={tool === 'polygon'} style={style(tool === 'polygon')} onClick={() => { close(); onTool('polygon') }}>{t('cold.wall')}</button>
       <button type="button" data-testid="tool-partition" aria-pressed={tool === 'partition'} style={style(tool === 'partition')} onClick={() => { close(); onTool('partition') }}>{t('tool.interior')}</button>
     </>
@@ -307,7 +307,7 @@ export default function ColdChrome({
         {drawButtons(menuItem)}
       </Menu>
       <Menu id="insert" label={t('menu.insert')} open={open} setOpen={setOpen} dock={dock}>
-        <button type="button" style={menuItem(tool === 'draw')} onClick={() => { close(); onTab('structure'); onTool('draw') }}>{t('tool.rectangle')}</button>
+        <button type="button" style={menuItem(tool === 'draw')} onClick={() => { close(); onTab('structure'); onTool('draw') }}>{t('tool.room')}</button>
         <button type="button" style={menuItem(tool === 'polygon')} onClick={() => { close(); onTab('structure'); onTool('polygon') }}>{t('cold.wall')}</button>
         <button type="button" style={menuItem(tool === 'partition')} onClick={() => { close(); onTab('structure'); onTool('partition') }}>{t('tool.interior')}</button>
         {COLD_TABS.filter((id) => id !== 'print' && id !== 'structure').map((id) => (
