@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "postinstall": "node scripts/copy-pdf-worker.js",
     "prebuild": "node scripts/check-lockfile.js",
     "build": "next build",
     "start": "next start",
@@ -18,9 +19,11 @@
     "@react-three/fiber": "^8.17.14",
     "@vercel/kv": "^3.0.0",
     "bcryptjs": "^2.4.3",
+    "heic2any": "^0.0.4",
     "jose": "^5.9.6",
     "jspdf": "^2.5.2",
     "next": "14.2.35",
+    "pdfjs-dist": "^4.8.69",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.169.0"

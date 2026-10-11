@@ -102,6 +102,25 @@ import { accessFor } from '@/lib/access'
 import { stampDemoWatermark } from '@/lib/watermark'
 import { applyDisplay, displayCommand, labelObstacles, layoutRoomLabels, normalizeDisplay } from '@/lib/display'
 import { layerEyeOn, revealedSystems, setEveryLayer, setLayerEye } from '@/lib/layers'
+import {
+  acceptUnderlaySuggestions,
+  applyPdfScale,
+  calibrateUnderlay,
+  moveUnderlay,
+  patchUnderlay,
+  placeUnderlay,
+  rejectUnderlaySuggestions,
+  rotateUnderlay,
+  setUnderlayLocked,
+  setUnderlayOpacity,
+  setUnderlayRotation,
+  toggleSuggestion,
+  underlayHit,
+  underlaySnapGuides,
+} from '@/lib/underlay'
+import { deskewStored, readUnderlayFile, renderPdfPage, traceStored } from '@/lib/underlayFile'
+import { UnderlayDrawing } from './UnderlayLayer'
+import { PdfPageDialog, UnderlayPanel } from './UnderlayPanel'
 import { blockHeightForLines, dimensionFont, fitLines, LINE_LEADING, paperFont, placeDimensionText } from '@/lib/annotations'
 import { DisplayPanel } from './DisplayPanel'
 import { DoorPlaceControls, FloorMenu, HouseSettings, SelectionPanel, WallToolSettings, selectionLabel } from './FloorMenus'
@@ -995,6 +1014,11 @@ export default function FloorPlanApp() {
   const [placing, setPlacing] = useState(null)
   const [repeatPlace, setRepeatPlace] = useState(false)
   const [toast, setToast] = useState('')
+  const [underlayPick, setUnderlayPick] = useState(null)
+  const [underlayDistance, setUnderlayDistance] = useState('10000')
+  const [pdfAsk, setPdfAsk] = useState(null)
+  const underlayDrag = useRef(null)
+  const underlayFileRef = useRef(null)
   const [flashId, setFlashId] = useState(null)
   const [fixtureQuery, setFixtureQuery] = useState('')
   const [draft, setDraft] = useState(null)
@@ -1359,6 +1383,7 @@ export default function FloorPlanApp() {
         freeAngle,
         joinWalls: true,
         enabled,
+        guides: underlaySnapGuides(plan),
       })
     }
     if (tool === 'room') {
@@ -1373,6 +1398,7 @@ export default function FloorPlanApp() {
         freeAngle,
         joinWalls: true,
         enabled,
+        guides: underlaySnapGuides(plan),
       })
     }
     if (tool === 'door' || tool === 'window' || tool === 'passage') {
@@ -1716,6 +1742,11 @@ export default function FloorPlanApp() {
     })
     setSnapVisual(allowed ? visual : null)
     setCursor(world)
+    if (underlayDrag.current && dragBefore.current) {
+      underlayDrag.current.moved = true
+      setPlan(moveUnderlay(dragBefore.current, world.x - underlayDrag.current.x, world.z - underlayDrag.current.z))
+      return
+    }
     const canTrack = !draft && !commandRef.current && (tool === 'exterior' || tool === 'interior' || tool === 'door' || tool === 'window' || placing)
     if (canTrack) {
       const current = trackRef.current
@@ -1836,7 +1867,8 @@ export default function FloorPlanApp() {
     const movedNode = dragNode.current?.moved
     const draggedFixture = Boolean(dragId.current)
     const movedCorner = dragCorner.current?.moved
-    if ((dragId.current || dragLabel.current || dragOpen.current || movedYard || movedRoute || movedNode || movedCorner) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
+    const movedUnderlay = underlayDrag.current?.moved
+    if ((dragId.current || dragLabel.current || dragOpen.current || movedYard || movedRoute || movedNode || movedCorner || movedUnderlay) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
     dragId.current = null
     dragCorner.current = null
     dragOpen.current = null
@@ -1844,6 +1876,7 @@ export default function FloorPlanApp() {
     dragYard.current = null
     routeDrag.current = null
     dragNode.current = null
+    underlayDrag.current = null
     dragBefore.current = null
     if (movedYard?.collection === 'objects') setPlan((current) => syncYardServices(current))
     if (draggedFixture) {
@@ -2297,6 +2330,19 @@ export default function FloorPlanApp() {
     if (event.button !== 0) return
     setMenu(null)
     const world = toWorld(event)
+    if (underlayPick && (underlayPick.mode === 'calibrate' || underlayPick.mode === 'deskew') && sheetMode !== 'site') {
+      const points = [...(underlayPick.points || []), { x: world.x, z: world.z }]
+      if (underlayPick.mode === 'deskew' && points.length >= 4) {
+        const four = points.slice(0, 4)
+        setUnderlayPick(null)
+        deskewStored(plan.underlay, four).then((patch) => {
+          if (patch) commit(patchUnderlay(plan, patch))
+        }).catch(() => showToast(t('underlay.pdfFail')))
+        return
+      }
+      setUnderlayPick({ ...underlayPick, points: points.slice(0, underlayPick.mode === 'calibrate' ? 2 : 4) })
+      return
+    }
     if (command && !svcTool && !yardTool && !placing && (tool === 'select' || tool === 'detect')) {
       const point = snappedPoint(world)
       if (command.name === 'shift-wall' && command.step === 'from') {
@@ -2382,6 +2428,11 @@ export default function FloorPlanApp() {
       return
     }
     const hit = hitTest(plan, world)
+    if (tool === 'select' && !placing && !svcTool && hit.kind === 'canvas' && underlayHit(plan.underlay, world) && plan.underlay?.locked === false) {
+      underlayDrag.current = { x: world.x, z: world.z, moved: false }
+      dragBefore.current = plan
+      return
+    }
     if (yardHit && hit.kind !== 'opening' && hit.kind !== 'wall' && (yardHit.collection !== 'plot' || hit.kind === 'canvas')) {
       choose(yardHit)
       if (yardHit.movable) {
@@ -3381,6 +3432,7 @@ export default function FloorPlanApp() {
         onExample={loadExample}
         onFamily={loadFamily}
         onProjectInfo={() => setInfoOpen(true)}
+        onImportUnderlay={() => underlayFileRef.current?.click()}
         onCloseRoom={() => closeRoom(poly)}
         onYardTool={(id) => {
           if (!id || id === yardTool) { exitToSelect(); return }
@@ -3583,7 +3635,64 @@ export default function FloorPlanApp() {
         onToggle={(id, visible) => setPlan((current) => setLayerEye(current, id, visible, workspace, sheetKey))}
         onShowAll={() => setPlan((current) => setEveryLayer(current, true, workspace, sheetKey))}
         onHideAll={() => setPlan((current) => setEveryLayer(current, false, workspace, sheetKey))}
+        onUnderlayLock={(locked) => setPlan((current) => setUnderlayLocked(current, locked))}
       />
+      <input
+        ref={underlayFileRef}
+        data-testid="underlay-file"
+        type="file"
+        accept="application/pdf,.pdf,image/png,image/jpeg,.jpg,.jpeg,.heic,.heif,image/heic,image/heif"
+        style={{ display: 'none' }}
+        onChange={async (event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          if (!file) return
+          try {
+            const read = await readUnderlayFile(file)
+            if (read.kind === 'pdf') {
+              setPdfAsk({ ...read, page: 1 })
+              return
+            }
+            let next = placeUnderlay(plan, read)
+            try {
+              next = { ...next, underlay: await traceStored(next.underlay, false) }
+            } catch { /* lines can be traced again from the panel */ }
+            commit(next)
+            setTool('select')
+            setUnderlayPick(null)
+            requestFit(next, 'plan')
+            if (read.shrunk) showToast(t('underlay.tooBig'))
+          } catch {
+            const heic = /heic|heif/i.test(file.name || '')
+            showToast(t(heic ? 'underlay.heicFail' : 'underlay.pdfFail'))
+          }
+        }}
+      />
+      {pdfAsk && (
+        <PdfPageDialog
+          t={t}
+          page={pdfAsk.page}
+          count={pdfAsk.pageCount}
+          onPage={(page) => setPdfAsk((current) => (current ? { ...current, page: Math.min(Math.max(1, page), current.pageCount) } : current))}
+          onClose={() => setPdfAsk(null)}
+          onUse={async () => {
+            try {
+              const rendered = await renderPdfPage(pdfAsk.bytes, pdfAsk.page || 1)
+              let next = placeUnderlay(plan, { ...rendered, name: pdfAsk.name, page: rendered.page, pageCount: rendered.pageCount })
+              try {
+                next = { ...next, underlay: await traceStored(next.underlay, false) }
+              } catch { /* tracing stays available from the panel */ }
+              commit(next)
+              setTool('select')
+              setPdfAsk(null)
+              requestFit(next, 'plan')
+              if (rendered.shrunk) showToast(t('underlay.tooBig'))
+            } catch {
+              showToast(t('underlay.pdfFail'))
+            }
+          }}
+        />
+      )}
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
         {compact && drawer && (
@@ -3599,6 +3708,54 @@ export default function FloorPlanApp() {
           <div data-testid="workspace-side-title" style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.4, color: '#0f766e', margin: '0 4px 8px' }}>{workspaceName}</div>
           {workspace === 'rakenne' && (
             <p style={{ margin: '0 4px 8px', fontSize: 12, lineHeight: 1.45, color: '#44403c' }}>{t('panel.structure')}</p>
+          )}
+          {workspace === 'rakenne' && sheetMode !== 'site' && (
+            <UnderlayPanel
+              t={t}
+              underlay={plan.underlay}
+              pick={underlayPick}
+              distance={underlayDistance}
+              onDistance={setUnderlayDistance}
+              onOpacity={(opacity) => setPlan((current) => setUnderlayOpacity(current, opacity))}
+              onLock={(locked) => setPlan((current) => setUnderlayLocked(current, locked))}
+              onRotate={(delta) => setPlan((current) => rotateUnderlay(current, delta))}
+              onAngle={(deg) => setPlan((current) => setUnderlayRotation(current, deg))}
+              onCalibrate={() => { setTool('select'); setUnderlayPick({ mode: 'calibrate', points: [] }) }}
+              onApplyDistance={() => {
+                if ((underlayPick?.points || []).length < 2) return
+                const mm = Number(String(underlayDistance).replace(',', '.'))
+                commit(calibrateUnderlay(plan, underlayPick.points[0], underlayPick.points[1], mm))
+                setUnderlayPick(null)
+              }}
+              onPdfScale={(ratio, dpi) => commit(applyPdfScale(plan, { ratio, dpi }))}
+              onDeskew={() => { setTool('select'); setUnderlayPick({ mode: 'deskew', points: [] }) }}
+              onSnap={async (snapLines) => {
+                let next = patchUnderlay(plan, { snapLines })
+                if (snapLines && !(next.underlay.lines || []).length) {
+                  try {
+                    const traced = await traceStored(next.underlay, false)
+                    next = { ...next, underlay: { ...traced, snapLines: true } }
+                  } catch { /* the checkbox still records the choice */ }
+                }
+                commit(next)
+              }}
+              onPdf={(includeInPdf) => setPlan((current) => patchUnderlay(current, { includeInPdf }))}
+              onDetect={async () => {
+                if (!plan.underlay?.image) return
+                try {
+                  const traced = await traceStored(plan.underlay, true)
+                  commit({ ...plan, underlay: traced })
+                  if (!traced.suggestions.length) showToast(t('underlay.emptyDetect'))
+                } catch {
+                  showToast(t('underlay.pdfFail'))
+                }
+              }}
+              onAcceptAll={() => commit(acceptUnderlaySuggestions(plan, 'all'))}
+              onAcceptSelected={() => commit(acceptUnderlaySuggestions(plan, 'selected'))}
+              onReject={() => commit(rejectUnderlaySuggestions(plan))}
+              onToggle={(id) => setPlan((current) => toggleSuggestion(current, id))}
+              onRemove={() => { commit({ ...plan, underlay: null }); setUnderlayPick(null) }}
+            />
           )}
           {workspace === 'rakenne' && doorSchedule(plan).length > 0 && (
             <div data-testid="door-schedule" style={{ margin: '4px 4px 12px' }}>
@@ -3925,6 +4082,17 @@ export default function FloorPlanApp() {
                 <g data-testid="plan-camera" transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
                 <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} fill="#fbfaf7" stroke="#1c1917" strokeWidth={1.4} />
                 <rect x={sheet.x + 4} y={sheet.y + 4} width={sheet.w - 8} height={sheet.h - 8} fill="none" stroke="#a8a29e" strokeWidth={0.6} />
+                {sheetMode !== 'site' && (
+                  <UnderlayDrawing
+                    underlay={plan.underlay}
+                    X={X}
+                    Y={Y}
+                    scale={layout.scale * k}
+                    picks={underlayPick?.points || []}
+                    picking={Boolean(underlayPick)}
+                    onSuggestion={(id) => setPlan((current) => toggleSuggestion(current, id))}
+                  />
+                )}
                 <g data-testid="structure-layer" opacity={workspace === 'rakenne' ? 1 : 0.32} style={{ pointerEvents: workspace === 'rakenne' ? 'auto' : 'none' }}>
                 {sheetMode !== 'site' && visibleRooms(plan).map((item) => (
                   <polygon

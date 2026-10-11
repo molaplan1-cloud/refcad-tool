@@ -69,6 +69,9 @@ export function DisplayPanel({ plan, display, workspace = 'rakenne', sheet = 'pl
         <Check testid="show-opening-sizes" label={t('display.openingSizes')} checked={display.openingSizes} onChange={(openingSizes) => onChange({ openingSizes })} />
         <Check testid="show-structures" label={t('display.structures')} checked={display.structures} onChange={(structures) => onChange({ structures })} />
         <Check testid="show-fixtures" label={t('display.fixtures')} checked={layerEyeOn(plan, 'fixtures', workspace, sheet)} onChange={(visible) => onLayer('fixtures', visible)} />
+        {plan?.underlay?.image && (
+          <Check testid="show-underlay" label={t('underlay.layer')} checked={layerEyeOn(plan, 'underlay', workspace, sheet)} onChange={(visible) => onLayer('underlay', visible)} />
+        )}
       </div>
       <div style={{ fontSize: 12, fontWeight: 700, margin: '8px 0 4px' }}>{t('display.services')}</div>
       {SERVICE_SYSTEMS.map((item) => (
