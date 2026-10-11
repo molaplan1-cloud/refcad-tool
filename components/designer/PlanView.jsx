@@ -12,7 +12,8 @@ import { highlightedPorts, pipeAppearance, snapPort } from '@/lib/pipeTopology'
 import { followEndpoint, moveSegmentPoints, moveVertexPoints, riseMetres, translatePoints } from '@/lib/routeEdit'
 import { designerHits, mergeIds, selectionBox } from '@/lib/cadEdit'
 import { calculateProject } from '@/lib/heatLoad'
-import { doorPlanFigures } from '@/lib/doors'
+import { doorOpensOut, doorPlanFigures } from '@/lib/doors'
+import { dragColdDevice, followHosts, isColdDevice, reseatWallDevices } from '@/lib/coldDevices'
 import {
   applyBox,
   applyOutline,
@@ -322,7 +323,7 @@ function DoorGlyph({ room, eq, scale }) {
   const drawn = doorPlanFigures(room, eq)
   const px = (n) => n / scale
   return (
-    <g data-eq={eq.id} data-door-style={drawn.style}>
+    <g data-eq={eq.id} data-door-style={drawn.style} data-leaf={doorOpensOut(eq, room) ? 'out' : 'in'}>
       {drawn.figures.map((fig, index) => {
         if (fig.kind === 'rect') {
           return (
@@ -796,7 +797,7 @@ export default function PlanView({
         const limited = clampResizeBox(room, g.orig, left, top, right, bottom)
         if (!limited) return
         p.onPreview(g.orig.map((item) => (
-          item.id === room.id ? applyBox(item, limited.left, limited.top, limited.right, limited.bottom) : item
+          item.id === room.id ? reseatWallDevices(applyBox(item, limited.left, limited.top, limited.right, limited.bottom)) : item
         )))
         return
       }
@@ -811,7 +812,7 @@ export default function PlanView({
         if (parent && !footprintInside(parent, proposed)) return
         const children = g.orig.filter((item) => item.parentId === room.id)
         if (children.some((child) => !footprintInside(proposed, child))) return
-        p.onPreview(g.orig.map((item) => (item.id === room.id ? proposed : item)))
+        p.onPreview(g.orig.map((item) => (item.id === room.id ? reseatWallDevices(proposed) : item)))
         return
       }
       if (g.kind === 'route') {
@@ -843,16 +844,17 @@ export default function PlanView({
         p.onPreviewCables?.(follow(g.cables))
         p.onPreview(g.orig.map((room) => {
           if (room.id !== g.roomId) return room
-          return {
-            ...room,
-            equipment: room.equipment.map((eq) => {
-              if (eq.id !== g.eqId) return eq
-              const localX = eq.x + dx
-              const localZ = eq.z + dz
-              if (eq.category === 'door') return { ...eq, ...snapDoorToWall(room, localX, localZ, eq.width) }
-              return { ...eq, x: localX, z: localZ }
-            }),
-          }
+          const equipment = room.equipment.map((eq) => {
+            if (eq.id !== g.eqId) return eq
+            const localX = eq.x + dx
+            const localZ = eq.z + dz
+            if (isColdDevice(eq)) {
+              return dragColdDevice(eq, room, room.x + localX, room.z + localZ, g.orig) || eq
+            }
+            if (eq.category === 'door') return { ...eq, ...snapDoorToWall(room, localX, localZ, eq.width) }
+            return { ...eq, x: localX, z: localZ }
+          })
+          return { ...room, equipment: followHosts(room, equipment, g.eqId) }
         }))
       }
     }
@@ -1452,7 +1454,7 @@ export default function PlanView({
                   const ex = room.x + eq.x
                   const ez = room.z + eq.z
                   return (
-                    <g key={eq.id} data-eq={eq.id} data-cat={eq.category} data-style={eq.style || ''} transform={`translate(${ex} ${ez}) rotate(${eq.rotation || 0})`}>
+                    <g key={eq.id} data-eq={eq.id} data-cat={eq.category} data-style={eq.style || ''} data-sensor={eq.sensor || ''} data-face={eq.face || ''} data-host={eq.hostId || ''} transform={`translate(${ex} ${ez}) rotate(${eq.rotation || 0})`}>
                       {flashId === eq.id && <rect data-testid="place-flash" x={-eq.width / 2 - 0.06} y={-eq.depth / 2 - 0.06} width={eq.width + 0.12} height={eq.depth + 0.12} fill="none" stroke="#ea580c" strokeWidth={0.04} />}
                       <EquipmentMark eq={eq} scale={view.scale} />
                     </g>

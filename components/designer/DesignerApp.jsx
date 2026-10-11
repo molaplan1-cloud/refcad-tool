@@ -13,6 +13,7 @@ import HeatLoadPanel from './HeatLoadPanel'
 import { TEMPLATES, TEMPLATE_GROUPS, coldDutyTypes, getTemplate, isRefrigerated } from '@/lib/catalog'
 import { PANEL_MM, commitPanel, emptyPanelPlan, extendPanel, joinPanelCorner, roomsFromPanels, setPanelEnd, snapDoorToPanel } from '@/lib/coldPanels'
 import { applyUnitChoice, assignRooms, groupUnits } from '@/lib/coldUnits'
+import { formatDeviceLink, isColdDevice, removalPrompt } from '@/lib/coldDevices'
 import { ProjectInfoDialog, ProjectSettingsDialog } from '@/components/floorplan/ProjectDialogs'
 import ColdChrome from './ColdChrome'
 import { stampDemoWatermark } from '@/lib/watermark'
@@ -62,7 +63,7 @@ import { useViewport } from '@/components/useViewport'
 import { CadPrompt, MultiProperties } from '../floorplan/CadTools'
 import { calculateProject, resultFor } from '@/lib/heatLoad'
 import { panelSchedule } from '@/lib/sharedWalls'
-import { doorChoices, doorEquipmentPatch, doorSchedule, doorTypeById } from '@/lib/doors'
+import { doorChoices, doorEquipmentPatch, doorOpensOut, doorSchedule, doorTypeById } from '@/lib/doors'
 import { buildDxf, dxfFilename } from '@/lib/dxf'
 import { buildPdf, pdfFilename } from '@/lib/pdfExport'
 import SchematicView from './SchematicView'
@@ -217,15 +218,24 @@ function UnitBoard({ t, rooms, result, diversity, onDiversity, onAssign, onPick 
               {combos.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           )}
-          {group.rooms.map((room) => (
-            <div key={room.id} data-testid={`unit-room-${room.id}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
-              <span>{room.label} {room.name} · {room.kw.toFixed(2)} kW · {t('cold.evap')} {room.evapKw.toFixed(2)} kW</span>
-              <select data-testid={`unit-assign-${room.id}`} aria-label={t('cold.assign')} value={rooms.find((item) => item.id === room.id)?.unitId || ''} onChange={(event) => onAssign(room.id, event.target.value || null)} style={{ maxWidth: 140, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }}>
-                <option value="">{t('cold.unassigned')}</option>
-                {machines.map((item) => <option key={item.id} value={item.id}>{item.machine.name}</option>)}
-              </select>
+          {group.rooms.map((room) => {
+            const full = rooms.find((item) => item.id === room.id)
+            const linked = (full?.equipment || []).filter((eq) => isColdDevice(eq))
+            return (
+            <div key={room.id} data-testid={`unit-room-${room.id}`} style={{ marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span>{room.label} {room.name} · {room.kw.toFixed(2)} kW · {t('cold.evap')} {room.evapKw.toFixed(2)} kW</span>
+                <select data-testid={`unit-assign-${room.id}`} aria-label={t('cold.assign')} value={full?.unitId || ''} onChange={(event) => onAssign(room.id, event.target.value || null)} style={{ maxWidth: 140, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                  <option value="">{t('cold.unassigned')}</option>
+                  {machines.map((item) => <option key={item.id} value={item.id}>{item.machine.name}</option>)}
+                </select>
+              </div>
+              {linked.map((eq) => (
+                <div key={eq.id} data-testid={`device-link-${eq.id}`} style={{ fontSize: 11, color: '#44403c', marginTop: 2 }}>{formatDeviceLink(t, full, eq, rooms)}</div>
+              ))}
             </div>
-          ))}
+            )
+          })}
         </div>
       ))}
     </div>
@@ -541,6 +551,8 @@ export default function DesignerApp({
     const ids = selectedRef.current
     if (!ids.length) return
     const current = roomsRef.current
+    const prompt = removalPrompt(current, ids, t)
+    if (prompt && !window.confirm(prompt)) return
     const roomIds = new Set(current.map((room) => room.id))
     const pipeIds = new Set(pipesRef.current.map((pipe) => pipe.id))
     const cableIds = new Set(cablesRef.current.map((cable) => cable.id))
@@ -685,6 +697,10 @@ export default function DesignerApp({
       }
     }
     const eq = makeEquipment(placingId, room, placeX, placeZ, current)
+    if (eq.refused) {
+      setNotice(t(eq.refused === 'need-door' ? 'cold.needDoor' : 'cold.needEvap'))
+      return
+    }
     const warning = eq.warning
     delete eq.warning
     const candidate = { ...eq, x: room.x + eq.x, z: room.z + eq.z, w: eq.width, d: eq.depth, name: eq.name }
@@ -1845,13 +1861,20 @@ export default function DesignerApp({
             pushUndo()
             patchEquipment(menu.id, { doorFamily: family })
           }}
+          onDoorLeaf={() => {
+            const host = roomsRef.current.find((item) => (item.equipment || []).some((eq) => eq.id === menu.id))
+            const eq = host?.equipment?.find((item) => item.id === menu.id)
+            if (!eq) return
+            pushUndo()
+            patchEquipment(menu.id, { opensOut: !doorOpensOut(eq, host) })
+          }}
         />
       )}
     </div>
   )
 }
 
-function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily, onReroute, onHeight, onLock, onCad }) {
+function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily, onDoorLeaf, onReroute, onHeight, onLock, onCad }) {
   const { t } = useLocale()
   const host = rooms.find((room) => room.id === menu.id) || rooms.find((room) => (room.equipment || []).some((eq) => eq.id === menu.id))
   const eq = host?.equipment?.find((item) => item.id === menu.id) || null
@@ -1901,6 +1924,11 @@ function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAng
                   ))}
                 </select>
               </label>
+              <MenuBtn testid="ctx-door-leaf" onClick={() => onDoorLeaf?.()}>
+                {doorOpensOut(eq, host) ? t('cold.opensOut') : t('cold.opensIn')}
+                {' · '}
+                {t('ctx.leaf')}
+              </MenuBtn>
             </>
           )}
           {eq && eq.category !== 'door' && (

@@ -11,6 +11,7 @@ import { routeLength, REFRIGERANT_IDS as PIPE_REFS } from '@/lib/pipeSizing'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
 import { HEIGHT_PRESETS, insulationOptions, materialOptions, routeLength as polyLength } from '@/lib/routeEdit'
 import { defaultElevation, mountLabel } from '@/lib/placement'
+import { formatDeviceLink, isColdDevice } from '@/lib/coldDevices'
 
 const labelStyle = {
   fontSize: 10, color: '#78716c', fontWeight: 700,
@@ -351,6 +352,9 @@ export default function HeatLoadPanel({
       {selectedEquipment && (
         <div style={{ padding: 10, borderRadius: 8, border: '1px solid #e7e5e4', background: '#fff' }}>
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{selectedEquipment.name}</div>
+          {isColdDevice(selectedEquipment) && (
+            <div data-testid="device-link" style={{ fontSize: 12, color: '#0f766e', marginBottom: 8 }}>{formatDeviceLink(t, room, selectedEquipment, rooms)}</div>
+          )}
           <div style={{ fontSize: 11, color: '#78716c', marginBottom: 8 }}>
             {selectedEquipment.width} × {selectedEquipment.depth} × {selectedEquipment.height} m
             {selectedEquipment.capacityKw ? ` · ${selectedEquipment.capacityKw} kW` : ''}

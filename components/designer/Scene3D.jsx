@@ -11,7 +11,7 @@ import { pipeSupports } from '@/lib/pipeTopology'
 import { comboBody, equipmentPorts, internalCeiling, pointInOutline, resolvedElevation } from '@/lib/placement'
 import { sharedWallPanels } from '@/lib/sharedWalls'
 import { buildingDimensionSpec, dimensionStyle, layoutRoomTags } from '@/lib/sceneDims'
-import { resolveDoor } from '@/lib/doors'
+import { doorOpensOut, resolveDoor } from '@/lib/doors'
 
 const DOOR_PART = {
   frame: '#3a3f46',
@@ -131,6 +131,8 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
   const doors = (room.equipment || []).filter((item) => item.category === 'door')
   const number = Math.max(1, doors.findIndex((item) => item.id === eq.id) + 1)
   const style = spec.style
+  const yaw = doorOpensOut(eq, room) ? -1 : 1
+  const pair = style === 'impact' ? 0.16 : 0.36
   const jamb = 0.05
   const strips = Math.max(6, Math.round(w / 0.12))
   const swing = style === 'hinged' || style === 'freezer' || style === 'fire' || style === 'glass'
@@ -176,7 +178,7 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
                   <meshStandardMaterial color="#1c1917" metalness={0.6} roughness={0.3} />
                 </mesh>
               ))}
-              <group rotation={[0, 0.16, 0]}>
+              <group rotation={[0, yaw * 0.16, 0]}>
                 <DoorLeaf w={w} h={h} glass={style === 'glass'} />
                 <DoorPart part="handle" args={[0.025, 0.22, 0.035]} position={[w * 0.78, h * 0.48, 0.055]} />
                 <DoorPart part="handle" args={[0.1, 0.022, 0.03]} position={[w * 0.78, h * 0.58, 0.05]} />
@@ -191,10 +193,10 @@ function DoorMesh({ room, eq, onSelect, onContext }) {
           )}
           {(style === 'double' || style === 'impact') && (
             <>
-              <group rotation={[0, style === 'impact' ? -0.16 : -0.36, 0]}>
+              <group rotation={[0, yaw * pair, 0]}>
                 <DoorPart part="leaf" args={[w / 2 - 0.03, h - 0.08, 0.04]} position={[w / 4, h / 2, 0.02]} />
               </group>
-              <group position={[w, 0, 0]} rotation={[0, style === 'impact' ? 0.16 : 0.36, 0]}>
+              <group position={[w, 0, 0]} rotation={[0, -yaw * pair, 0]}>
                 <DoorPart part="leaf" args={[w / 2 - 0.03, h - 0.08, 0.04]} position={[-w / 4, h / 2, 0.02]} />
               </group>
             </>
