@@ -993,8 +993,9 @@ export default function PlanView({
       }
       if (g.kind === 'move') {
         const primary = g.orig.find((room) => room.id === g.id)
-        const anchorX = primary.x - primary.width / 2
-        const anchorZ = primary.z - primary.depth / 2
+        const half = primary.panelKey ? Math.max(0.02, (primary.wallThickness || 0.1) / 2) : 0
+        const anchorX = primary.x - primary.width / 2 - half
+        const anchorZ = primary.z - primary.depth / 2 - half
         const anchor = snapWorld(anchorX + (world.x - g.startX), anchorZ + (world.z - g.startZ), {
           scale: current.scale,
           grid: p.snapOn ? p.gridSize : 0,
