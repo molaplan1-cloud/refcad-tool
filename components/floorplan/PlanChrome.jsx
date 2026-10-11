@@ -288,6 +288,8 @@ export function PlanChrome({
         <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>{t('edit.removeAuto')}</button>
         <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
         <button type="button" data-testid="square-wall" style={menuItem(false)} onClick={() => { close(); onSquare?.() }}>{t('cad.square')}</button>
+        <button type="button" data-testid="menu-join-extend" style={menuItem(false)} onClick={() => { close(); onCommand?.('extend-wall') }}>{t('join.extend')}</button>
+        <button type="button" data-testid="menu-join-corner" style={menuItem(false)} onClick={() => { close(); onCommand?.('join-corner') }}>{t('join.corner')}</button>
         {editCommands}
       </Menu>
       <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen} dock={dock}>
@@ -423,6 +425,8 @@ export function PlanChrome({
           <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>{t('edit.removeAuto')}</button>
           <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
           <button type="button" data-testid="square-wall" style={menuItem(false)} onClick={() => { close(); onSquare?.() }}>{t('cad.square')}</button>
+          <button type="button" data-testid="menu-join-extend" style={menuItem(false)} onClick={() => { close(); onCommand?.('extend-wall') }}>{t('join.extend')}</button>
+          <button type="button" data-testid="menu-join-corner" style={menuItem(false)} onClick={() => { close(); onCommand?.('join-corner') }}>{t('join.corner')}</button>
           {editCommands}
         </Menu>
         <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen}>

@@ -1785,6 +1785,8 @@ export function FloorMenu({ menu, plan, onApply, onCommit, onNavigate }) {
           °
         </label>
         <CadSep />
+        <CadItem testid="ctx-join-extend" onClick={() => onNavigate('cad:extend-wall')}>{t('join.extend')}</CadItem>
+        <CadItem testid="ctx-join-corner" onClick={() => onNavigate('cad:join-corner')}>{t('join.corner')}</CadItem>
         <CadItem testid="ctx-shift-wall" onClick={() => onNavigate('cad:shift-wall')}>{t('draw.shiftWall')}</CadItem>
         <CadItem testid="ctx-split" onClick={() => act(splitWall(plan, wall.id, menu.at || { x: (wall.a.x + wall.b.x) / 2, z: (wall.a.z + wall.b.z) / 2 }), true)}>{t('ctx.split')}</CadItem>
         <CadItem testid="ctx-door" onClick={() => act(addOpening(plan, wall.id, menu.at || wall.a, 'door'), true)}>{t('ctx.addDoor')}</CadItem>
