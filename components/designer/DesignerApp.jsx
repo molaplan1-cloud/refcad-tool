@@ -647,11 +647,13 @@ export default function DesignerApp({
   }
 
   function syncPanels(next) {
+    const wasEmpty = (roomsRef.current || []).length === 0
     panelRef.current = next
     setPanelPlan(next)
     const synced = roomsFromPanels(next, roomsRef.current, drawTypeRef.current)
     roomsRef.current = synced
     setRooms(synced)
+    if (wasEmpty && synced.length > 0) setFitToken((token) => token + 1)
   }
 
   function onPanelSegment(a, b) {
@@ -711,7 +713,13 @@ export default function DesignerApp({
   function onCommitRectangle(corner, opposite) {
     const thickness = (Number(panelMmRef.current) || 100) / 1000
     const basis = sizeBasisRef.current === 'outer' ? 'outer' : 'inner'
-    const fitted = fitAgainstRooms(corner, opposite, roomsRef.current, { thickness, basis })
+    const scale = Math.max(6, ((Number(zoomPercent) || 100) / 100) * 36)
+    const fitted = fitAgainstRooms(corner, opposite, roomsRef.current, {
+      thickness,
+      basis,
+      grid: snapOn ? gridSize : 0,
+      radius: Math.max(16 / scale, gridSize, 0.12),
+    })
     if (fitted.rejected) {
       setNotice(t('cold.overlap'))
       return
