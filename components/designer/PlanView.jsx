@@ -514,6 +514,7 @@ export default function PlanView({
   onCommitRectangle,
   onEditDimension,
   innerDims = true,
+  roomShape = 'rect',
   onUndo,
   onSelectWall,
   walls = [],
@@ -570,7 +571,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
-    onPanelSegment, onPanelEnd, onChainStep, onCommitRectangle, onEditDimension, onUndo, onSelectWall, walls, selectedWalls, onScale,
+    onPanelSegment, onPanelEnd, onChainStep, onCommitRectangle, onEditDimension, onUndo, onSelectWall, walls, selectedWalls, onScale, roomShape,
     onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu, hand,
   }
 
@@ -586,7 +587,7 @@ export default function PlanView({
     polyTyped.current = ''
     setPoly([])
     setDraft(null)
-  }, [tool])
+  }, [tool, roomShape])
 
   useEffect(() => {
     if (!zoomCommand) return
@@ -718,7 +719,7 @@ export default function PlanView({
       const points = polyRef.current
       const toolNow = propsRef.current.tool
       const wallTool = toolNow === 'draw' || toolNow === 'polygon' || toolNow === 'partition'
-      const chainTool = toolNow === 'polygon' || toolNow === 'partition'
+      const chainTool = toolNow === 'polygon' || toolNow === 'partition' || (toolNow === 'draw' && propsRef.current.roomShape === 'free')
       if (event.key === 'Escape' && (drawing || points.length || chainRef.current)) {
         gesture.current = null
         typed.current = { field: 'w', w: '', d: '' }
@@ -772,7 +773,7 @@ export default function PlanView({
         if (event.key === 'Enter') {
           event.preventDefault()
           event.stopPropagation()
-          if (toolNow === 'draw' && chainRef.current?.corner) {
+          if (toolNow === 'draw' && propsRef.current.roomShape !== 'free' && chainRef.current?.corner) {
             const size = parseRectangleSize(polyTyped.current)
             if (size) {
               const corner = chainRef.current.corner
@@ -890,13 +891,14 @@ export default function PlanView({
       const world = { x: (px - current.offsetX) / current.scale, z: (py - current.offsetY) / current.scale, px, py }
       const p = propsRef.current
       const g = gesture.current
-      if ((p.tool === 'polygon' || p.tool === 'partition') && chainRef.current?.anchor) {
+      const chaining = p.tool === 'polygon' || p.tool === 'partition' || (p.tool === 'draw' && p.roomShape === 'free')
+      if (chaining && chainRef.current?.anchor) {
         const point = drawCursor(world, chainRef.current.anchor, p.walls, current.scale, polyTyped.current, {
           extraPoints: chainRef.current.start ? [chainRef.current.start] : [],
         })
         setPoly([chainRef.current.anchor])
         setPolyHover({ ...point, kind: 'endpoint' })
-      } else if (p.tool === 'draw' && chainRef.current?.corner) {
+      } else if (p.tool === 'draw' && p.roomShape !== 'free' && chainRef.current?.corner) {
         const point = rectangleCursor(world, chainRef.current.corner, p.walls, current.scale, polyTyped.current)
         setDraft({ kind: 'rect', x1: chainRef.current.corner.x, z1: chainRef.current.corner.z, x2: point.x, z2: point.z })
       }
@@ -1261,7 +1263,7 @@ export default function PlanView({
       return
     }
     if (!touchHand && (p.tool === 'draw' || p.tool === 'polygon' || p.tool === 'partition')) {
-      if (p.tool === 'draw') {
+      if (p.tool === 'draw' && p.roomShape !== 'free') {
         const corner = chainRef.current?.corner || null
         const point = rectangleCursor(world, corner, p.walls, view.scale, polyTyped.current)
         polyTyped.current = ''
@@ -1585,7 +1587,7 @@ export default function PlanView({
       : tool === 'polygon' || tool === 'partition'
         ? t('cold.chainHint')
         : tool === 'draw'
-          ? t('cold.drawHint')
+          ? (roomShape === 'free' ? t('cold.freeHint') : t('cold.drawHint'))
           : t('designer.selectHint')
   const grips = []
   const gripSeen = new Set()
