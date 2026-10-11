@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { usePlanLocale } from '@/components/i18n/Locale'
-import { FUSE_SERIES } from '@/lib/electric'
+import { CABLE_SECTIONS, FUSE_TYPES, MANUAL_FUSE_AMPS } from '@/lib/electric'
 import { HEAT_SOURCES, pexSize } from '@/lib/hydronic'
 import {
   PLACEABLES,
@@ -20,6 +20,8 @@ import {
   rerouteRun,
   rerouteSystem,
   runColor,
+  setCircuitNumber,
+  setCircuitOverride,
   serviceLegendRows,
   serviceObjectTitle,
   rotateServiceNode,
@@ -37,7 +39,9 @@ import {
   groupCableCallouts,
   layoutDeviceTags,
   longestRunSegment,
+  NODE_DOT_R_MM,
   runLabelText,
+  visibleRouteMarks,
   runStrokeMm,
   symbolFigures,
   symbolInk,
@@ -346,9 +350,9 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   const runs = [...visibleRuns].sort((a, b) => (order[a.system] ?? 9) - (order[b.system] ?? 9))
   const multi = new Set(runs.map((run) => run.system)).size > 1
   const drawn = runs.map((run) => ({ run, points: shiftPoints(run.points, run.system, multi, run.kind) }))
-  const fittings = collectFittings(drawn
+  const fittings = visibleRouteMarks(collectFittings(drawn
     .filter(({ run }) => run.kind !== 'floorheat' && run.kind !== 'efloor' && run.role !== 'loop')
-    .map((item) => ({ ...item.run, points: item.points })))
+    .map((item) => ({ ...item.run, points: item.points }))))
   const legend = SERVICE_SYSTEMS.filter((item) => (
     (!Array.isArray(legendSystems) || legendSystems.includes(item.id))
     && (layerVisible(plan, item.id) || (Array.isArray(revealSystems) && revealSystems.includes(item.id)))
@@ -577,7 +581,7 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
               const up = (src.y || 0) > (srcPrev.y || 0)
               return (
                 <g key={`riser-${run.id}-${index}`} data-testid="route-riser" style={{ pointerEvents: 'none' }}>
-                  <circle cx={X(point.x)} cy={Y(point.z)} r={1.6 * unit} fill="#fff" stroke={color} strokeWidth={0.2 * unit} />
+                  <circle cx={X(point.x)} cy={Y(point.z)} r={unit} fill="#fff" stroke={color} strokeWidth={0.2 * unit} />
                   {showText && <text x={X(point.x) + 2.2 * unit} y={Y(point.z) - 1.6 * unit} fontSize={cableFont} fontWeight="700" fill={color}>{up ? 'nousu' : 'lasku'}</text>}
                 </g>
               )
@@ -592,16 +596,18 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
                 <path d="M-3.5,-3 v-2.4 a3.5,3.5 0 0 1 7,0 v2.4" fill="none" stroke="#0f766e" strokeWidth={1} />
               </g>
             )}
-            {interactive && selected?.service?.target === 'run' && selected?.service?.id === run.id && points.map((point, index) => (
+            {interactive && selected?.service?.target === 'run' && selected?.service?.id === run.id && points.map((point, index) => {
+              const grip = Math.max(NODE_DOT_R_MM * unit, 8 / Math.max(zoom, 0.2))
+              const midX = index < points.length - 1 ? X((point.x + points[index + 1].x) / 2) : 0
+              const midY = index < points.length - 1 ? Y((point.z + points[index + 1].z) / 2) : 0
+              return (
               <g key={`edit-${run.id}-${index}`}>
                 <circle
                   data-testid={`route-vertex-${index}`}
                   cx={X(point.x)}
                   cy={Y(point.z)}
-                  r={5}
-                  fill="#fff"
-                  stroke="#0f766e"
-                  strokeWidth={1.6}
+                  r={grip}
+                  fill="transparent"
                   style={{ cursor: 'grab' }}
                   onPointerDown={(event) => {
                     event.stopPropagation()
@@ -609,24 +615,44 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
                     onRouteDown?.(event, { id: run.id, mode: 'vertex', index })
                   }}
                 />
+                <circle
+                  cx={X(point.x)}
+                  cy={Y(point.z)}
+                  r={NODE_DOT_R_MM * unit}
+                  fill="#fff"
+                  stroke="#0f766e"
+                  strokeWidth={Math.max(0.2 * unit, 1 / Math.max(zoom, 0.2))}
+                  style={{ pointerEvents: 'none' }}
+                />
                 {index < points.length - 1 && (
-                  <rect
-                    data-testid={`route-segment-${index}`}
-                    x={X((point.x + points[index + 1].x) / 2) - 4}
-                    y={Y((point.z + points[index + 1].z) / 2) - 4}
-                    width={8}
-                    height={8}
-                    fill="#0f766e"
-                    style={{ cursor: 'move' }}
-                    onPointerDown={(event) => {
-                      event.stopPropagation()
-                      event.preventDefault()
-                      onRouteDown?.(event, { id: run.id, mode: 'segment', index })
-                    }}
-                  />
+                  <>
+                    <rect
+                      data-testid={`route-segment-${index}`}
+                      x={midX - grip}
+                      y={midY - grip}
+                      width={grip * 2}
+                      height={grip * 2}
+                      fill="transparent"
+                      style={{ cursor: 'move' }}
+                      onPointerDown={(event) => {
+                        event.stopPropagation()
+                        event.preventDefault()
+                        onRouteDown?.(event, { id: run.id, mode: 'segment', index })
+                      }}
+                    />
+                    <rect
+                      x={midX - 0.6 * unit}
+                      y={midY - 0.6 * unit}
+                      width={1.2 * unit}
+                      height={1.2 * unit}
+                      fill="#0f766e"
+                      style={{ pointerEvents: 'none' }}
+                    />
+                  </>
                 )}
               </g>
-            ))}
+              )
+            })}
             <SlopeMark run={{ ...run, points }} X={X} Y={Y} show={showText} unit={unit} />
             {(run.kind === 'floorheat' || run.role === 'loop') && (
               <LoopTag points={points} label={run.loopIndex || run.outlet} X={X} Y={Y} unit={unit} />
@@ -671,11 +697,8 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
           <text data-testid={item.system === 'iv' ? 'duct-label' : 'cable-mark'} x={item.x} y={item.y} textAnchor="middle" dominantBaseline="central" fontSize={item.system === 'iv' ? ivFont : cableFont} fontWeight="650" fill={item.color || '#1c1917'} stroke="#fbfaf7" strokeWidth={0.45 * unit} paintOrder="stroke">{item.text}</text>
         </g>
       ))}
-      {fittings.bends.map((point, index) => (
-        <circle key={`bend-${index}`} cx={X(point.x)} cy={Y(point.z)} r={1.15 * unit} fill="#fff" stroke={runColor(point)} strokeWidth={0.2 * unit} style={{ pointerEvents: 'none' }} />
-      ))}
       {fittings.tees.map((point, index) => (
-        <circle key={`tee-${index}`} cx={X(point.x)} cy={Y(point.z)} r={1.05 * unit} fill={runColor(point)} style={{ pointerEvents: 'none' }} />
+        <circle key={`tee-${index}`} data-testid="tee-dot" cx={X(point.x)} cy={Y(point.z)} r={NODE_DOT_R_MM * unit} fill={runColor(point)} style={{ pointerEvents: 'none' }} />
       ))}
       {drawnNodes.map((node) => {
         const tag = deviceTags.get(node.id)
@@ -752,9 +775,6 @@ export function ServiceDrawing({ plan, X, Y, sheet, legendBox, interactive, prev
   )
 }
 
-const LOAD_KINDS = ['socket', 'switch', 'light', 'stove', 'oven', 'heater', 'radiator', 'ev', 'heatpump', 'iv-unit', 'boiler', 'washer', 'dishwasher']
-const SECTIONS = [1.5, 2.5, 4, 6, 10, 16, 25]
-
 function NumberField({ testid, label, value, onCommit, step = '0.1' }) {
   const [text, setText] = useState(value == null ? '' : String(value))
   useEffect(() => {
@@ -782,29 +802,50 @@ function NumberField({ testid, label, value, onCommit, step = '0.1' }) {
   )
 }
 
-function DeviceFields({ node, onPatch }) {
+function fuseChoices(current) {
+  const amp = Number(current)
+  if (!amp || MANUAL_FUSE_AMPS.includes(amp)) return MANUAL_FUSE_AMPS
+  return [...MANUAL_FUSE_AMPS, amp].sort((a, b) => a - b)
+}
+
+function sectionLabel(cores, section) {
+  return `${cores}x${String(section).replace('.', ',')}`
+}
+
+function DeviceFields({ node, plan, onPatch }) {
+  const { t } = usePlanLocale(plan)
+  const signal = node.role === 'signal' || node.kind === 'data' || node.kind === 'antenna'
   const cores = Number(node.voltage) >= 300 ? 5 : 3
   const circuitValue = node.circuitMode === 'manual' && node.circuit ? String(node.circuit) : 'auto'
+  const suggestedType = node.recommendedFuseType || 'C'
+  const suggestedFuse = node.recommendedFuse || node.fuse || '—'
+  const suggestedCable = node.recommendedCable || node.cable || '—'
+  const rcdValue = node.rcdManual ? (node.rcd ? 'on' : 'off') : 'auto'
+  const rcdAuto = node.recommendedRcd ? t('electric.rcdOn') : t('electric.rcdOff')
   return (
     <div data-testid="device-fields">
+      {!signal && (
+        <>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+            {t('electric.voltage')}
+            <select data-testid="device-voltage" style={fieldStyle} value={Number(node.voltage) >= 300 ? 400 : 230} onChange={(event) => onPatch({ voltage: Number(event.target.value) })}>
+              <option value={230}>230 V (1~ L+N+PE)</option>
+              <option value={400}>400 V (3~ L1–L3+N+PE)</option>
+            </select>
+          </label>
+          <NumberField testid="device-power" label={t('electric.power')} value={node.power ?? 0} step="1" onCommit={(power) => onPatch({ power })} />
+          <NumberField testid="device-cos" label={t('electric.cos')} value={node.cosPhi ?? 1} onCommit={(cosPhi) => onPatch({ cosPhi })} />
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+            {t('electric.connection')}
+            <select data-testid="device-connection" style={fieldStyle} value={node.connection === 'socket' ? 'socket' : 'fixed'} onChange={(event) => onPatch({ connection: event.target.value })}>
+              <option value="socket">{t('electric.socketConn')}</option>
+              <option value="fixed">{t('electric.fixed')}</option>
+            </select>
+          </label>
+        </>
+      )}
       <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-        Jännite
-        <select data-testid="device-voltage" style={fieldStyle} value={Number(node.voltage) >= 300 ? 400 : 230} onChange={(event) => onPatch({ voltage: Number(event.target.value) })}>
-          <option value={230}>230 V (1~ L+N+PE)</option>
-          <option value={400}>400 V (3~ L1–L3+N+PE)</option>
-        </select>
-      </label>
-      <NumberField testid="device-power" label="Teho (W)" value={node.power ?? 0} step="1" onCommit={(power) => onPatch({ power })} />
-      <NumberField testid="device-cos" label="cos φ" value={node.cosPhi ?? 1} onCommit={(cosPhi) => onPatch({ cosPhi })} />
-      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-        Liitäntä
-        <select data-testid="device-connection" style={fieldStyle} value={node.connection === 'socket' ? 'socket' : 'fixed'} onChange={(event) => onPatch({ connection: event.target.value })}>
-          <option value="socket">Pistorasia</option>
-          <option value="fixed">Kiinteä</option>
-        </select>
-      </label>
-      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-        Ryhmä
+        {t('electric.group')}
         <select
           data-testid="device-circuit"
           style={fieldStyle}
@@ -814,33 +855,33 @@ function DeviceFields({ node, onPatch }) {
             else onPatch({ circuitMode: 'manual', circuit: Number(event.target.value) })
           }}
         >
-          <option value="auto">Automaattinen{node.circuit ? ` (R${node.circuit})` : ''}</option>
-          {Array.from({ length: 16 }, (_, index) => index + 1).map((id) => (
+          <option value="auto">{t('electric.groupAuto', { group: node.circuit ? ` (R${node.circuit})` : '' })}</option>
+          {Array.from({ length: 24 }, (_, index) => index + 1).map((id) => (
             <option key={id} value={id}>R{id}</option>
           ))}
         </select>
       </label>
       {node.kind === 'switch' && (
         <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-          Kytkin
+          {t('electric.switchKind')}
           <select data-testid="switch-style" style={fieldStyle} value={node.switchStyle || 'single'} onChange={(event) => onPatch({ switchStyle: event.target.value })}>
-            <option value="single">Yksinkertainen</option>
-            <option value="two-way">Vaihtokytkin</option>
-            <option value="series">Sarjakytkin</option>
+            <option value="single">{t('electric.switchSingle')}</option>
+            <option value="two-way">{t('electric.switchTwo')}</option>
+            <option value="series">{t('electric.switchSeries')}</option>
           </select>
         </label>
       )}
       {node.kind === 'socket' && (
         <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-          Syöttö
+          {t('electric.feed')}
           <select data-testid="socket-feed" style={fieldStyle} value={node.feed === 'radial' ? 'radial' : 'chain'} onChange={(event) => onPatch({ feed: event.target.value })}>
-            <option value="chain">Ketjutus</option>
-            <option value="radial">Säteittäinen</option>
+            <option value="chain">{t('electric.chain')}</option>
+            <option value="radial">{t('electric.radial')}</option>
           </select>
         </label>
       )}
       <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-        Sulake
+        {t('electric.fuse')}
         <select
           data-testid="device-fuse"
           style={fieldStyle}
@@ -850,12 +891,43 @@ function DeviceFields({ node, onPatch }) {
             else onPatch({ fuseManual: true, fuse: Number(event.target.value) })
           }}
         >
-          <option value="auto">Automaattinen ({node.recommendedFuse || node.fuse || '—'} A)</option>
-          {FUSE_SERIES.map((amp) => <option key={amp} value={amp}>{amp} A</option>)}
+          <option value="auto">{t('electric.fuseAuto', { fuse: suggestedFuse, type: suggestedType })}</option>
+          {fuseChoices(node.fuse).map((amp) => <option key={amp} value={amp}>{amp} A</option>)}
         </select>
       </label>
       <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-        Kaapeli
+        {t('electric.fuseType')}
+        <select
+          data-testid="device-fuse-type"
+          style={fieldStyle}
+          value={node.fuseTypeManual ? node.fuseType : 'auto'}
+          onChange={(event) => {
+            if (event.target.value === 'auto') onPatch({ fuseTypeManual: false })
+            else onPatch({ fuseTypeManual: true, fuseType: event.target.value })
+          }}
+        >
+          <option value="auto">{t('electric.typeAuto', { type: suggestedType })}</option>
+          {FUSE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        {t('electric.rcd')}
+        <select
+          data-testid="device-rcd"
+          style={fieldStyle}
+          value={rcdValue}
+          onChange={(event) => {
+            if (event.target.value === 'auto') onPatch({ rcdManual: false })
+            else onPatch({ rcdManual: true, rcdOn: event.target.value === 'on' })
+          }}
+        >
+          <option value="auto">{t('electric.rcdAuto', { state: rcdAuto })}</option>
+          <option value="on">{t('electric.rcdOn')}</option>
+          <option value="off">{t('electric.rcdOff')}</option>
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        {t('electric.cable')}
         <select
           data-testid="device-cable"
           style={fieldStyle}
@@ -865,18 +937,23 @@ function DeviceFields({ node, onPatch }) {
             else onPatch({ cableManual: true, section: Number(event.target.value) })
           }}
         >
-          <option value="auto">Automaattinen ({node.cable || '—'})</option>
-          {SECTIONS.map((section) => (
-            <option key={section} value={section}>{cores}x{String(section).replace('.', ',')}</option>
+          <option value="auto">{t('electric.cableAuto', { cable: suggestedCable })}</option>
+          {CABLE_SECTIONS.map((section) => (
+            <option key={section} value={section}>{sectionLabel(signal ? 0 : cores, section)}</option>
           ))}
         </select>
       </label>
+      <div data-testid="fuse-suggestion" style={{ fontSize: 12, color: '#57534e', marginBottom: 8 }}>
+        {t('electric.calculated', { fuse: suggestedFuse, type: suggestedType })}
+        {suggestedCable ? ` · ${suggestedCable}` : ''}
+      </div>
       <div data-testid="device-size" style={{ fontSize: 12, color: '#44403c', marginBottom: 8, lineHeight: 1.45 }}>
         {`${Number(node.current || 0).toFixed(1).replace('.', ',')} A`}
+        {node.fuseType ? ` ${node.fuseType}` : ''}
         {node.phase ? ` · ${node.phase}` : ''}
         {node.cable ? ` · ${node.cable}` : ''}
         {node.marking ? ` · ${node.marking}` : ''}
-        {node.rcd ? ' · vikavirtasuoja 30 mA' : ''}
+        {node.rcd ? ` · ${t('electric.rcd')} ${t('electric.rcdOn')}` : ''}
         {node.dropPct ? ` · jännitehäviö ${String(node.dropPct).replace('.', ',')} %` : ''}
       </div>
       {node.warning ? (
@@ -1054,6 +1131,104 @@ function PanelSizeFields({ node, plan, onCommit }) {
   )
 }
 
+function GroupFields({ plan, circuitId, marking, onCommit }) {
+  const { t } = usePlanLocale(plan)
+  const circuit = (ensureServices(plan).electric?.circuits || []).find((item) => Number(item.id) === Number(circuitId))
+  if (!circuit) return null
+  const cores = Number(circuit.phases) >= 3 ? 5 : 3
+  const patch = (next) => onCommit(setCircuitOverride(plan, circuit.id, next))
+  const suggestedType = circuit.recommendedFuseType || circuit.fuseType || 'C'
+  const suggestedFuse = circuit.recommendedFuse || circuit.fuse || '—'
+  const suggestedCable = circuit.recommendedCable || circuit.cable || '—'
+  const rcdValue = circuit.rcdManual ? (circuit.rcd ? 'on' : 'off') : 'auto'
+  const rcdAuto = circuit.recommendedRcd ? t('electric.rcdOn') : t('electric.rcdOff')
+  return (
+    <div data-testid="group-fields">
+      {marking ? <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>{marking}</div> : null}
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        {t('electric.group')}
+        <select
+          data-testid="group-circuit"
+          style={fieldStyle}
+          value={circuit.id}
+          onChange={(event) => onCommit(setCircuitNumber(plan, circuit.id, Number(event.target.value)))}
+        >
+          {Array.from({ length: 24 }, (_, index) => index + 1).map((id) => (
+            <option key={id} value={id}>R{id}</option>
+          ))}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        {t('electric.fuse')}
+        <select
+          data-testid="group-fuse"
+          style={fieldStyle}
+          value={circuit.fuseManual ? String(circuit.fuse) : 'auto'}
+          onChange={(event) => {
+            if (event.target.value === 'auto') patch({ fuseManual: false })
+            else patch({ fuseManual: true, fuse: Number(event.target.value) })
+          }}
+        >
+          <option value="auto">{t('electric.fuseAuto', { fuse: suggestedFuse, type: suggestedType })}</option>
+          {fuseChoices(circuit.fuse).map((amp) => <option key={amp} value={amp}>{amp} A</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        {t('electric.fuseType')}
+        <select
+          data-testid="group-fuse-type"
+          style={fieldStyle}
+          value={circuit.fuseTypeManual ? circuit.fuseType : 'auto'}
+          onChange={(event) => {
+            if (event.target.value === 'auto') patch({ fuseTypeManual: false })
+            else patch({ fuseTypeManual: true, fuseType: event.target.value })
+          }}
+        >
+          <option value="auto">{t('electric.typeAuto', { type: suggestedType })}</option>
+          {FUSE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        {t('electric.rcd')}
+        <select
+          data-testid="group-rcd"
+          style={fieldStyle}
+          value={rcdValue}
+          onChange={(event) => {
+            if (event.target.value === 'auto') patch({ rcdManual: false })
+            else patch({ rcdManual: true, rcdOn: event.target.value === 'on' })
+          }}
+        >
+          <option value="auto">{t('electric.rcdAuto', { state: rcdAuto })}</option>
+          <option value="on">{t('electric.rcdOn')}</option>
+          <option value="off">{t('electric.rcdOff')}</option>
+        </select>
+      </label>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
+        {t('electric.cable')}
+        <select
+          data-testid="group-cable"
+          style={fieldStyle}
+          value={circuit.cableManual ? String(circuit.section) : 'auto'}
+          onChange={(event) => {
+            if (event.target.value === 'auto') patch({ cableManual: false })
+            else patch({ cableManual: true, section: Number(event.target.value) })
+          }}
+        >
+          <option value="auto">{t('electric.cableAuto', { cable: suggestedCable })}</option>
+          {CABLE_SECTIONS.map((section) => (
+            <option key={section} value={section}>{sectionLabel(cores, section)}</option>
+          ))}
+        </select>
+      </label>
+      <div data-testid="group-suggestion" style={{ fontSize: 12, color: '#57534e', marginBottom: 8 }}>
+        {t('electric.calculated', { fuse: suggestedFuse, type: suggestedType })}
+        {suggestedCable ? ` · ${suggestedCable}` : ''}
+      </div>
+    </div>
+  )
+}
+
 export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperties, onRedraw, onCad, docked = false }) {
   if (!menu || menu.kind !== 'service') return null
   const services = ensureServices(plan)
@@ -1169,16 +1344,8 @@ export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperti
               </select>
             </label>
           )}
-          {node.system === 'electric' && LOAD_KINDS.includes(node.kind) && (
-            <DeviceFields node={node} onPatch={patchNode} />
-          )}
-          {node.system === 'electric' && !LOAD_KINDS.includes(node.kind) && node.kind !== 'panel' && (
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-              Virtapiiri
-              <select data-testid="service-circuit" style={fieldStyle} value={node.circuit || 1} onChange={(event) => patchNode({ circuit: Number(event.target.value), circuitMode: 'manual' })}>
-                {Array.from({ length: 16 }, (_, index) => index + 1).map((id) => <option key={id} value={id}>R{id}</option>)}
-              </select>
-            </label>
+          {node.system === 'electric' && node.kind !== 'panel' && (
+            <DeviceFields node={node} plan={plan} onPatch={patchNode} />
           )}
           {node.kind === 'water-point' && (
             <div data-testid="water-fields">
@@ -1277,16 +1444,8 @@ export function ServiceMenu({ menu, plan, onApply, onCommit, onClose, onProperti
               <input data-testid="service-slope" type="number" step="0.1" style={fieldStyle} value={run.slope ?? 1} onChange={(event) => patchRun({ slope: Number(event.target.value) || 0 })} />
             </label>
           )}
-          {run.system === 'electric' && (
-            <>
-              {run.marking ? <div style={{ fontSize: 12, color: '#44403c', marginBottom: 8 }}>{run.marking}</div> : null}
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 650, marginBottom: 8 }}>
-                Virtapiiri
-                <select data-testid="service-circuit" style={fieldStyle} value={run.circuit || 1} onChange={(event) => patchRun({ circuit: Number(event.target.value) })}>
-                  {Array.from({ length: 16 }, (_, index) => index + 1).map((id) => <option key={id} value={id}>R{id}</option>)}
-                </select>
-              </label>
-            </>
+          {run.system === 'electric' && run.circuit && (
+            <GroupFields plan={plan} circuitId={run.circuit} marking={run.marking} onCommit={write} />
           )}
           <MenuBtn testid="route-add-vertex" onClick={() => {
             const index = segmentIndex

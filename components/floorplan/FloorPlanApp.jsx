@@ -5020,6 +5020,7 @@ export default function FloorPlanApp() {
               onClose={() => setElectricView(null)}
               onPrint={() => savePdf(buildElectricPdf(plan), `${(plan.name || 'sahko').replace(/\s+/g, '-')}-sahko.pdf`)}
               onAssign={(deviceId, circuitId) => commit(assignDeviceCircuit(plan, deviceId, circuitId))}
+              onCommit={(next) => commit(next)}
             />
           )}
           {heatView && (

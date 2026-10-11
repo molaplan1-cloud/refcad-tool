@@ -1,6 +1,8 @@
 'use client'
 
-import { electricSummary } from '@/lib/services'
+import { usePlanLocale } from '@/components/i18n/Locale'
+import { CABLE_SECTIONS, FUSE_TYPES, MANUAL_FUSE_AMPS } from '@/lib/electric'
+import { electricSummary, setCircuitNumber, setCircuitOverride } from '@/lib/services'
 
 const btn = (active) => ({
   height: 28,
@@ -58,7 +60,7 @@ export function SingleLine({ report }) {
           <g key={circuit.id} data-testid={`diagram-group-${circuit.id}`}>
             <line x1={x} y1={busY} x2={x} y2={fuseY} stroke="#1c1917" strokeWidth="1.4" />
             <rect x={x - 16} y={fuseY} width={32} height={18} fill="#fff" stroke="#1c1917" />
-            <text x={x} y={fuseY + 13} textAnchor="middle" fontSize="10" fontWeight="700" fill="#1c1917">{circuit.fuse ? `${circuit.fuse} A` : '—'}</text>
+            <text x={x} y={fuseY + 13} textAnchor="middle" fontSize="10" fontWeight="700" fill="#1c1917">{circuit.fuse ? `${circuit.fuse} A${circuit.fuseType ? ` ${circuit.fuseType}` : ''}` : '—'}</text>
             {rcd && (
               <g>
                 <line x1={x} y1={fuseY + 18} x2={x} y2={rcdY - 11} stroke="#1c1917" strokeWidth="1.4" />
@@ -92,8 +94,18 @@ function Summary({ report }) {
   )
 }
 
-export function ScheduleTable({ report }) {
+function cellSelect(testid, value, onChange, children) {
+  return (
+    <select data-testid={testid} value={value} onChange={onChange} style={{ width: '100%', maxWidth: 148, fontSize: 12, padding: '3px 4px' }}>
+      {children}
+    </select>
+  )
+}
+
+export function ScheduleTable({ plan, report, onCommit, onAssign }) {
+  const { t } = usePlanLocale(plan)
   const circuits = report?.circuits || []
+  const patch = (circuit, next) => onCommit?.(setCircuitOverride(plan, circuit.id, next))
   return (
     <div data-testid="electric-schedule">
       <div style={{ fontSize: 18, fontWeight: 750, marginBottom: 8 }}>Ryhmäluettelo</div>
@@ -101,7 +113,7 @@ export function ScheduleTable({ report }) {
       <table style={{ width: '100%', minWidth: 1080, borderCollapse: 'collapse', fontSize: 13, background: '#fff' }}>
         <thead>
           <tr>
-            {['Ryhmä', 'Kuvaus', 'Laitteet', 'Jännite', 'Vaihe', 'Teho', 'Virta', 'Sulake', 'RCD', 'Kaapeli', 'Pituus'].map((title) => (
+            {[t('electric.group'), 'Kuvaus', 'Laitteet', 'Jännite', 'Vaihe', 'Teho', 'Virta', t('electric.fuse'), t('electric.rcd'), t('electric.cable'), 'Pituus'].map((title) => (
               <th key={title} style={{ textAlign: 'left', borderBottom: '1px solid #1c1917', padding: '6px 6px', whiteSpace: 'nowrap' }}>{title}</th>
             ))}
           </tr>
@@ -123,7 +135,11 @@ export function ScheduleTable({ report }) {
                 if (deviceId && onAssign) onAssign(deviceId, circuit.id)
               }}
             >
-              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4', fontWeight: 700 }}>R{circuit.id}</td>
+              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4', fontWeight: 700 }}>
+                {cellSelect(`group-circuit-${circuit.id}`, String(circuit.id), (event) => onCommit?.(setCircuitNumber(plan, circuit.id, Number(event.target.value))), (
+                  Array.from({ length: 24 }, (_, index) => index + 1).map((id) => <option key={id} value={id}>R{id}</option>)
+                ))}
+              </td>
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{circuit.description}</td>
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>
                 {(circuit.members || []).length ? circuit.members.map((member) => (
@@ -145,9 +161,53 @@ export function ScheduleTable({ report }) {
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{circuit.phase}</td>
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{fmtPower(circuit.power)}</td>
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{circuit.current ? fmtAmp(circuit.current) : ''}</td>
-              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{circuit.fuse ? `${circuit.fuse} A` : ''}</td>
-              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{circuit.rcd || ''}</td>
-              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{circuit.cable}</td>
+              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>
+                {cellSelect(`group-fuse-${circuit.id}`, circuit.fuseManual ? String(circuit.fuse) : 'auto', (event) => {
+                  if (event.target.value === 'auto') patch(circuit, { fuseManual: false })
+                  else patch(circuit, { fuseManual: true, fuse: Number(event.target.value) })
+                }, (
+                  <>
+                    <option value="auto">{t('electric.fuseAuto', { fuse: circuit.recommendedFuse || circuit.fuse || '—', type: circuit.recommendedFuseType || circuit.fuseType || '' })}</option>
+                    {(MANUAL_FUSE_AMPS.includes(Number(circuit.fuse)) || !circuit.fuseManual ? MANUAL_FUSE_AMPS : [...MANUAL_FUSE_AMPS, Number(circuit.fuse)].sort((a, b) => a - b)).map((amp) => (
+                      <option key={amp} value={amp}>{amp} A</option>
+                    ))}
+                  </>
+                ))}
+                {cellSelect(`group-fuse-type-${circuit.id}`, circuit.fuseTypeManual ? circuit.fuseType : 'auto', (event) => {
+                  if (event.target.value === 'auto') patch(circuit, { fuseTypeManual: false })
+                  else patch(circuit, { fuseTypeManual: true, fuseType: event.target.value })
+                }, (
+                  <>
+                    <option value="auto">{t('electric.typeAuto', { type: circuit.recommendedFuseType || circuit.fuseType || 'C' })}</option>
+                    {FUSE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </>
+                ))}
+              </td>
+              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>
+                {cellSelect(`group-rcd-${circuit.id}`, circuit.rcdManual ? (circuit.rcd ? 'on' : 'off') : 'auto', (event) => {
+                  if (event.target.value === 'auto') patch(circuit, { rcdManual: false })
+                  else patch(circuit, { rcdManual: true, rcdOn: event.target.value === 'on' })
+                }, (
+                  <>
+                    <option value="auto">{t('electric.rcdAuto', { state: circuit.recommendedRcd ? t('electric.rcdOn') : t('electric.rcdOff') })}</option>
+                    <option value="on">{t('electric.rcdOn')}</option>
+                    <option value="off">{t('electric.rcdOff')}</option>
+                  </>
+                ))}
+              </td>
+              <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>
+                {cellSelect(`group-cable-${circuit.id}`, circuit.cableManual ? String(circuit.section) : 'auto', (event) => {
+                  if (event.target.value === 'auto') patch(circuit, { cableManual: false })
+                  else patch(circuit, { cableManual: true, section: Number(event.target.value) })
+                }, (
+                  <>
+                    <option value="auto">{t('electric.cableAuto', { cable: circuit.recommendedCable || circuit.cable || '—' })}</option>
+                    {CABLE_SECTIONS.map((section) => (
+                      <option key={section} value={section}>{`${circuit.phases >= 3 ? 5 : 3}x${String(section).replace('.', ',')}`}</option>
+                    ))}
+                  </>
+                ))}
+              </td>
               <td style={{ padding: '6px', borderBottom: '1px solid #e7e5e4' }}>{fmtLength(circuit.length)}</td>
             </tr>
           ))}
@@ -162,7 +222,7 @@ export function ScheduleTable({ report }) {
   )
 }
 
-export function ElectricPanel({ plan, mode, onMode, onClose, onPrint, onAssign }) {
+export function ElectricPanel({ plan, mode, onMode, onClose, onPrint, onAssign, onCommit }) {
   const report = electricSummary(plan)
   return (
     <div
@@ -182,7 +242,7 @@ export function ElectricPanel({ plan, mode, onMode, onClose, onPrint, onAssign }
           <SingleLine report={report} />
         </div>
       ) : (
-        <ScheduleTable report={report} />
+        <ScheduleTable plan={plan} report={report} onCommit={onCommit} onAssign={onAssign} />
       )}
     </div>
   )
