@@ -1,9 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { CAD_COMMANDS, CAD_LAYERS, mirrorOpenings, sharedProperties } from '@/lib/cadEdit'
+import { CAD_COMMANDS, CAD_EXTRAS, CAD_LAYERS, mirrorOpenings, sharedProperties } from '@/lib/cadEdit'
 import { CadItem, CadMenu, CadSep, CadStyles, Flyout, Segmented } from './CadMenu'
-import { MultiProperties } from './CadTools'
+import { MultiProperties, SelectionActions } from './CadTools'
 import {
   CLADDING,
   MATERIALS,
@@ -633,13 +633,17 @@ function phrase(t, item) {
   return value === item.key ? (item.label || value) : value
 }
 
-export function SelectionPanel({ plan, selection, picks, onApply, onCommit, onClear, onRedrawRoute, onPatchMany }) {
+export function SelectionPanel({ plan, selection, picks, onApply, onCommit, onClear, onRedrawRoute, onPatchMany, onCommand }) {
   const { t } = usePlanLocale(plan)
+  const actions = (
+    <SelectionActions kind={picks?.length > 1 ? 'multi' : selection?.kind} count={picks?.length || 1} onCommand={onCommand} />
+  )
   if (picks && picks.length > 1) {
     const shared = sharedProperties(plan, picks)
     return (
       <div data-testid="selection-form">
         <CadStyles />
+        {actions}
         <MultiProperties count={picks.length}>
           <Field label={t('menu.layers')}>
             <select data-testid="multi-layer" style={inputStyle} value={shared.layer || ''} onChange={(event) => onPatchMany({ layer: event.target.value })}>
@@ -696,7 +700,7 @@ export function SelectionPanel({ plan, selection, picks, onApply, onCommit, onCl
       />
     )
   }
-  return <div data-testid="selection-form"><CadStyles />{body}</div>
+  return <div data-testid="selection-form"><CadStyles />{actions}{body}</div>
 }
 
 function SplitField({ plan, wall, onCommit }) {
@@ -1715,12 +1719,9 @@ function claddingChoices(wall) {
 function CadEditItems({ onNavigate, t }) {
   return (
     <Flyout label={t('ctx.edit')} testid="ctx-cad">
-      {CAD_COMMANDS.map((cmd) => (
+      {[...CAD_COMMANDS, ...CAD_EXTRAS].map((cmd) => (
         <CadItem key={cmd.id} testid={`ctx-${cmd.testid}`} shortcut={cmd.short} onClick={() => onNavigate(`cad:${cmd.id}`)}>{phrase(t, cmd)}</CadItem>
       ))}
-      <CadItem testid="ctx-cad-delete" onClick={() => onNavigate('cad:delete')}>{t('cad.delete')}</CadItem>
-      <CadItem testid="ctx-cad-group" onClick={() => onNavigate('cad:group')}>{t('cad.group')}</CadItem>
-      <CadItem testid="ctx-cad-lock" onClick={() => onNavigate('cad:lock')}>{t('cad.lock')}</CadItem>
     </Flyout>
   )
 }

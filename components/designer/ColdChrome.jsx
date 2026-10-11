@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { LanguageSwitch } from '@/components/i18n/Locale'
-import { CadToolbar } from '../floorplan/CadTools'
+import { CadToolbar, EditCommandItems } from '../floorplan/CadTools'
 
 const COLD_TABS = ['structure', 'doors', 'cooling', 'pipes', 'electric', 'print']
 
@@ -139,6 +139,8 @@ export default function ColdChrome({
   showLegend = false,
   onLegend,
   onFull,
+  editBar = false,
+  onEditBar,
   onExample,
   onPdf,
   onDxf,
@@ -234,6 +236,13 @@ export default function ColdChrome({
         <button type="button" data-testid="undo" style={menuItem(false)} onClick={() => { close(); onUndo?.() }}>{t('edit.undo')}</button>
         <button type="button" data-testid="redo" style={menuItem(false)} onClick={() => { close(); onRedo?.() }}>{t('edit.redo')}</button>
         <button type="button" data-testid="cleanup-menu" style={menuItem(false)} onClick={() => { close(); onCleanup?.() }}>{t('edit.cleanup')}</button>
+        <EditCommandItems
+          scope="cold"
+          itemStyle={menuItem}
+          onCommand={(id, event) => { close(); onCommand?.(id, event) }}
+          onSelectType={(type) => { close(); onSelectType?.(type) }}
+          onLayer={(layer) => { close(); onLayer?.(layer) }}
+        />
       </Menu>
       <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" style={menuItem(view === '2d')} onClick={() => { close(); onView('2d') }}>2D</button>
@@ -243,6 +252,7 @@ export default function ColdChrome({
         <button type="button" style={menuItem(false)} onClick={() => { close(); onFit?.() }}>{t('snap.fit')}</button>
         <button type="button" data-testid="toggle-legend" style={menuItem(showLegend)} onClick={() => { close(); onLegend?.(!showLegend) }}>{t('display.legend')}</button>
         <button type="button" data-testid="full-canvas" style={menuItem(false)} onClick={() => { close(); onFull?.() }}>{t('panel.full')}</button>
+        <button type="button" data-testid="toggle-edit-bar" aria-pressed={Boolean(editBar)} style={menuItem(Boolean(editBar))} onClick={() => { close(); onEditBar?.() }}>{t('view.editBar')}</button>
       </Menu>
       <Menu id="draw" label={t('menu.draw')} open={open} setOpen={setOpen} dock={dock}>
         {tab === 'structure' && !dock ? <div style={{ fontSize: 12, color: '#78716c', padding: '4px 8px' }}>{t('menu.onRibbon')}</div> : drawButtons(menuItem)}
@@ -295,9 +305,11 @@ export default function ColdChrome({
         {toolsOpen && (
           <div className="tool-sheet" data-testid="tool-sheet">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>{ribbon(hit)}</div>
-            <div style={{ marginTop: 8 }}>
-              <CadToolbar scope="cold" active={cad?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onLayer} />
-            </div>
+            {editBar && (
+              <div style={{ marginTop: 8 }}>
+                <CadToolbar scope="cold" active={cad?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onLayer} />
+              </div>
+            )}
             <button type="button" data-testid="close-tools" onClick={() => onToggleTools?.()} style={{ ...hit(false), marginTop: 8 }}>{t('edit.closeTools')}</button>
           </div>
         )}
@@ -329,7 +341,7 @@ export default function ColdChrome({
       <div data-testid="tool-ribbon" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '4px 8px', background: '#f5f5f4', borderBottom: '1px solid #e7e5e4', overflowX: 'auto' }}>
         {ribbon(styleFor)}
       </div>
-      <CadToolbar scope="cold" active={cad?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onLayer} />
+      {editBar && <CadToolbar scope="cold" active={cad?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onLayer} />}
     </div>
   )
 }

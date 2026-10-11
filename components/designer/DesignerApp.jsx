@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LanguageSwitch, useLocale } from '@/components/i18n/Locale'
 import { SideRail } from '@/components/floorplan/SideRail'
+import { SelectionActions } from '@/components/floorplan/CadTools'
 import { applyPanelCommand, panelCommand, readPanels, writePanels } from '@/lib/panels'
 import PlanView from './PlanView'
 import HeatLoadPanel from './HeatLoadPanel'
@@ -243,7 +244,7 @@ export default function DesignerApp({
   const [selectedIds, setSelectedIds] = useState([])
   const [cad, setCad] = useState(null)
   const [placingId, setPlacingId] = useState(null)
-  const [rails, setRails] = useState(() => readPanels(null))
+  const [rails, setRails] = useState(() => ({ ...readPanels(null), editBar: false }))
   const railsOwner = useRef('local')
   useEffect(() => {
     const id = user?.id || 'local'
@@ -1230,6 +1231,12 @@ export default function DesignerApp({
           writePanels(user?.id, next)
           return next
         })}
+        editBar={rails.editBar}
+        onEditBar={() => setRails((current) => {
+          const next = { ...current, editBar: !current.editBar }
+          writePanels(user?.id, next)
+          return next
+        })}
         onExample={loadExample}
         onPdf={exportPdf}
         onDxf={exportDxf}
@@ -1509,6 +1516,16 @@ export default function DesignerApp({
           expandLabel={t('panel.expand')}
         >
           {compact && <button type="button" data-testid="close-info" onClick={() => setDrawer(null)}>{t('panel.close')}</button>}
+          {selectedIds.length > 0 && (
+            <div style={{ padding: '10px 12px 0' }}>
+              <SelectionActions
+                kind={selectedIds.length > 1 ? 'multi' : selectedEquipment ? 'equipment' : pipes.some((item) => item.id === selectedId) ? 'pipe' : cables.some((item) => item.id === selectedId) ? 'cable' : selectedRoom ? 'room' : null}
+                count={selectedIds.length}
+                active={cad?.name}
+                onCommand={beginCad}
+              />
+            </div>
+          )}
           {(tool === 'draw' || tool === 'polygon' || tool === 'pipe' || tool === 'cable') && (
             <div data-testid="tool-properties" style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
               <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 8 }}>{t('panel.tool')}</div>
@@ -1738,12 +1755,18 @@ function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAng
   const left = Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 300)
   const top = Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 520)
   return (
-    <div data-testid="context-menu" style={{ position: 'fixed', left, top, zIndex: 40, width: 280, background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }} onMouseDown={(event) => event.stopPropagation()}>
+    <div data-testid="context-menu" style={{ position: 'fixed', left, top, zIndex: 40, width: 280, maxHeight: '70vh', overflowY: 'auto', background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }} onMouseDown={(event) => event.stopPropagation()}>
       <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{eq?.name || pipe?.kind || host?.name || t('ctx.object')}</div>
       <MenuBtn testid="ctx-cad-move" onClick={() => onCad?.('move')}>{t('cad.move')}</MenuBtn>
       <MenuBtn testid="ctx-cad-copy" onClick={() => onCad?.('copy')}>{t('cad.copy')}</MenuBtn>
       <MenuBtn testid="ctx-cad-rotate" onClick={() => onCad?.('rotate')}>{t('cad.rotate')}</MenuBtn>
+      <MenuBtn testid="ctx-cad-scale" onClick={() => onCad?.('scale')}>{t('cad.scale')}</MenuBtn>
       <MenuBtn testid="ctx-cad-mirror" onClick={() => onCad?.('mirror')}>{t('cad.mirror')}</MenuBtn>
+      <MenuBtn testid="ctx-cad-offset" onClick={() => onCad?.('offset')}>{t('cad.offset')}</MenuBtn>
+      <MenuBtn testid="ctx-cad-align" onClick={() => onCad?.('align')}>{t('cad.align')}</MenuBtn>
+      <MenuBtn testid="ctx-cad-group" onClick={() => onCad?.('group')}>{t('cad.group')}</MenuBtn>
+      <MenuBtn testid="ctx-cad-lock" onClick={() => onCad?.('lock')}>{t('cad.lock')}</MenuBtn>
+      <MenuBtn testid="ctx-cad-hide" onClick={() => onCad?.('hide')}>{t('cad.hide')}</MenuBtn>
       {menu.kind !== 'pipe' && menu.kind !== 'cable' && (
         <>
           <MenuBtn testid="ctx-rotate-cw" onClick={() => onRotate(90)}>{t('designer.rotateCw')}  ]</MenuBtn>

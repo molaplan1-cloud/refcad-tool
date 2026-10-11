@@ -10,7 +10,7 @@ import { WORKSPACES, workspaceSystems } from '@/lib/workspaces'
 import { BUILDINGS, OBJECTS, PLANTS } from '@/lib/yard'
 import { LanguageSwitch } from '@/components/i18n/Locale'
 import { zoomPercent } from '@/lib/zoom'
-import { CadToolbar } from './CadTools'
+import { CadToolbar, EditCommandItems } from './CadTools'
 import { YARD_DRAW_TOOLS } from './YardLayer'
 
 const rib = (active) => ({
@@ -168,7 +168,7 @@ export function PlanChrome({
   onCloseRoom, onYardTool, onGrid, onAngle, onZoomOut, onZoomIn, onZoomFit,
   onClearances, onWallMode, onRoofMode, onSceneStyle, onSystem, onKind, onSvcTool,
   onFinish, onRoute, onRewire, onSchedule, onDiagram, onRewireWater, onRewireHeat, onHeatTable,
-  onHeatSchematic, onPdf, onServicePdf, onMaterials, onFull, onCommand, onSelectType, onCadLayer, repeat = false, onRepeat, onCleanup, onRemoveAuto, onStraighten, onSquare,
+  onHeatSchematic, onPdf, onServicePdf, onMaterials, onFull, onCommand, onSelectType, onCadLayer, editBar = false, onEditBar, repeat = false, onRepeat, onCleanup, onRemoveAuto, onStraighten, onSquare,
   workspace = 'rakenne', onWorkspace, onPlaceDevice, onSuggest, onAccept, ghostCount = 0,
   access = null,
   onProjectInfo,
@@ -259,6 +259,17 @@ export function PlanChrome({
   )
 
   const hit = (active) => ({ ...toolStyle(active), height: 44, minHeight: 44, minWidth: 44 })
+  const editCommands = (
+    <EditCommandItems
+      itemStyle={menuItem}
+      onCommand={(id, event) => { close(); onCommand?.(id, event) }}
+      onSelectType={(type) => { close(); onSelectType?.(type) }}
+      onLayer={(layer) => { close(); onCadLayer?.(layer) }}
+    />
+  )
+  const editBarItem = (
+    <button type="button" data-testid="toggle-edit-bar" aria-pressed={Boolean(editBar)} style={menuItem(Boolean(editBar))} onClick={() => { close(); onEditBar?.() }}>{t('view.editBar')}</button>
+  )
   const menus = (dock) => (
     <>
       <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen} dock={dock}>
@@ -277,10 +288,12 @@ export function PlanChrome({
         <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>{t('edit.removeAuto')}</button>
         <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
         <button type="button" data-testid="square-wall" style={menuItem(false)} onClick={() => { close(); onSquare?.() }}>{t('cad.square')}</button>
+        {editCommands}
       </Menu>
       <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="open-display" style={menuItem(display.preset !== 'custom')} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
         <button type="button" data-testid="full-canvas" style={menuItem(false)} onClick={() => { close(); onFull?.() }}>{t('panel.full')}</button>
+        {editBarItem}
       </Menu>
       <Menu id="print" label={t('menu.print')} open={open} setOpen={setOpen} dock={dock}>
         <button type="button" data-testid="export-floor-pdf" style={menuItem(false)} onClick={() => { close(); onPdf() }}>PDF</button>
@@ -353,9 +366,11 @@ export function PlanChrome({
               {snapTools}
               {zoomTools}
             </div>
-            <div style={{ marginTop: 8 }}>
-              <CadToolbar active={command?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onCadLayer} />
-            </div>
+            {editBar && (
+              <div style={{ marginTop: 8 }}>
+                <CadToolbar active={command?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onCadLayer} />
+              </div>
+            )}
             <button type="button" data-testid="close-tools" onClick={() => onToggleTools?.()} style={{ ...hit(false), marginTop: 8 }}>{t('edit.closeTools')}</button>
           </div>
         )}
@@ -408,10 +423,12 @@ export function PlanChrome({
           <button type="button" data-testid="remove-auto" style={menuItem(false)} onClick={() => { close(); onRemoveAuto?.() }}>{t('edit.removeAuto')}</button>
           <button type="button" data-testid="straighten-walls" style={menuItem(false)} onClick={() => { close(); onStraighten?.() }}>{t('edit.straighten')}</button>
           <button type="button" data-testid="square-wall" style={menuItem(false)} onClick={() => { close(); onSquare?.() }}>{t('cad.square')}</button>
+          {editCommands}
         </Menu>
         <Menu id="view" label={t('menu.view')} open={open} setOpen={setOpen}>
           <button type="button" data-testid="open-display" style={menuItem(false)} onClick={() => { close(); onDisplay() }}>{t('file.display')}</button>
           <button type="button" data-testid="full-canvas" style={menuItem(false)} onClick={() => { close(); onFull?.() }}>{t('panel.full')}</button>
+          {editBarItem}
           {!onSheet && snapTools}
           {!onSheet && zoomTools}
         </Menu>
@@ -523,7 +540,7 @@ export function PlanChrome({
           {onSheet && <Group>{zoomTools}</Group>}
         </div>
       )}
-      <CadToolbar active={command?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onCadLayer} />
+      {editBar && <CadToolbar active={command?.name} onCommand={onCommand} onSelectType={onSelectType} onLayer={onCadLayer} />}
     </div>
   )
 }
