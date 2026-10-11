@@ -3300,6 +3300,8 @@ export default function FloorPlanApp() {
     return (
       <ColdWorkspace
         plan={plan}
+        user={account}
+        watermark={access.watermark}
         onProjectType={onProjectType}
         onName={(name) => setPlan((current) => (current.name === name ? current : { ...current, name }))}
       />

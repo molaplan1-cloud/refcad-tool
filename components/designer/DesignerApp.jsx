@@ -10,6 +10,7 @@ import HeatLoadPanel from './HeatLoadPanel'
 import { ROOM_TYPES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
 import { ProjectInfoDialog, ProjectSettingsDialog } from '@/components/floorplan/ProjectDialogs'
 import ColdChrome from './ColdChrome'
+import { stampDemoWatermark } from '@/lib/watermark'
 import { applyProjectType } from '@/lib/projectMode'
 import { CURRENT_KEY } from '@/lib/projects'
 import { emptyPlan } from '@/lib/floorplan'
@@ -196,6 +197,7 @@ export default function DesignerApp({
   initialSchematic = null,
   onPersist,
   user = null,
+  watermark = false,
   persistLabel = 'selaimeen',
   projectType = 'kylmio',
   onProjectType,
@@ -893,6 +895,7 @@ export default function DesignerApp({
 
   function exportPdf() {
     const doc = buildPdf({ projectName: name, userEmail: user?.email || '', rooms, unitSystem, pipes, cables, schematic })
+    if (watermark) stampDemoWatermark(doc, t('watermark.demo'))
     doc.save(pdfFilename(name))
   }
 

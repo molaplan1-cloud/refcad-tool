@@ -6,7 +6,7 @@ import { useLocale } from '@/components/i18n/Locale'
 
 const STORAGE_KEY = 'refcad-design-v1'
 
-export default function ColdWorkspace({ plan, onProjectType, onName }) {
+export default function ColdWorkspace({ plan, onProjectType, onName, user = null, watermark = false }) {
   const { t } = useLocale()
   const [ready, setReady] = useState(false)
   const [saved, setSaved] = useState(null)
@@ -49,6 +49,8 @@ export default function ColdWorkspace({ plan, onProjectType, onName }) {
         if (data.name && data.name !== plan?.name) onName?.(data.name)
       }}
       persistLabel={t('designer.browser')}
+      user={user}
+      watermark={watermark}
     />
   )
 }
