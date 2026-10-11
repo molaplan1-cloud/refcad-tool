@@ -372,8 +372,8 @@ export default function SchematicView({ rooms, projectName, settings, onChange, 
   }
 
   return (
-    <div data-testid="schematic-view" style={{ display: 'flex', height: '100%', minWidth: 0, background: paper }}>
-      <div style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: 12 }}>
+    <div data-testid="schematic-view" style={{ position: 'absolute', inset: 0, display: 'flex', minWidth: 0, minHeight: 0, background: paper }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', padding: 12 }}>
         {!circuit && (
           <div style={{ color: theme.title, padding: 24 }}>Lisää höyrystin pohjaan, niin periaatekaavio rakentuu.</div>
         )}
@@ -385,8 +385,10 @@ export default function SchematicView({ rooms, projectName, settings, onChange, 
             data-drawing={technical ? 'technical' : 'presentation'}
             data-remote={circuit.remote ? 'true' : 'false'}
             viewBox={`0 0 ${circuit.width} ${circuit.height}`}
-            width="100%"
-            style={{ display: 'block', maxWidth: circuit.width, background: paper, color: theme.title, fontFamily: technical ? '"Liberation Sans", "Nimbus Sans", Arial, Helvetica, sans-serif' : undefined }}
+            preserveAspectRatio="xMidYMid meet"
+            width={circuit.width}
+            height={circuit.height}
+            style={{ display: 'block', width: '100%', height: '100%', background: paper, color: theme.title, fontFamily: technical ? '"Liberation Sans", "Nimbus Sans", Arial, Helvetica, sans-serif' : undefined }}
           >
             {technical ? <TechnicalSheet circuit={circuit} themeName={themeName} /> : (
               <>

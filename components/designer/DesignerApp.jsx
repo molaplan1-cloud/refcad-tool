@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -262,6 +262,11 @@ function UnitBoard({ t, rooms, result, units = [], diversity, onDiversity, onAss
       ))}
     </div>
   )
+}
+
+class ShotBoundary extends Component {
+  componentDidCatch() { this.props.onFail?.() }
+  render() { return this.props.children }
 }
 
 export default function DesignerApp({
@@ -1169,11 +1174,49 @@ export default function DesignerApp({
     }
   }
 
+  const [shot, setShot] = useState(null)
+  const shotRef = useRef(null)
+  shotRef.current = shot
+
   function exportPdf() {
-    const doc = buildPdf({ projectName: name, userEmail: user?.email || '', rooms, unitSystem, pipes, cables, schematic })
-    if (watermark) stampDemoWatermark(doc, t('watermark.demo'))
-    doc.save(pdfFilename(name))
+    if (shotRef.current) return
+    setShot({
+      projectName: name,
+      userEmail: user?.email || '',
+      rooms,
+      unitSystem,
+      pipes,
+      cables,
+      schematic,
+      watermark,
+      watermarkLabel: t('watermark.demo'),
+    })
   }
+
+  function finishShot(dataUrl) {
+    const payload = shotRef.current
+    if (!payload || payload.done) return
+    payload.done = true
+    const doc = buildPdf({
+      projectName: payload.projectName,
+      userEmail: payload.userEmail,
+      rooms: payload.rooms,
+      unitSystem: payload.unitSystem,
+      pipes: payload.pipes,
+      cables: payload.cables,
+      schematic: payload.schematic,
+      viewImage: dataUrl || null,
+    })
+    if (payload.watermark) stampDemoWatermark(doc, payload.watermarkLabel)
+    doc.save(pdfFilename(payload.projectName))
+    setShot(null)
+  }
+
+  useEffect(() => {
+    if (!shot) return undefined
+    const timer = setTimeout(() => finishShot(null), 8000)
+    return () => clearTimeout(timer)
+  }, [shot])
 
   function exportDxf() {
     const text = buildDxf({ projectName: name, rooms, pipes, cables, schematic })
@@ -2116,6 +2159,8 @@ export default function DesignerApp({
             result={result}
             roomResult={roomResult}
             unitSystem={unitSystem}
+            units={schematic.units || []}
+            diversity={schematic.diversity}
             onPatch={patchSelected}
             onFocusEdit={() => { editSnap.current = snapshot() }}
             onBlurEdit={() => {
@@ -2260,6 +2305,21 @@ export default function DesignerApp({
             patchEquipment(menu.id, { opensOut: !doorOpensOut(eq, host) })
           }}
         />
+      )}
+      {shot && (
+        <ShotBoundary onFail={() => finishShot(null)}>
+          <div data-testid="pdf-scene-host" aria-hidden style={{ position: 'fixed', left: 0, top: 0, width: 1480, height: 980, zIndex: 1, pointerEvents: 'none', opacity: 0 }}>
+            <Scene3D
+              rooms={shot.rooms}
+              pipes={shot.pipes}
+              cables={shot.cables}
+              unitSystem={shot.unitSystem}
+              selectedId={null}
+              print
+              onCapture={finishShot}
+            />
+          </div>
+        </ShotBoundary>
       )}
     </div>
   )

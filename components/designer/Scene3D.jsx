@@ -1098,6 +1098,61 @@ function boundsOf(rooms) {
   }
 }
 
+function paintCapture(gl, root) {
+  const source = gl.domElement
+  const out = document.createElement('canvas')
+  out.width = source.width
+  out.height = source.height
+  const ctx = out.getContext('2d')
+  ctx.drawImage(source, 0, 0)
+  const host = root?.getBoundingClientRect()
+  if (!host || host.width < 1 || host.height < 1) return out.toDataURL('image/jpeg', 0.92)
+  const sx = source.width / host.width
+  const sy = source.height / host.height
+  root.querySelectorAll('.refcad-float span').forEach((span) => {
+    const text = span.textContent || ''
+    if (!text) return
+    const box = span.getBoundingClientRect()
+    const x = (box.left - host.left) * sx
+    const y = (box.top - host.top) * sy
+    const w = Math.max(1, box.width * sx)
+    const h = Math.max(1, box.height * sy)
+    const style = getComputedStyle(span)
+    ctx.fillStyle = style.backgroundColor
+    ctx.fillRect(x, y, w, h)
+    ctx.strokeStyle = style.borderTopColor || '#cfd4dc'
+    ctx.lineWidth = Math.max(1, sx * 0.5)
+    ctx.strokeRect(x, y, w, h)
+    const size = (parseFloat(style.fontSize) || 11) * sy
+    ctx.font = `${style.fontWeight || 650} ${size}px ${style.fontFamily || 'sans-serif'}`
+    ctx.fillStyle = style.color || '#1f2937'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(text, x + w / 2, y + h / 2)
+  })
+  return out.toDataURL('image/jpeg', 0.92)
+}
+
+function CaptureBridge({ rootRef, onCapture }) {
+  const gl = useThree((state) => state.gl)
+  const size = useThree((state) => state.size)
+  const frames = useRef(0)
+  const sent = useRef(false)
+  const callback = useRef(onCapture)
+  callback.current = onCapture
+  useFrame(() => {
+    if (sent.current || size.width < 40 || size.height < 40) return
+    frames.current += 1
+    // Frame fits the camera on a later animation frame, and the technical
+    // edges are added during useFrame. Wait until both have landed.
+    if (frames.current < 8) return
+    sent.current = true
+    const url = paintCapture(gl, rootRef.current)
+    callback.current?.(url)
+  })
+  return null
+}
+
 function Frame({ rooms }) {
   const { camera, controls, size } = useThree()
   const signature = rooms.map((room) => room.id).join('|')
@@ -1833,12 +1888,13 @@ function PlaceBridge({ active, onPlace, onExit, onPreview }) {
   return null
 }
 
-export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, onSelect, onContext, onRouteDrag, unitSystem, placeMode = false, onPlace, onExitPlace, locale = 'fi' }) {
+export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, onSelect, onContext, onRouteDrag, unitSystem, placeMode = false, onPlace, onExitPlace, locale = 'fi', print = false, onCapture }) {
   const [theme, setTheme] = useState('technical')
   const [dims, setDims] = useState(false)
   const [heading, setHeading] = useState(0)
   const [ghost, setGhost] = useState(null)
   const rigRef = useRef(null)
+  const rootRef = useRef(null)
   const palette = PALETTES[theme] || PALETTES.technical
   const technical = palette.flat === true
   const tags = useMemo(() => layoutRoomTags(rooms), [rooms])
@@ -1848,12 +1904,13 @@ export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, on
   }
   return (
     <SceneTheme.Provider value={palette}>
-      <div data-testid="iso-canvas" data-theme={theme} style={{ position: 'relative', width: '100%', height: '100%', background: palette.bg, overflow: 'hidden' }}>
+      <div ref={rootRef} data-testid="iso-canvas" data-theme={theme} data-print={print ? 'true' : 'false'} style={{ position: 'relative', width: '100%', height: '100%', background: palette.bg, overflow: 'hidden' }}>
         <Canvas
           shadows
+          dpr={onCapture ? [1, 1] : undefined}
           camera={{ position: [18, 14, 18], fov: 38, near: 0.08, far: 500 }}
-          gl={{ antialias: true, toneMapping: technical ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping, toneMappingExposure: theme === 'dark' ? 1.08 : 1 }}
-          onPointerMissed={() => onSelect(null)}
+          gl={{ antialias: true, preserveDrawingBuffer: Boolean(onCapture), toneMapping: technical ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping, toneMappingExposure: theme === 'dark' ? 1.08 : 1 }}
+          onPointerMissed={() => onSelect?.(null)}
         >
           <ToneMap theme={theme} />
           <StylePass />
@@ -1933,8 +1990,9 @@ export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, on
           />
           <Frame rooms={rooms} />
           <ViewBridge rigRef={rigRef} onHeading={setHeading} />
+          {onCapture ? <CaptureBridge rootRef={rootRef} onCapture={onCapture} /> : null}
         </Canvas>
-        <div data-testid="scene-compass" style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 8, zIndex: 5 }}>
+        {print ? null : <div data-testid="scene-compass" style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 8, zIndex: 5 }}>
           <button type="button" data-testid="scene-yaw-left" aria-label="Kierrä vasemmalle" style={roundBtn} onClick={() => rigRef.current?.yaw(Math.PI / 6)}>↺</button>
           <div style={{ width: 74, height: 74, position: 'relative' }}>
             {compassMark('N', heading, 0, '#ef4444')}
@@ -1944,8 +2002,8 @@ export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, on
             <span style={{ position: 'absolute', left: '50%', top: '50%', width: 6, height: 6, margin: '-3px 0 0 -3px', borderRadius: 3, background: '#ef4444' }} />
           </div>
           <button type="button" data-testid="scene-yaw-right" aria-label="Kierrä oikealle" style={roundBtn} onClick={() => rigRef.current?.yaw(-Math.PI / 6)}>↻</button>
-        </div>
-        <div style={{ position: 'absolute', right: 12, bottom: 10, zIndex: 5, display: 'flex', gap: 6 }}>
+        </div>}
+        {print ? null : <div style={{ position: 'absolute', right: 12, bottom: 10, zIndex: 5, display: 'flex', gap: 6 }}>
           <button
             type="button"
             data-testid="scene-dims"
@@ -1975,15 +2033,15 @@ export default function Scene3D({ rooms, pipes = [], cables = [], selectedId, on
               {label}
             </button>
           ))}
-        </div>
-        <div style={{
+        </div>}
+        {print ? null : <div style={{
           position: 'absolute', left: 12, bottom: 10, padding: '6px 10px',
           background: palette.hintBg, border: `1px solid ${palette.hintBorder}`, borderRadius: 8,
           fontSize: 11, color: palette.hintFg, pointerEvents: 'none',
         }}>
           Vedä kiertää · keskinäppäin siirtää · oikea näppäin valikko · rulla zoomaa
           {unitSystem === 'IP' ? ' · mitat jalkoina paneelissa' : ''}
-        </div>
+        </div>}
       </div>
     </SceneTheme.Provider>
   )
