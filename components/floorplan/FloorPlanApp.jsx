@@ -1087,7 +1087,7 @@ export default function FloorPlanApp() {
   const [sheetMode, setSheetMode] = useState('plan')
   const [workspace, setWorkspace] = useState('rakenne')
   const [account, setAccount] = useState(null)
-  const [panels, setPanels] = useState(() => readPanels(null))
+  const [panels, setPanels] = useState(() => ({ ...readPanels(null), editBar: false }))
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const accountRef = useRef(null)
   accountRef.current = account
@@ -3704,6 +3704,12 @@ export default function FloorPlanApp() {
           writePanels(accountRef.current?.id, next)
           return next
         })}
+        editBar={panels.editBar}
+        onEditBar={() => setPanels((current) => {
+          const next = { ...current, editBar: !current.editBar }
+          writePanels(accountRef.current?.id, next)
+          return next
+        })}
         onServicePdf={(id) => {
           if (id === 'site') {
             savePdf(buildSitePdf(plan), `${(plan.name || 'site').replace(/\s+/g, '-')}-site.pdf`)
@@ -4972,7 +4978,7 @@ export default function FloorPlanApp() {
             </div>
           )}
           {pick && (
-            <SelectionPanel plan={plan} selection={pick} picks={picks} onApply={setPlan} onCommit={commit} onPatchMany={(patch) => commit(patchShared(plan, picks, patch))} onClear={() => { remember([]); setMenu(null) }} onRedrawRoute={beginRedraw} />
+            <SelectionPanel plan={plan} selection={pick} picks={picks} onApply={setPlan} onCommit={commit} onPatchMany={(patch) => commit(patchShared(plan, picks, patch))} onClear={() => { remember([]); setMenu(null) }} onRedrawRoute={beginRedraw} onCommand={beginCommand} />
           )}
           {pick?.kind === 'room' && room && (
             <div style={{ fontSize: 12, color: '#57534e', margin: '4px 0 12px' }}>{formatArea(room.area)}</div>

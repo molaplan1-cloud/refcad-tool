@@ -1,6 +1,6 @@
 'use client'
 
-import { CAD_COMMANDS, CAD_LAYERS, SELECT_TYPES } from '@/lib/cadEdit'
+import { actionsForSelection, CAD_COMMANDS, CAD_EXTRAS, CAD_LAYERS, SELECT_TYPES } from '@/lib/cadEdit'
 import { useLocale } from '@/components/i18n/Locale'
 import { CadIcon } from './CadIcons'
 
@@ -32,20 +32,7 @@ const iconBtn = (active) => ({
   flexShrink: 0,
 })
 
-const EXTRA = [
-  { id: 'square', key: 'cad.square', testid: 'cad-square', label: 'Suorista', shortcut: 'Q' },
-  { id: 'rotate90', key: 'cad.rotate90', testid: 'cad-rotate-90', label: 'Käännä 90°', shortcut: 'R' },
-  { id: 'delete', key: 'cad.delete', testid: 'cad-delete', label: 'Poista', shortcut: 'Del' },
-  { id: 'group', key: 'cad.group', testid: 'cad-group', label: 'Ryhmitä', shortcut: 'Ctrl+G' },
-  { id: 'ungroup', key: 'cad.ungroup', testid: 'cad-ungroup', label: 'Pura ryhmä', shortcut: 'Ctrl+Shift+G' },
-  { id: 'lock', key: 'cad.lock', testid: 'cad-lock', label: 'Lukitse', shortcut: 'L' },
-  { id: 'unlock', key: 'cad.unlock', testid: 'cad-unlock', label: 'Avaa lukitus', shortcut: 'L' },
-  { id: 'hide', key: 'cad.hide', testid: 'cad-hide', label: 'Piilota', shortcut: 'H' },
-  { id: 'isolate', key: 'cad.isolate', testid: 'cad-isolate', label: 'Eristä', shortcut: 'I' },
-  { id: 'show', key: 'cad.show', testid: 'cad-show', label: 'Näytä kaikki', shortcut: 'Shift+H' },
-  { id: 'similar', key: 'cad.similar', testid: 'cad-similar', label: 'Valitse samanlaiset', shortcut: 'Shift+S' },
-  { id: 'match', key: 'cad.match', testid: 'cad-match', label: 'Kopioi ominaisuudet', shortcut: 'K' },
-]
+const EXTRA = CAD_EXTRAS.map((item) => ({ ...item, shortcut: item.short }))
 
 function phrase(t, item) {
   if (!item?.key) return item?.label || ''
@@ -179,6 +166,65 @@ export function CadPrompt({ command, readout, onChange, onApply, onCancel }) {
       {readout && <span data-testid="cad-readout">{readout}</span>}
       <button type="button" data-testid="cad-apply" style={barBtn(true)} onClick={onApply}>{t('cad.done')}</button>
       <button type="button" data-testid="cad-cancel" style={barBtn(false)} onClick={onCancel}>{t('cad.undoShort')}</button>
+    </div>
+  )
+}
+
+export function EditCommandItems({ itemStyle, onCommand, onSelectType, onLayer, scope = 'house' }) {
+  const { t } = useLocale()
+  const types = scope === 'cold'
+    ? SELECT_TYPES.filter((item) => item.id === 'all' || item.id === 'room' || item.id === 'door')
+    : SELECT_TYPES
+  const layers = scope === 'cold' ? [] : CAD_LAYERS
+  const row = itemStyle ? itemStyle(false) : { ...barBtn(false), textAlign: 'left', width: '100%' }
+  return (
+    <>
+      <div style={{ height: 1, background: '#e7e5e4', margin: '4px 2px' }} />
+      <select data-testid="menu-select-type" defaultValue="" title={t('select.type')} onChange={(event) => { const value = event.target.value; event.target.value = ''; if (value) onSelectType?.(value) }} style={{ ...selectLike, margin: '2px 4px' }}>
+        <option value="">{t('select.type')}…</option>
+        {types.map((item) => <option key={item.id} value={item.id}>{phrase(t, item)}</option>)}
+      </select>
+      {COMMANDS.map((cmd) => (
+        <button key={cmd.id} type="button" data-testid={`menu-${cmd.testid}`} title={`${phrase(t, cmd)} (${cmd.shortcut})`} style={{ ...row, display: 'flex', justifyContent: 'space-between', gap: 16, width: '100%' }} onClick={() => onCommand?.(cmd.id)}>
+          <span>{phrase(t, cmd)}</span>
+          <span style={{ color: '#78716c', fontWeight: 650 }}>{cmd.shortcut}</span>
+        </button>
+      ))}
+      {layers.length > 0 && (
+        <select data-testid="menu-cad-layer" defaultValue="" title={t('cad.changeLayer')} onChange={(event) => { const value = event.target.value; event.target.value = ''; if (value) onLayer?.(value) }} style={{ ...selectLike, margin: '2px 4px' }}>
+          <option value="">{t('cad.layer')}…</option>
+          {layers.map((item) => <option key={item.id} value={item.id}>{phrase(t, item)}</option>)}
+        </select>
+      )}
+    </>
+  )
+}
+
+const selectLike = {
+  height: 28,
+  borderRadius: 6,
+  border: '1px solid #d6d3d1',
+  fontSize: 12,
+  fontWeight: 650,
+  background: '#fff',
+  color: '#1c1917',
+}
+
+export function SelectionActions({ kind, count = 1, active, onCommand }) {
+  const { t } = useLocale()
+  const ids = actionsForSelection(kind, count)
+  if (!ids.length || !onCommand) return null
+  return (
+    <div data-testid="selection-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '0 0 10px' }}>
+      {ids.map((id) => {
+        const cmd = byId(id)
+        if (!cmd) return null
+        return (
+          <button key={id} type="button" data-testid={`act-${cmd.testid}`} aria-label={phrase(t, cmd)} title={`${phrase(t, cmd)} (${cmd.shortcut})`} style={iconBtn(active === id)} onClick={(event) => onCommand(id, event)}>
+            <CadIcon name={id} />
+          </button>
+        )
+      })}
     </div>
   )
 }
