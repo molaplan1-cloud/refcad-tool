@@ -110,7 +110,11 @@ export function CadPrompt({ command, readout, onChange, onApply, onCancel }) {
   const distance = ['move', 'copy', 'array', 'offset', 'stretch'].includes(command.name)
   const angle = command.name === 'rotate'
   const factor = command.name === 'scale'
-  const hint = command.name === 'shift-wall'
+  const hint = command.name === 'extend-wall'
+    ? (command.step === 'target' ? t('join.pickWall') : t('join.pickEnd'))
+    : command.name === 'join-corner'
+      ? t('join.pickTwo')
+      : command.name === 'shift-wall'
     ? (command.step === 'from' ? t('cad.fromWall') : t('cad.toWall'))
     : command.name === 'mirror'
       ? (command.step === 'base' ? t('cad.mirrorStart') : t('cad.mirrorEnd'))
@@ -119,7 +123,7 @@ export function CadPrompt({ command, readout, onChange, onApply, onCancel }) {
         : command.step === 'window' ? t('cad.window') : command.step === 'base' ? t('cad.base') : command.step === 'source' ? t('cad.source') : t('cad.target')
   return (
     <div data-testid="cad-prompt" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-      <strong>{command.name === 'shift-wall' ? t('draw.shiftWall') : (phrase(t, cmd) || command.name)}</strong>
+      <strong>{command.name === 'shift-wall' ? t('draw.shiftWall') : command.name === 'extend-wall' ? t('join.extend') : command.name === 'join-corner' ? t('join.corner') : (phrase(t, cmd) || command.name)}</strong>
       <span style={{ color: '#57534e' }}>{hint}</span>
       {distance && (
         <input data-testid="cad-value" inputMode="decimal" placeholder="mm" value={command.value || ''} onChange={(event) => onChange({ value: event.target.value })} onKeyDown={(event) => onFieldKey(event, onApply, onCancel)} style={{ width: 72, height: 24, borderRadius: 6, border: '1px solid #d6d3d1' }} />

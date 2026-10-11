@@ -31,6 +31,7 @@ import {
   finishLegendLines,
   materialsList,
   moveCorner,
+  setEndpoint,
   resizeDimension,
   wallForDimension,
   moveFixture,
@@ -64,6 +65,7 @@ import {
   claddingOf,
 } from '@/lib/floorplan'
 import { faceOffsets, wallFigures } from '@/lib/wall-outline'
+import { extendToWall, healCandidate, joinCorner, snapWallEnd } from '@/lib/wallJoin'
 import { layerFaces, resolveWallStructure, structureCatalog } from '@/lib/structures'
 import { FixtureSymbol } from './FixtureSymbol'
 import { FURNITURE_GROUPS, layoutFor, resolveFixture, scheduleRows, suggestionsFor } from '@/lib/furniture'
@@ -1052,6 +1054,7 @@ export default function FloorPlanApp() {
   const [placing, setPlacing] = useState(null)
   const [repeatPlace, setRepeatPlace] = useState(false)
   const [toast, setToast] = useState('')
+  const [heal, setHeal] = useState(null)
   const [underlayPick, setUnderlayPick] = useState(null)
   const [underlayDistance, setUnderlayDistance] = useState('10000')
   const [pdfAsk, setPdfAsk] = useState(null)
@@ -1389,6 +1392,7 @@ export default function FloorPlanApp() {
 
   const commit = useCallback((next) => {
     clearGuides()
+    setHeal(healCandidate(next))
     setPlan((current) => {
       history.current = [...history.current, current].slice(-40)
       redo.current = []
@@ -1601,6 +1605,34 @@ export default function FloorPlanApp() {
     if (name === 'mirror' && selected.length > 0 && selected.every((item) => item.kind === 'opening')) {
       const direction = Boolean(extra && typeof extra === 'object' && (extra.shiftKey || extra.shift))
       commit(mirrorOpenings(plan, selected, { direction }))
+      setMenu(null)
+      return
+    }
+    if (name === 'extend-wall' || name === 'join-corner') {
+      const wallIds = selected.filter((item) => item.kind === 'wall').map((item) => item.id)
+      if (name === 'join-corner' && wallIds.length >= 2) {
+        commit(joinCorner(plan, wallIds[0], wallIds[1]))
+        setMenu(null)
+        return
+      }
+      const corner = pick?.kind === 'corner' ? pick.at : null
+      let end = null
+      let wallId = wallIds[0] || null
+      if (name === 'extend-wall' && corner && wallId) {
+        const wall = (plan.walls || []).find((item) => item.id === wallId)
+        if (wall) end = Math.hypot(wall.a.x - corner.x, wall.a.z - corner.z) <= Math.hypot(wall.b.x - corner.x, wall.b.z - corner.z) ? 'a' : 'b'
+      }
+      originPlan.current = plan
+      const next = {
+        name,
+        step: name === 'join-corner' ? (wallId ? 'second' : 'first') : (end ? 'target' : 'end'),
+        wallId,
+        end,
+      }
+      commandRef.current = next
+      setCommand(next)
+      setTool('select')
+      setPlacing(null)
       setMenu(null)
       return
     }
@@ -1872,18 +1904,35 @@ export default function FloorPlanApp() {
     } else if (!typingDraw) setDrawGuide(null)
     const radius = Math.max(12 / Math.max(ppm2d, 0.001), 0.45)
     if (dragCorner.current) {
-      const snap = altRef.current
-        ? { point: world }
-        : snapPoint(world, { walls: (dragBefore.current || plan).walls, grid: gridStep, radius: snapRadius(ppm2d, 14), enabled: true, ignore: dragCorner.current.origin })
-      const to = snap.point
       const origin = dragCorner.current.origin
-      if (Math.hypot(to.x - origin.x, to.z - origin.z) > 0.001) {
-        dragCorner.current.moved = true
-        const base = dragBefore.current || plan
-        setPlan(moveCorner(base, origin, to, { free: shiftRef.current || angleStep === 0 }))
-      } else if (dragCorner.current.moved && dragBefore.current) {
-        dragCorner.current.moved = false
-        setPlan(dragBefore.current)
+      const base = dragBefore.current || plan
+      if (dragCorner.current.wallId && !shiftRef.current) {
+        const wall = (base.walls || []).find((item) => item.id === dragCorner.current.wallId)
+        const snap = wall
+          ? snapWallEnd(world, wall, dragCorner.current.end, base.walls, snapRadius(ppm2d, 16), base)
+          : { point: world, onFace: false, kind: null, targetId: null }
+        if (Math.hypot(snap.point.x - origin.x, snap.point.z - origin.z) > 0.001) {
+          dragCorner.current.moved = true
+          dragCorner.current.kind = snap.kind
+          dragCorner.current.targetId = snap.targetId
+          setPlan(setEndpoint(base, dragCorner.current.wallId, dragCorner.current.end, snap.point))
+        } else if (dragCorner.current.moved && dragBefore.current) {
+          dragCorner.current.moved = false
+          dragCorner.current.kind = null
+          setPlan(dragBefore.current)
+        }
+      } else {
+        const snap = altRef.current
+          ? { point: world }
+          : snapPoint(world, { walls: base.walls, grid: gridStep, radius: snapRadius(ppm2d, 14), enabled: true, ignore: origin })
+        const to = snap.point
+        if (Math.hypot(to.x - origin.x, to.z - origin.z) > 0.001) {
+          dragCorner.current.moved = true
+          setPlan(moveCorner(base, origin, to, { free: shiftRef.current || angleStep === 0 }))
+        } else if (dragCorner.current.moved && dragBefore.current) {
+          dragCorner.current.moved = false
+          setPlan(dragBefore.current)
+        }
       }
     }
     if (dragId.current) setPlan((current) => moveFixture(current, dragId.current, world.x, world.z, radius))
@@ -1949,7 +1998,15 @@ export default function FloorPlanApp() {
     const movedRoute = routeDrag.current?.moved
     const movedNode = dragNode.current?.moved
     const draggedFixture = Boolean(dragId.current)
-    const movedCorner = dragCorner.current?.moved
+    const cornerDrag = dragCorner.current
+    const movedCorner = cornerDrag?.moved
+    if (movedCorner && cornerDrag?.wallId && cornerDrag.kind && cornerDrag.targetId) {
+      const joined = extendToWall(plan, cornerDrag.wallId, cornerDrag.end, cornerDrag.targetId)
+      if (joined !== plan) setPlan(joined)
+      setHeal(healCandidate(joined))
+    } else if (movedCorner) {
+      setHeal(healCandidate(plan))
+    }
     const movedUnderlay = underlayDrag.current?.moved
     if ((dragId.current || dragLabel.current || dragOpen.current || movedYard || movedRoute || movedNode || movedCorner || movedUnderlay) && dragBefore.current) history.current = [...history.current, dragBefore.current].slice(-40)
     dragId.current = null
@@ -2428,6 +2485,44 @@ export default function FloorPlanApp() {
     }
     if (command && !svcTool && !yardTool && !placing && (tool === 'select' || tool === 'detect')) {
       const point = snappedPoint(world)
+      if (command.name === 'extend-wall' && command.step === 'end') {
+        const corner = nearestEndpoint((originPlan.current || plan).walls, world, snapRadius(ppm2d, 18))
+        if (!corner) return
+        const walls = (originPlan.current || plan).walls || []
+        const owners = walls.filter((wall) => Math.hypot(wall.a.x - corner.x, wall.a.z - corner.z) <= 0.08 || Math.hypot(wall.b.x - corner.x, wall.b.z - corner.z) <= 0.08)
+        const wall = (command.wallId && owners.find((item) => item.id === command.wallId)) || owners[0]
+        if (!wall) return
+        const end = Math.hypot(wall.a.x - corner.x, wall.a.z - corner.z) <= Math.hypot(wall.b.x - corner.x, wall.b.z - corner.z) ? 'a' : 'b'
+        const next = { ...command, step: 'target', wallId: wall.id, end }
+        commandRef.current = next
+        setCommand(next)
+        return
+      }
+      if (command.name === 'extend-wall' && command.step === 'target') {
+        const hit = hitTest(plan, world)
+        if (hit.kind !== 'wall' || hit.id === command.wallId) return
+        commit(extendToWall(originPlan.current || plan, command.wallId, command.end, hit.id))
+        originPlan.current = null
+        commandRef.current = null
+        setCommand(null)
+        return
+      }
+      if (command.name === 'join-corner' && (command.step === 'first' || command.step === 'second')) {
+        const hit = hitTest(plan, world)
+        if (hit.kind !== 'wall') return
+        if (command.step === 'first' || !command.wallId) {
+          const next = { ...command, step: 'second', wallId: hit.id }
+          commandRef.current = next
+          setCommand(next)
+          return
+        }
+        if (hit.id === command.wallId) return
+        commit(joinCorner(originPlan.current || plan, command.wallId, hit.id))
+        originPlan.current = null
+        commandRef.current = null
+        setCommand(null)
+        return
+      }
       if (command.name === 'shift-wall' && command.step === 'from') {
         const host = (originPlan.current || plan).walls.find((item) => item.id === command.wallId)
         const hit = nearestWall(host ? [host] : [], point, 0.45)
@@ -2505,7 +2600,16 @@ export default function FloorPlanApp() {
     const yardHit = workspace === 'piha' && sheetMode === 'site' ? hitTestYard(plan, world, Math.max(0.28, 12 / Math.max(ppm2d, 0.001))) : null
     const corner = workspace === 'rakenne' ? nearestEndpoint(plan.walls, world, snapRadius(ppm2d, 14)) : null
     if (corner && !yardHit) {
-      dragCorner.current = { origin: { x: corner.x, z: corner.z }, moved: false }
+      const owners = (plan.walls || []).filter((wall) => Math.hypot(wall.a.x - corner.x, wall.a.z - corner.z) <= 0.08 || Math.hypot(wall.b.x - corner.x, wall.b.z - corner.z) <= 0.08)
+      const sole = owners.length === 1 ? owners[0] : null
+      dragCorner.current = {
+        origin: { x: corner.x, z: corner.z },
+        moved: false,
+        wallId: sole?.id || null,
+        end: sole ? (Math.hypot(sole.a.x - corner.x, sole.a.z - corner.z) <= Math.hypot(sole.b.x - corner.x, sole.b.z - corner.z) ? 'a' : 'b') : null,
+        kind: null,
+        targetId: null,
+      }
       dragBefore.current = plan
       choose({ kind: 'corner', id: 'corner', at: { x: corner.x, z: corner.z } })
       return
@@ -4057,6 +4161,9 @@ export default function FloorPlanApp() {
             ) : (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <span data-testid="status-tool">{track?.armed === 'pick' ? t('draw.fromPoint') : status}</span>
+                {heal && (
+                  <button type="button" data-testid="heal-join" onClick={() => { setHeal(null); commit(extendToWall(plan, heal.wallId, heal.end, heal.targetId)) }} style={{ marginLeft: 8, height: 22, padding: '0 8px', borderRadius: 6, border: '1px solid #0f766e', background: '#ccfbf1', color: '#115e59', fontWeight: 750, cursor: 'pointer' }}>{t('join.heal')}</button>
+                )}
                 {trackLive && <span data-testid="track-status" data-label={trackLive.label}>{trackLive.label}</span>}
                 {trackingActive && (
                   <button
