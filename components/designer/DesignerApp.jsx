@@ -12,7 +12,7 @@ import PlanView from './PlanView'
 import HeatLoadPanel, { DutyTypeSelect } from './HeatLoadPanel'
 import { TEMPLATES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
 import { PANEL_MM, commitPanel, emptyPanelPlan, extendPanel, joinPanelCorner, roomsFromPanels, setPanelEnd, snapDoorToPanel } from '@/lib/coldPanels'
-import { applyUnitChoice, assignRooms, groupUnits } from '@/lib/coldUnits'
+import { applyUnitChoice, assignAllToOne, assignEachOwn, assignOwnUnit, assignRooms, bindPlacedUnit, createUnit, groupUnits, pickUnitModel } from '@/lib/coldUnits'
 import { formatDeviceLink, isColdDevice, removalPrompt } from '@/lib/coldDevices'
 import { LibraryDialog, ProjectInfoDialog, ProjectSettingsDialog } from '@/components/floorplan/ProjectDialogs'
 import ColdChrome from './ColdChrome'
@@ -194,10 +194,11 @@ function TemplateThumb({ item }) {
   )
 }
 
-function UnitBoard({ t, rooms, result, diversity, onDiversity, onAssign, onPick }) {
-  const board = groupUnits(rooms, result, { diversity })
-  const machines = board.groups.filter((group) => group.machine)
+function UnitBoard({ t, rooms, result, units = [], diversity, onDiversity, onAssign, onPick, onCreate, onAll, onEach, onBind, placed = [] }) {
+  const board = groupUnits(rooms, result, { diversity, units })
+  const logical = board.groups.filter((group) => group.machine?.logical)
   const combos = TEMPLATES.filter((item) => item.category === 'combo')
+  const btn = { border: '1px solid #d6d3d1', background: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 11, padding: '4px 8px', fontWeight: 650 }
   return (
     <div data-testid="unit-board" style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
@@ -207,28 +208,49 @@ function UnitBoard({ t, rooms, result, diversity, onDiversity, onAssign, onPick 
           <input data-testid="unit-diversity" aria-label={t('cold.diversity')} type="number" min="0.5" max="1" step="0.05" value={diversity ?? 0.85} onChange={(event) => onDiversity(Number(event.target.value) || 0.85)} style={{ width: 64, marginLeft: 6, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }} />
         </label>
       </div>
-      {board.groups.filter((group) => group.rooms.length).map((group) => (
-        <div key={group.id} data-testid={`unit-group-${group.id}`} style={{ marginTop: 8, fontSize: 12, lineHeight: 1.45 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+        <button type="button" data-testid="unit-new" onClick={onCreate} style={btn}>{t('cold.unitNew')}</button>
+        <button type="button" data-testid="unit-all" onClick={onAll} style={btn}>{t('cold.unitAll')}</button>
+        <button type="button" data-testid="unit-each" onClick={onEach} style={btn}>{t('cold.unitEach')}</button>
+      </div>
+      {board.groups.filter((group) => group.rooms.length || group.machine?.logical).map((group) => (
+        <div key={group.id} data-testid={`unit-group-${group.id}`} data-name={group.machine?.name || ''} style={{ marginTop: 8, fontSize: 12, lineHeight: 1.45 }}>
           <div style={{ fontWeight: 750 }}>{group.machine?.name || t('cold.unassigned')}</div>
           <div data-testid={`unit-total-${group.id}`}>{t('cold.totalKw', { kw: group.totalKw.toFixed(2) })}</div>
-          <div>{t('cold.suctionPlus')} {group.plusKw.toFixed(2)} kW · {t('cold.suctionMinus')} {group.minusKw.toFixed(2)} kW</div>
-          <div>{t('cold.suggest')}: {group.suggested?.name || '—'}</div>
-          {group.machine && (
-            <select data-testid={`unit-pick-${group.id}`} aria-label={t('cold.pickUnit')} value={group.machine.catalogId || ''} onChange={(event) => onPick(group.machine.id, event.target.value)} style={{ width: '100%', marginTop: 4, height: 28, borderRadius: 6, border: '1px solid #d6d3d1' }}>
-              {combos.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
+          <div data-testid={`unit-suction-${group.id}`}>{t('cold.suctionPlus')} {group.plusKw.toFixed(2)} kW · {t('cold.suctionMinus')} {group.minusKw.toFixed(2)} kW</div>
+          <div data-testid={`unit-suggest-${group.id}`}>{t('cold.suggest')}: {group.suggested?.name || '—'}</div>
+          {group.chosen?.name && <div data-testid={`unit-chosen-${group.id}`}>{t('cold.unitChosen')}: {group.chosen.name}</div>}
+          {group.machine?.logical && (
+            <>
+              <select data-testid={`unit-pick-${group.id}`} aria-label={t('cold.pickUnit')} value={group.machine.catalogId || group.suggested?.id || ''} onChange={(event) => onPick(group.id, event.target.value)} style={{ width: '100%', marginTop: 4, height: 28, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                {combos.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+              {placed.length > 0 && (
+                <label style={{ display: 'block', marginTop: 4, fontSize: 11, color: '#57534e' }}>
+                  {t('cold.unitPlaced')}
+                  <select data-testid={`unit-placed-${group.id}`} aria-label={t('cold.unitPlaced')} value={group.machine.placedId || ''} onChange={(event) => onBind(group.id, event.target.value || null)} style={{ display: 'block', width: '100%', marginTop: 2, height: 28, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                    <option value="">{t('cold.unitUnplaced')}</option>
+                    {placed.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                </label>
+              )}
+            </>
           )}
           {group.rooms.map((room) => {
             const full = rooms.find((item) => item.id === room.id)
             const linked = (full?.equipment || []).filter((eq) => isColdDevice(eq))
             return (
             <div key={room.id} data-testid={`unit-room-${room.id}`} style={{ marginTop: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                 <span>{room.label} {room.name} · {room.kw.toFixed(2)} kW · {t('cold.evap')} {room.evapKw.toFixed(2)} kW</span>
-                <select data-testid={`unit-assign-${room.id}`} aria-label={t('cold.assign')} value={full?.unitId || ''} onChange={(event) => onAssign(room.id, event.target.value || null)} style={{ maxWidth: 140, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }}>
-                  <option value="">{t('cold.unassigned')}</option>
-                  {machines.map((item) => <option key={item.id} value={item.id}>{item.machine.name}</option>)}
-                </select>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#44403c' }}>
+                  {t('cold.assign')}:
+                  <select data-testid={`unit-assign-${room.id}`} aria-label={t('cold.assign')} value={full?.unitId && logical.some((item) => item.id === full.unitId) ? full.unitId : ''} onChange={(event) => onAssign(room.id, event.target.value)} style={{ maxWidth: 140, height: 26, borderRadius: 6, border: '1px solid #d6d3d1' }}>
+                    <option value="">{t('cold.unassigned')}</option>
+                    {logical.map((item) => <option key={item.id} value={item.id}>{item.machine.name}</option>)}
+                    <option value="__own__">{t('cold.unitOwn')}</option>
+                  </select>
+                </label>
               </div>
               {linked.map((eq) => (
                 <div key={eq.id} data-testid={`device-link-${eq.id}`} style={{ fontSize: 11, color: '#44403c', marginTop: 2 }}>{formatDeviceLink(t, full, eq, rooms)}</div>
@@ -286,6 +308,7 @@ export default function DesignerApp({
     revision: 'A',
     designer: '',
     overrides: {},
+    units: [],
     ...(initialSchematic || {}),
   }))
   const [unitSystem, setUnitSystem] = useState(initialUnitSystem === 'IP' ? 'IP' : 'SI')
@@ -802,7 +825,13 @@ export default function DesignerApp({
   }
 
   function runAutoPipe() {
-    const result = autoCircuit(roomsRef.current, { refrigerant, teC, tcC, id: genId })
+    const result = autoCircuit(roomsRef.current, {
+      refrigerant,
+      teC,
+      tcC,
+      id: genId,
+      units: schematicRef.current.units || [],
+    })
     if (result.offerMove) {
       setPipeOffer(result.moves)
       setNotice(result.hint)
@@ -833,7 +862,13 @@ export default function DesignerApp({
         }
       }),
     }))
-    const result = autoCircuit(next, { refrigerant, teC, tcC, id: genId })
+    const result = autoCircuit(next, {
+      refrigerant,
+      teC,
+      tcC,
+      id: genId,
+      units: schematicRef.current.units || [],
+    })
     if (!result.ok) {
       setPipeOffer(null)
       setNotice(result.hint)
@@ -1392,8 +1427,13 @@ export default function DesignerApp({
       setCad((current) => (current ? { ...current, step: 'base', box } : current))
     },
     onContextMenu: (hit) => {
-      setSelectedIds([hit.id])
-      setMenu(hit)
+      const current = selectedRef.current
+      const keep = hit.kind === 'room' && current.includes(hit.id)
+      const ids = keep
+        ? current.filter((id) => roomsRef.current.some((room) => room.id === id))
+        : [hit.id]
+      if (!keep) setSelectedIds([hit.id])
+      setMenu({ ...hit, ids })
     },
     pipes,
     cables,
@@ -1774,14 +1814,26 @@ export default function DesignerApp({
                 <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} placeMode={Boolean(placing)} onPlace={(spot) => {
                   const host = (rooms || []).find((room) => pointInOutline(spot.x, spot.z, outlinePoints(room))) || [...rooms].sort((a, b) => Math.hypot(a.x - spot.x, a.z - spot.z) - Math.hypot(b.x - spot.x, b.z - spot.z))[0]
                   if (host) onPlace(host.id, spot.x, spot.z, spot.gesture)
-                }} onExitPlace={() => { setPlacingId(null); setTool('select') }} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
+                }} onExitPlace={() => { setPlacingId(null); setTool('select') }} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => {
+                  const current = selectedRef.current
+                  const keep = hit.kind === 'room' && current.includes(hit.id)
+                  const ids = keep ? current.filter((id) => roomsRef.current.some((room) => room.id === id)) : [hit.id]
+                  if (!keep) setSelectedIds([hit.id])
+                  setMenu({ ...hit, ids })
+                }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
               </div>
             </div>
           ) : view === '3d' ? (
             <Scene3D rooms={rooms} pipes={pipes} cables={cables} selectedId={selectedId} placeMode={Boolean(placing)} onPlace={(spot) => {
               const host = (rooms || []).find((room) => pointInOutline(spot.x, spot.z, outlinePoints(room))) || [...rooms].sort((a, b) => Math.hypot(a.x - spot.x, a.z - spot.z) - Math.hypot(b.x - spot.x, b.z - spot.z))[0]
               if (host) onPlace(host.id, spot.x, spot.z, spot.gesture)
-            }} onExitPlace={() => { setPlacingId(null); setTool('select') }} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => { setSelectedIds([hit.id]); setMenu(hit) }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
+            }} onExitPlace={() => { setPlacingId(null); setTool('select') }} onSelect={(id) => setSelectedIds(id ? [id] : [])} onContext={(hit) => {
+                  const current = selectedRef.current
+                  const keep = hit.kind === 'room' && current.includes(hit.id)
+                  const ids = keep ? current.filter((id) => roomsRef.current.some((room) => room.id === id)) : [hit.id]
+                  if (!keep) setSelectedIds([hit.id])
+                  setMenu({ ...hit, ids })
+                }} onRouteDrag={onRouteDrag} unitSystem={unitSystem} />
           ) : (
             <PlanView {...planProps} />
           )}
@@ -1902,10 +1954,51 @@ export default function DesignerApp({
             t={t}
             rooms={rooms}
             result={result}
+            units={schematic.units || []}
             diversity={schematic.diversity}
+            placed={rooms.flatMap((room) => (room.equipment || []).filter((eq) => eq.category === 'combo' || eq.category === 'unit' || eq.category === 'compressor').map((eq) => ({ id: eq.id, name: eq.name })))}
             onDiversity={(diversity) => setSchematic((current) => ({ ...current, diversity }))}
-            onAssign={(roomId, unitId) => setRooms((current) => assignRooms(current, [roomId], unitId))}
-            onPick={(equipmentId, templateId) => setRooms((current) => applyUnitChoice(current, equipmentId, templateId))}
+            onCreate={() => {
+              pushUndo()
+              const created = createUnit(schematicRef.current.units || [])
+              setSchematic((current) => ({ ...current, units: created.units }))
+            }}
+            onAll={() => {
+              pushUndo()
+              const next = assignAllToOne(roomsRef.current, schematicRef.current.units || [])
+              roomsRef.current = next.rooms
+              setRooms(next.rooms)
+              setSchematic((current) => ({ ...current, units: next.units }))
+            }}
+            onEach={() => {
+              pushUndo()
+              const next = assignEachOwn(roomsRef.current, schematicRef.current.units || [])
+              roomsRef.current = next.rooms
+              setRooms(next.rooms)
+              setSchematic((current) => ({ ...current, units: next.units }))
+            }}
+            onAssign={(roomId, value) => {
+              pushUndo()
+              if (value === '__own__') {
+                const next = assignOwnUnit(roomsRef.current, schematicRef.current.units || [], roomId)
+                roomsRef.current = next.rooms
+                setRooms(next.rooms)
+                setSchematic((current) => ({ ...current, units: next.units }))
+                return
+              }
+              setRooms(assignRooms(roomsRef.current, [roomId], value || null))
+            }}
+            onPick={(unitId, templateId) => {
+              pushUndo()
+              const units = schematicRef.current.units || []
+              const host = units.find((unit) => unit.id === unitId)
+              setSchematic((current) => ({ ...current, units: pickUnitModel(units, unitId, templateId) }))
+              if (host?.placedId) setRooms(applyUnitChoice(roomsRef.current, host.placedId, templateId))
+            }}
+            onBind={(unitId, placedId) => {
+              pushUndo()
+              setSchematic((current) => ({ ...current, units: bindPlacedUnit(current.units || [], unitId, placedId) }))
+            }}
           />
           {selectedIds.length > 1 && (
             <div style={{ padding: 12, borderBottom: '1px solid #e7e5e4' }}>
@@ -2012,6 +2105,12 @@ export default function DesignerApp({
         <ContextMenu
           menu={menu}
           rooms={rooms}
+          units={schematic.units || []}
+          onJoinUnits={(ids, unitId) => {
+            pushUndo()
+            setRooms(assignRooms(roomsRef.current, ids, unitId))
+            setMenu(null)
+          }}
           pipes={pipes}
           cables={cables}
           onClose={() => setMenu(null)}
@@ -2090,7 +2189,7 @@ export default function DesignerApp({
   )
 }
 
-function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily, onDoorLeaf, onReroute, onHeight, onLock, onCad }) {
+function ContextMenu({ menu, rooms, units = [], pipes, cables = [], onClose, onRotate, onAngle, onResize, onElevation, onDuplicate, onDelete, onDoorType, onDoorFamily, onDoorLeaf, onReroute, onHeight, onLock, onCad, onJoinUnits }) {
   const { t } = useLocale()
   const host = rooms.find((room) => room.id === menu.id) || rooms.find((room) => (room.equipment || []).some((eq) => eq.id === menu.id))
   const eq = host?.equipment?.find((item) => item.id === menu.id) || null
@@ -2107,6 +2206,11 @@ function ContextMenu({ menu, rooms, pipes, cables = [], onClose, onRotate, onAng
   return (
     <div data-testid="context-menu" style={{ position: 'fixed', left, top, zIndex: 40, width: 280, maxHeight: '70vh', overflowY: 'auto', background: '#fff', border: '1px solid #e7e5e4', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.16)', padding: 8 }} onMouseDown={(event) => event.stopPropagation()}>
       <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 6px 8px' }}>{eq?.name || pipe?.kind || host?.name || t('ctx.object')}</div>
+      {menu.kind === 'room' && (units || []).map((unit) => (
+        <MenuBtn key={unit.id} testid={`ctx-unit-${unit.name}`} onClick={() => onJoinUnits?.(menu.ids?.length ? menu.ids : [menu.id], unit.id)}>
+          {t('cold.unitJoin', { name: unit.name })}
+        </MenuBtn>
+      ))}
       <MenuBtn testid="ctx-cad-move" onClick={() => onCad?.('move')}>{t('cad.move')}</MenuBtn>
       <MenuBtn testid="ctx-cad-copy" onClick={() => onCad?.('copy')}>{t('cad.copy')}</MenuBtn>
       <MenuBtn testid="ctx-cad-rotate" onClick={() => onCad?.('rotate')}>{t('cad.rotate')}</MenuBtn>
