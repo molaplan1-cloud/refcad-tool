@@ -28,6 +28,7 @@ import {
   formatMm,
   hitTest,
   materialOf,
+  finishLegendLines,
   materialsList,
   moveCorner,
   resizeDimension,
@@ -541,6 +542,39 @@ function yardPlacesOne(id) {
   if (id.startsWith('plant:') || id.startsWith('object:') || id.startsWith('building:')) return true
   if (id.startsWith('ground:')) return GROUND_TOOLS.find((item) => item.id === id.slice(7))?.mode === 'point'
   return false
+}
+
+function FinishLegend({ lines, sheet, layout, k, zoom }) {
+  const font = paperFont(k, zoom, 2.2)
+  const rowH = font * 1.35
+  const perCol = Math.ceil(lines.length / 2)
+  const boxW = Math.min(sheet.w * 0.42, Math.max(180, layout.title.w * k))
+  const colW = boxW / 2
+  const boxH = perCol * rowH + font * 0.6
+  const x = sheet.x + layout.title.x * k
+  const y = Math.max(sheet.y + 8, sheet.y + layout.title.y * k - boxH - 8)
+  return (
+    <g data-testid="finish-legend" style={{ pointerEvents: 'none' }}>
+      <rect x={x} y={y} width={boxW} height={boxH} fill="#fbfaf7" stroke="#1c1917" strokeWidth={0.6} />
+      {lines.map((line, index) => {
+        const col = Math.floor(index / perCol)
+        const row = index % perCol
+        const lx = x + 4 + col * colW
+        const ly = y + rowH * (row + 1)
+        if (line.kind === 'swatch') {
+          return (
+            <g key={`${line.text}-${index}`}>
+              <rect x={lx} y={ly - font * 0.75} width={font * 0.7} height={font * 0.7} fill={line.color} stroke="#44403c" strokeWidth={0.4} />
+              <text x={lx + font} y={ly} fontSize={font} fill="#1c1917">{line.text}</text>
+            </g>
+          )
+        }
+        return (
+          <text key={`${line.text}-${index}`} x={lx} y={ly} fontSize={line.kind === 'title' ? font * 1.05 : font} fontWeight={700} fill="#1c1917">{line.text}</text>
+        )
+      })}
+    </g>
+  )
 }
 
 function sheetPixels(size, plan, site = false) {
@@ -4437,6 +4471,9 @@ export default function FloorPlanApp() {
                     {mark.code}
                   </text>
                 ))}
+                {sheetMode !== 'site' && display.legend && (
+                  <FinishLegend lines={finishLegendLines(locale)} sheet={sheet} layout={layout} k={k} zoom={camera.zoom || 1} />
+                )}
                 {sheetMode !== 'site' && display.legend && structureCatalog(plan).length > 0 && (
                   <g data-testid="structure-legend" style={{ pointerEvents: 'none' }}>
                     {(() => {
