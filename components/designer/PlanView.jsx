@@ -513,6 +513,9 @@ export default function PlanView({
   onChainStep,
   onCommitRectangle,
   onEditDimension,
+  onRoomMove,
+  onRoomResize,
+  onRoomOutline,
   innerDims = true,
   roomShape = 'rect',
   onUndo,
@@ -550,6 +553,10 @@ export default function PlanView({
   const [hoverId, setHoverId] = useState(null)
   const [draft, setDraft] = useState(null)
   const [dimEdit, setDimEdit] = useState(null)
+  const dimEditRef = useRef(null)
+  const dimClosing = useRef(false)
+  const dimHold = useRef(false)
+  dimEditRef.current = dimEdit
   const [poly, setPoly] = useState([])
   const [polyHover, setPolyHover] = useState(null)
   const [spaceDown, setSpaceDown] = useState(false)
@@ -571,7 +578,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
-    onPanelSegment, onPanelEnd, onChainStep, onCommitRectangle, onEditDimension, onUndo, onSelectWall, walls, selectedWalls, onScale, roomShape,
+    onPanelSegment, onPanelEnd, onChainStep, onCommitRectangle, onEditDimension, onRoomMove, onRoomResize, onRoomOutline, onUndo, onSelectWall, walls, selectedWalls, onScale, roomShape,
     onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu, hand,
   }
 
@@ -997,6 +1004,11 @@ export default function PlanView({
         })
         const limited = clampGroupTranslation(g.orig, g.ids, anchor.x - anchorX, anchor.z - anchorZ)
         setCursor((prev) => ({ ...(prev || world), kind: anchor.kind }))
+        const panelIds = g.orig.filter((room) => g.ids.has(room.id) && room.panelKey).map((room) => room.id)
+        if (panelIds.length && p.onRoomMove) {
+          p.onRoomMove(panelIds, limited.dx, limited.dz)
+          return
+        }
         p.onPreview(g.orig.map((room) => {
           if (!g.ids.has(room.id)) return room
           return {
@@ -1030,6 +1042,10 @@ export default function PlanView({
         }
         const limited = clampResizeBox(room, g.orig, left, top, right, bottom)
         if (!limited) return
+        if (room.panelKey && p.onRoomResize) {
+          p.onRoomResize(room.id, limited)
+          return
+        }
         p.onPreview(g.orig.map((item) => (
           item.id === room.id ? reseatWallDevices(applyBox(item, limited.left, limited.top, limited.right, limited.bottom)) : item
         )))
@@ -1046,6 +1062,10 @@ export default function PlanView({
         if (parent && !footprintInside(parent, proposed)) return
         const children = g.orig.filter((item) => item.parentId === room.id)
         if (children.some((child) => !footprintInside(proposed, child))) return
+        if (room.panelKey && p.onRoomOutline) {
+          p.onRoomOutline(room.id, points)
+          return
+        }
         p.onPreview(g.orig.map((item) => (item.id === room.id ? reseatWallDevices(proposed) : item)))
         return
       }
@@ -1164,6 +1184,20 @@ export default function PlanView({
     }
   }, [])
 
+  const closeDimEditor = (commit, keepOpen = false) => {
+    const current = dimEditRef.current
+    if (!current || dimClosing.current) return
+    if (commit) {
+      const mm = Number(String(current.value).replace(',', '.'))
+      if (Number.isFinite(mm) && mm >= 50) propsRef.current.onEditDimension?.(current.dim, mm)
+    }
+    if (keepOpen) return
+    dimClosing.current = true
+    dimEditRef.current = null
+    setDimEdit(null)
+    window.setTimeout(() => { dimClosing.current = false }, 0)
+  }
+
   const onMouseDown = (event) => {
     if (touching.current && !event.fromTouch) return
     const host = hostRef.current
@@ -1199,6 +1233,10 @@ export default function PlanView({
       return
     }
     if (event.button !== 0) return
+    if (dimEditRef.current && event.target?.dataset?.testid !== 'wall-length-edit') {
+      closeDimEditor(true)
+      return
+    }
     const p = propsRef.current
     const touchHand = Boolean(event.fromTouch && p.hand)
     if (p.cad && p.tool === 'select' && !p.placing) {
@@ -2016,6 +2054,7 @@ export default function PlanView({
                   x = Math.min(Math.max(8, x), Math.max(8, frame.width - width - 8))
                   y = Math.min(Math.max(8, y), Math.max(8, frame.height - height - 8))
                 }
+                if (dimEditRef.current) dimHold.current = true
                 setDimEdit({ dim, value: String(dim.label || ''), x, y })
               } : null}
             />
@@ -2134,15 +2173,22 @@ export default function PlanView({
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault()
-              const mm = Number(String(dimEdit.value).replace(',', '.'))
-              if (Number.isFinite(mm) && mm >= 50) propsRef.current.onEditDimension?.(dimEdit.dim, mm)
-              setDimEdit(null)
+              closeDimEditor(true)
             } else if (event.key === 'Escape') {
               event.preventDefault()
-              setDimEdit(null)
+              closeDimEditor(false)
             }
           }}
+          onBlur={() => {
+            if (dimHold.current) {
+              dimHold.current = false
+              closeDimEditor(true, true)
+              return
+            }
+            closeDimEditor(true)
+          }}
           onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
           style={{ position: 'absolute', left: dimEdit.x, top: dimEdit.y, zIndex: 30, width: 96, height: 32, padding: '2px 8px', fontSize: 16, fontWeight: 700, color: '#134e4a', background: '#fff', border: '2px solid #0f766e', borderRadius: 6, boxShadow: '0 8px 18px rgba(28,25,23,0.18)' }}
         />
       )}

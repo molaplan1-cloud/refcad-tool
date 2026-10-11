@@ -11,7 +11,7 @@ import { applyPanelCommand, panelCommand, readPanels, writePanels } from '@/lib/
 import PlanView from './PlanView'
 import HeatLoadPanel, { DutyTypeSelect } from './HeatLoadPanel'
 import { TEMPLATES, TEMPLATE_GROUPS, getTemplate, isRefrigerated } from '@/lib/catalog'
-import { PANEL_MM, commitPanel, emptyPanelPlan, extendPanel, joinPanelCorner, roomsFromPanels, setPanelEnd, snapDoorToPanel } from '@/lib/coldPanels'
+import { PANEL_MM, commitPanel, emptyPanelPlan, extendPanel, joinPanelCorner, repairRoomsFromWalls, reshapePanelRoom, resizePanelRoom, roomsFromPanels, setPanelEnd, snapDoorToPanel, translatePanelRooms } from '@/lib/coldPanels'
 import { applyUnitChoice, assignAllToOne, assignEachOwn, assignOwnUnit, assignRooms, bindPlacedUnit, createUnit, groupUnits, pickUnitModel } from '@/lib/coldUnits'
 import { formatDeviceLink, isColdDevice, removalPrompt } from '@/lib/coldDevices'
 import { LibraryDialog, ProjectInfoDialog, ProjectSettingsDialog } from '@/components/floorplan/ProjectDialogs'
@@ -286,7 +286,10 @@ export default function DesignerApp({
   const [toolsOpen, setToolsOpen] = useState(false)
   const [drawer, setDrawer] = useState(null)
   const [name, setName] = useState(initialName || 'Uusi projekti')
-  const [rooms, setRooms] = useState(() => normalizeRooms(initialRooms))
+  const [rooms, setRooms] = useState(() => repairRoomsFromWalls(
+    initialPanels?.walls ? { ...emptyPanelPlan(), ...initialPanels } : emptyPanelPlan(),
+    normalizeRooms(initialRooms),
+  ))
   const [panelPlan, setPanelPlan] = useState(() => initialPanels?.walls ? { ...emptyPanelPlan(), ...initialPanels } : emptyPanelPlan())
   const [panelMm, setPanelMm] = useState(initialPanels?.panelMm || 100)
   const [selectedWalls, setSelectedWalls] = useState([])
@@ -359,6 +362,7 @@ export default function DesignerApp({
   const [templatesOpen, setTemplatesOpen] = useState(true)
   const roomsRef = useRef(rooms)
   const panelRef = useRef(panelPlan)
+  const roomEditRef = useRef(null)
   const panelMmRef = useRef(panelMm)
   const drawTypeRef = useRef('chilled')
   const pipesRef = useRef(pipes)
@@ -632,6 +636,42 @@ export default function DesignerApp({
     setRooms(synced)
   }
 
+  function roomEditBase() {
+    if (!roomEditRef.current) {
+      roomEditRef.current = { plan: panelRef.current, rooms: roomsRef.current, told: false }
+    }
+    return roomEditRef.current
+  }
+
+  function applyRoomWalls(result) {
+    if (!result?.plan || (result.plan === roomEditRef.current?.plan && !result.copied)) return
+    const base = roomEditRef.current
+    if (result.copied && base && !base.told) {
+      base.told = true
+      setNotice(t('cold.sharedDetach'))
+    }
+    if (result.plan !== panelRef.current) syncPanels(result.plan)
+  }
+
+  function onRoomMove(ids, dx, dz) {
+    const base = roomEditBase()
+    applyRoomWalls(translatePanelRooms(base.plan, base.rooms, ids, dx, dz))
+  }
+
+  function onRoomResize(roomId, box) {
+    const base = roomEditBase()
+    const room = (base.rooms || []).find((item) => item.id === roomId)
+    if (!room?.panelKey) return
+    applyRoomWalls(resizePanelRoom(base.plan, base.rooms, room, box))
+  }
+
+  function onRoomOutline(roomId, points) {
+    const base = roomEditBase()
+    const room = (base.rooms || []).find((item) => item.id === roomId)
+    if (!room?.panelKey) return
+    applyRoomWalls(reshapePanelRoom(base.plan, base.rooms, room, points))
+  }
+
   function onPanelSegment(a, b) {
     syncPanels(commitPanel(panelRef.current, a, b, panelMmRef.current))
   }
@@ -652,7 +692,11 @@ export default function DesignerApp({
 
   function onEditDimension(dim, mm) {
     const next = resizeDimension(panelRef.current, dim, mm / 1000)
-    if (!next || next === panelRef.current) return
+    if (!next || next === panelRef.current) {
+      const label = Number(dim?.label)
+      if (!(Number.isFinite(label) && Math.abs(label - mm) < 1)) setNotice(t('cold.dimMiss'))
+      return
+    }
     pushUndo()
     syncPanels(next)
   }
@@ -922,6 +966,33 @@ export default function DesignerApp({
 
   function patchSelected(patch) {
     if (!selectedRoom) return
+    const geometric = ['x', 'z', 'width', 'depth'].some((key) => key in (patch || {}))
+    if (geometric && selectedRoom.panelKey) {
+      const x = patch.x ?? selectedRoom.x
+      const z = patch.z ?? selectedRoom.z
+      const width = patch.width ?? selectedRoom.width
+      const depth = patch.depth ?? selectedRoom.depth
+      const result = resizePanelRoom(panelRef.current, roomsRef.current, selectedRoom, {
+        left: x - width / 2,
+        top: z - depth / 2,
+        right: x + width / 2,
+        bottom: z + depth / 2,
+      })
+      if (result?.plan && result.plan !== panelRef.current) {
+        if (result.copied) setNotice(t('cold.sharedDetach'))
+        syncPanels(result.plan)
+      }
+      const rest = { ...patch }
+      delete rest.x
+      delete rest.z
+      delete rest.width
+      delete rest.depth
+      if (Object.keys(rest).length) {
+        const roomId = selectedRoom.id
+        setRooms((current) => current.map((room) => (room.id === roomId ? { ...room, ...rest } : room)))
+      }
+      return
+    }
     setRooms((current) => current.map((room) => {
       if (room.id !== selectedRoom.id) return room
       const next = { ...room, ...patch }
@@ -1139,15 +1210,16 @@ export default function DesignerApp({
         if (!Array.isArray(data.rooms)) throw new Error('rooms')
         pushUndo()
         setName(data.projectName || data.name || name)
-        setRooms(normalizeRooms(data.rooms))
+        const panels = data.panels?.walls ? { ...emptyPanelPlan(), ...data.panels } : emptyPanelPlan()
+        const healed = repairRoomsFromWalls(panels, normalizeRooms(data.rooms), drawTypeRef.current)
+        panelRef.current = panels
+        setPanelPlan(panels)
+        roomsRef.current = healed
+        setRooms(healed)
         setPipes(Array.isArray(data.pipes) ? data.pipes : [])
         setCables(Array.isArray(data.cables) ? data.cables : [])
         if (data.schematic && typeof data.schematic === 'object') setSchematic((current) => ({ ...current, ...data.schematic }))
         if (data.unitSystem === 'IP' || data.unitSystem === 'SI') setUnitSystem(data.unitSystem)
-        if (data.panels?.walls) {
-          panelRef.current = data.panels
-          setPanelPlan(data.panels)
-        }
         setNotice(t('designer.imported'))
       } catch {
         setNotice(t('designer.badFile'))
@@ -1323,11 +1395,12 @@ export default function DesignerApp({
     pushUndo()
     setProjectId(entry.id)
     setName(entry.name || t('file.untitled'))
-    const panels = entry.panels?.walls ? entry.panels : emptyPanelPlan()
+    const panels = entry.panels?.walls ? { ...emptyPanelPlan(), ...entry.panels } : emptyPanelPlan()
+    const healed = repairRoomsFromWalls(panels, entry.rooms || [], drawTypeRef.current)
     panelRef.current = panels
     setPanelPlan(panels)
-    setRooms(entry.rooms || [])
-    roomsRef.current = entry.rooms || []
+    roomsRef.current = healed
+    setRooms(healed)
     setPipes(entry.pipes || [])
     setCables(entry.cables || [])
     if (entry.unitSystem) setUnitSystem(entry.unitSystem)
@@ -1375,7 +1448,10 @@ export default function DesignerApp({
     onSelect: setSelectedIds,
     onPreview: setRooms,
     onGestureStart: pushUndo,
-    onGestureEnd: () => {},
+    onGestureEnd: () => { roomEditRef.current = null },
+    onRoomMove,
+    onRoomResize,
+    onRoomOutline,
     onCreateRect,
     onCreatePolygon,
     walls: panelPlan.walls || [],
