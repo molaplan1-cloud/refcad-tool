@@ -6,7 +6,7 @@ import { PLANS } from '@/lib/access'
 import { ShellLanguage, useLocale } from '@/components/i18n/Locale'
 
 const FEATURES = ['cold', 'house', 'hall']
-const PLAN_POINTS = { free: 2, basic: 3, pro: 5, company: 3 }
+const PLAN_POINTS = { free: 3, basic: 3, pro: 5, company: 3 }
 
 export default function LandingClient() {
   const { t } = useLocale()

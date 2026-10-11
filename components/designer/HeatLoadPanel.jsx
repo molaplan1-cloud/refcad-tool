@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useLocale } from '@/components/i18n/Locale'
-import { PRODUCTS, ROOM_TYPES, getProduct, isRefrigerated } from '@/lib/catalog'
+import { PRODUCTS, coldDutyTypes, getProduct, getType, isRefrigerated } from '@/lib/catalog'
 import { applyType, internalDims } from '@/lib/geometry'
 import { isCustomOutline, polygonMetrics } from '@/lib/cadDraw'
 import { formatKw, formatPower, fromLength, fromTemp, lengthUnit, tempUnit, toLength, toTemp } from '@/lib/units'
@@ -231,9 +231,9 @@ export default function HeatLoadPanel({
             ))}
           </div>
 
-          <Fold title="Huonetyyppi ja mitat">
+          <Fold title={t('designer.roomType')}>
           <label style={{ display: 'block' }}>
-            <span style={labelStyle}>Huonetyyppi</span>
+            <span style={labelStyle}>{t('designer.roomType')}</span>
             <select
               value={room.type}
               onFocus={onFocusEdit}
@@ -241,9 +241,12 @@ export default function HeatLoadPanel({
               onChange={(e) => onPatch(applyType(room, e.target.value, rooms))}
               style={inputStyle}
             >
-              {ROOM_TYPES.map((type) => (
-                <option key={type.id} value={type.id}>{type.name} {type.short}</option>
+              {coldDutyTypes().map((type) => (
+                <option key={type.id} value={type.id}>{t(`cold.type.${type.id}`)}</option>
               ))}
+              {!coldDutyTypes().some((type) => type.id === room.type) && (
+                <option value={room.type}>{getType(room.type).name}</option>
+              )}
             </select>
           </label>
 

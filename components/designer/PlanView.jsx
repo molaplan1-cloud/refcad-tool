@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocale } from '@/components/i18n/Locale'
 import { formatLength, formatTemp } from '@/lib/units'
 import { descendantIds, internalDims, snapDoorToWall } from '@/lib/geometry'
+import { chainCloses, panelCursor } from '@/lib/coldPanels'
 import { fanCountForWidth, isRefrigerated } from '@/lib/catalog'
 import { pointInEquipment } from '@/lib/placement'
 import { sizePlacedPipe } from '@/lib/pipeDuty'
@@ -381,6 +382,11 @@ export default function PlanView({
   onCreateRect,
   onCreatePolygon,
   onCreateRoute,
+  onPanelSegment,
+  onPanelEnd,
+  onSelectWall,
+  walls = [],
+  selectedWalls = [],
   onPlace,
   onContextMenu,
   onPreviewPipes,
@@ -427,6 +433,7 @@ export default function PlanView({
   propsRef.current = {
     rooms, selectedIds, tool, placing, gridSize, snapOn, snapFlags, pipes, cables, pipeKind,
     onSelect, onPreview, onGestureStart, onGestureEnd, onCreateRect, onCreatePolygon, onCreateRoute, onPlace, onContextMenu,
+    onPanelSegment, onPanelEnd, onSelectWall, walls, selectedWalls,
     onPreviewPipes, onPreviewCables, cad, onCadDown, onCadMove, onCadStretch, onExitPlace, onToolMenu, hand,
   }
 
@@ -568,7 +575,7 @@ export default function PlanView({
         typed.current.field = typed.current.field === 'w' ? 'd' : 'w'
         return
       }
-      if ((drawing || points.length) && /^[0-9.,]$/.test(event.key)) {
+      if ((drawing || points.length || propsRef.current.tool === 'draw') && /^[0-9.,@<]$/.test(event.key)) {
         event.preventDefault()
         event.stopPropagation()
         if (drawing) {
@@ -587,6 +594,23 @@ export default function PlanView({
         setDraft(null)
         propsRef.current.onCreateRect(g.x1, g.z1, g.x2, g.z2)
         typed.current = { field: 'w', w: '', d: '' }
+        return
+      }
+      if (event.key === 'Enter' && propsRef.current.tool === 'draw' && polyRef.current.length && polyTyped.current) {
+        event.preventDefault()
+        event.stopPropagation()
+        const last = polyRef.current[polyRef.current.length - 1]
+        const point = panelCursor({ x: last.x + 1, z: last.z }, last, propsRef.current.walls, viewRef.current.scale, polyTyped.current)
+        polyTyped.current = ''
+        if (point && chainCloses(polyRef.current, point)) {
+          propsRef.current.onPanelSegment?.(last, polyRef.current[0])
+          setPoly([])
+          return
+        }
+        if (point) {
+          propsRef.current.onPanelSegment?.(last, point)
+          setPoly([...polyRef.current, point])
+        }
         return
       }
       if (event.key === 'Enter' && points.length) {
@@ -641,16 +665,18 @@ export default function PlanView({
       const world = { x: (px - current.offsetX) / current.scale, z: (py - current.offsetY) / current.scale, px, py }
       const p = propsRef.current
       const g = gesture.current
-      if (polyRef.current.length && isRouteTool(p.tool)) {
+      if (polyRef.current.length && (isRouteTool(p.tool) || p.tool === 'draw')) {
         const last = polyRef.current[polyRef.current.length - 1]
-        let hover = snapWorld(world.x, world.z, {
-          origin: last,
-          scale: current.scale,
-          grid: p.snapOn ? p.gridSize : 0,
-          rooms: p.rooms,
-          flags: { ...p.snapFlags, ortho: true },
-        })
-        const typedLength = parseFloat(polyTyped.current.replace(',', '.'))
+        let hover = p.tool === 'draw'
+          ? { ...panelCursor(world, last, p.walls, current.scale, polyTyped.current), kind: 'endpoint' }
+          : snapWorld(world.x, world.z, {
+            origin: last,
+            scale: current.scale,
+            grid: p.snapOn ? p.gridSize : 0,
+            rooms: p.rooms,
+            flags: { ...p.snapFlags, ortho: true },
+          })
+        const typedLength = p.tool === 'draw' ? NaN : parseFloat(polyTyped.current.replace(',', '.'))
         if (Number.isFinite(typedLength) && typedLength >= 0.3) {
           const dx = hover.x - last.x
           const dz = hover.z - last.z
@@ -684,6 +710,12 @@ export default function PlanView({
       if (g.kind === 'marquee') {
         const mode = g.stretch || g.x1 > world.x ? 'crossing' : 'window'
         setDraft({ kind: 'marquee', x1: g.x1, z1: g.z1, x2: world.x, z2: world.z, mode })
+        return
+      }
+      if (g.kind === 'panel-end') {
+        const snappedEnd = panelCursor(world, null, p.walls, current.scale, '')
+        g.point = snappedEnd
+        setCursor({ ...world, x: snappedEnd.x, z: snappedEnd.z, kind: 'endpoint' })
         return
       }
       const snapped = snapWorld(world.x, world.z, {
@@ -849,6 +881,10 @@ export default function PlanView({
         }
         return
       }
+      if (g.kind === 'panel-end' && g.point) {
+        p.onPanelEnd?.(g.id, g.end, g.point)
+        return
+      }
       if (g.kind === 'draw') {
         setDraft(null)
         typed.current = { field: 'w', w: '', d: '' }
@@ -979,7 +1015,32 @@ export default function PlanView({
       setPoly([...polyRef.current, { x: point.x, z: point.z }])
       return
     }
-    if (!touchHand && (p.tool === 'draw' || p.tool === 'partition')) {
+    const panelEnd = event.target?.dataset?.panelEnd
+    const panelWall = event.target?.dataset?.panelWall
+    if (panelWall && !panelEnd && p.tool === 'select') {
+      p.onSelectWall?.(panelWall, event.shiftKey)
+      return
+    }
+    if (panelEnd && panelWall && p.tool === 'select') {
+      p.onSelectWall?.(panelWall, event.shiftKey)
+      gesture.current = { kind: 'panel-end', id: panelWall, end: panelEnd }
+      return
+    }
+    if (!touchHand && p.tool === 'draw') {
+      const origin = polyRef.current.length ? polyRef.current[polyRef.current.length - 1] : null
+      let point = panelCursor(world, origin, p.walls, view.scale, polyTyped.current)
+      polyTyped.current = ''
+      if (!point) return
+      if (origin && chainCloses(polyRef.current, point)) {
+        p.onPanelSegment?.(origin, polyRef.current[0])
+        setPoly([])
+        return
+      }
+      if (origin) p.onPanelSegment?.(origin, point)
+      setPoly([...polyRef.current, { x: point.x, z: point.z }])
+      return
+    }
+    if (!touchHand && p.tool === 'partition') {
       const point = snapWorld(world.x, world.z, {
         scale: view.scale,
         grid: p.snapOn ? p.gridSize : 0,
@@ -1273,9 +1334,11 @@ export default function PlanView({
       ? t('designer.cableHint')
       : tool === 'polygon'
         ? t('designer.polyHint')
-        : tool === 'draw' || tool === 'partition'
-          ? t('designer.dragHint')
-          : t('designer.selectHint')
+        : tool === 'draw'
+          ? t('cold.drawHint')
+          : tool === 'partition'
+            ? t('designer.dragHint')
+            : t('designer.selectHint')
 
   const rectDraft = draft?.kind === 'rect' ? draft : null
   const draftWidth = rectDraft ? Math.abs(rectDraft.x2 - rectDraft.x1) : 0
@@ -1320,6 +1383,33 @@ export default function PlanView({
               stroke={line.major ? '#d9d3c8' : '#ebe6dc'}
               strokeWidth={(line.major ? 1.1 : 0.7) / view.scale}
             />
+          ))}
+          {(walls || []).map((wall) => (
+            <g key={wall.id} data-testid={`panel-wall-${wall.id}`}>
+              <line
+                data-panel-wall={wall.id}
+                x1={wall.a.x}
+                y1={wall.a.z}
+                x2={wall.b.x}
+                y2={wall.b.z}
+                stroke={selectedWalls.includes(wall.id) ? '#0f766e' : '#44403c'}
+                strokeWidth={Math.max((wall.thickness || 0.1) * 0.35, 1.6 / view.scale)}
+              />
+              {['a', 'b'].map((end) => (
+                <circle
+                  key={end}
+                  data-panel-wall={wall.id}
+                  data-panel-end={end}
+                  data-testid={`panel-grip-${wall.id}-${end}`}
+                  cx={wall[end].x}
+                  cy={wall[end].z}
+                  r={5 / view.scale}
+                  fill="#fff"
+                  stroke="#0f766e"
+                  strokeWidth={1.4 / view.scale}
+                />
+              ))}
+            </g>
           ))}
           {wallPanels.map((panel) => {
             const points = panelPolygon(panel)

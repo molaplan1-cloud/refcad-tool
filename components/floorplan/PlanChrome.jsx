@@ -336,7 +336,7 @@ export function PlanChrome({
               </button>
             )
           })}
-          {access?.workspaces.includes('kylma') && <ColdTab t={t} compact />}
+          {access?.draw !== false && <ColdTab t={t} compact />}
         </div>
         {open === 'root' && (
           <div className="compact-menu" data-testid="chrome-menu-panel" style={{ background: '#fff', color: '#1c1917', maxHeight: '46vh', overflow: 'auto', padding: 8 }}>
@@ -406,7 +406,7 @@ export function PlanChrome({
             </button>
           )
         })}
-        {access?.workspaces.includes('kylma') && <ColdTab t={t} />}
+        {access?.draw !== false && <ColdTab t={t} />}
       </div>
       <div data-testid="menu-bar" style={{ display: 'flex', alignItems: 'center', gap: 2, height: 32, padding: '0 6px', background: '#fafaf9', borderBottom: '1px solid #e7e5e4' }}>
         <Menu id="file" label={t('menu.file')} open={open} setOpen={setOpen}>

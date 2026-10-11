@@ -48,6 +48,7 @@ export default function Page() {
       cables: data.cables || [],
       unitSystem: data.unitSystem,
       schematic: data.schematic || null,
+      panels: data.panels || null,
       dimUnit: data.unitSystem === 'IP' ? 'ft' : 'm',
       lastSaved: new Date().toISOString(),
     }))
@@ -100,6 +101,7 @@ export default function Page() {
       initialPipes={saved?.pipes || []}
       initialCables={saved?.cables || []}
       initialSchematic={saved?.schematic || null}
+      initialPanels={saved?.panels || null}
       initialUnitSystem={saved?.unitSystem || (saved?.dimUnit === 'ft' ? 'IP' : 'SI')}
       onPersist={onPersist}
       persistLabel={t('designer.browser')}
